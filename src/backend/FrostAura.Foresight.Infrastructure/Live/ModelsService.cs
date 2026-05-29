@@ -13,12 +13,14 @@ public sealed class ModelsService : IModelsService
     private readonly ForesightDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly FlowValidator _validator;
+    private readonly ModelDescriber _describer;
 
-    public ModelsService(ForesightDbContext db, ITenantContext tenant, FlowValidator validator)
+    public ModelsService(ForesightDbContext db, ITenantContext tenant, FlowValidator validator, ModelDescriber describer)
     {
         _db = db;
         _tenant = tenant;
         _validator = validator;
+        _describer = describer;
     }
 
     public async Task<IReadOnlyList<Model>> ListAsync(CancellationToken ct)
@@ -62,6 +64,10 @@ public sealed class ModelsService : IModelsService
         };
         _db.Models.Add(model);
         await _db.SaveChangesAsync(ct);
+
+        // Fire-and-forget: generate AI descriptions in background so the HTTP response returns immediately.
+        _describer.EnqueueAsync(model.Id);
+
         return model;
     }
 
@@ -73,6 +79,9 @@ public sealed class ModelsService : IModelsService
         if (model is null) return null;
         if (model.IsBuiltIn) throw new InvalidOperationException("Built-in models are read-only.");
 
+        var nameChanged = name is not null && name != model.Name;
+        var definitionChanged = definition is not null && definition != model.Definition;
+
         if (name is not null) model.Name = name;
         if (description is not null) model.Description = description;
         if (definition is not null)
@@ -82,6 +91,13 @@ public sealed class ModelsService : IModelsService
         }
         model.UpdatedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
+
+        // Regenerate descriptions in background only when the name or definition actually changed,
+        // since descriptions are derived from those fields. Description-only edits (human text)
+        // don't warrant regeneration.
+        if (nameChanged || definitionChanged)
+            _describer.EnqueueAsync(model.Id);
+
         return model;
     }
 

@@ -194,6 +194,13 @@ public static class DependencyInjection
         // ModelId mapping. Singleton so cached values survive across DI scopes; the resolver opens
         // its own scope internally when it has to read from the DbContext.
         services.AddSingleton<IActiveModelResolver, Live.ActiveModelResolver>();
+        // OpenRouter client for AI model description generation. Registered as a typed HttpClient
+        // and no-ops (returns null) when OpenRouter:ApiKey is absent — safe to have in every env.
+        services.AddHttpClient<Adapters.OpenRouterClient>();
+        // ModelDescriber is singleton: it holds no per-request state, uses IServiceScopeFactory
+        // for its background DB writes, and is injected into the scoped ModelsService safely via
+        // the singleton-captures-scoped-through-factory pattern.
+        services.AddSingleton<Live.ModelDescriber>();
         services.AddScoped<IModelsService, Live.ModelsService>();
         services.AddScoped<Live.ActiveModelsService>();
 

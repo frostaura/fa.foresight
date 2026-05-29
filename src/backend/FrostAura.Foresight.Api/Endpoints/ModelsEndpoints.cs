@@ -54,6 +54,7 @@ public static class ModelsEndpoints
                     m.TrainingValidationAccuracy, m.BacktestAccuracy, m.LastTrainedAt,
                     m.TrainStartMs, m.TrainEndMs, m.TrainSymbol, m.TrainInterval,
                     m.TrainingStatus, m.TrainingStartedAt, m.TrainingError,
+                    m.SimpleDescription, m.TechnicalDescription,
                     m.CreatedAt, m.UpdatedAt,
                     ScoresByInterval = scores ?? new Dictionary<string, decimal>(),
                     AverageScore = avg,

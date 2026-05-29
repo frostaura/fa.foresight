@@ -1,6 +1,7 @@
 using FrostAura.Foresight.Domain.Models;
 using FrostAura.Foresight.Domain.Tenancy;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -320,6 +321,10 @@ public static class DatabaseInitializer
                 ADD COLUMN IF NOT EXISTS ""TrainingStartedAt"" timestamptz NULL;
             ALTER TABLE models
                 ADD COLUMN IF NOT EXISTS ""TrainingError"" varchar(2000) NULL;
+            -- AI-generated model descriptions (OpenRouter, generated in background on upsert).
+            ALTER TABLE models ADD COLUMN IF NOT EXISTS ""SimpleDescription"" varchar(500) NULL;
+            ALTER TABLE models ADD COLUMN IF NOT EXISTS ""TechnicalDescription"" varchar(1000) NULL;
+
             -- Zombie training jobs: a model stuck at 'training' at boot is an orphan from a
             -- crashed/restarted process — its background task is gone, so the spinner would never
             -- clear. Mark it failed so the UI surfaces what actually happened (user can retrain).
@@ -733,6 +738,26 @@ public static class DatabaseInitializer
             .ExecuteUpdateAsync(s => s.SetProperty(m => m.IsBuiltIn, false).SetProperty(m => m.UpdatedAt, now), ct);
         if (unlockedCount > 0)
             logger.LogInformation("Cleared IsBuiltIn flag on {Count} model(s)", unlockedCount);
+
+        // AI description backfill for built-ins that are missing descriptions. Gated on the
+        // OpenRouter key being present so this is a no-op in dev/CI environments without a key.
+        // Runs fire-and-forget (one enqueue per missing row) so startup isn't delayed.
+        var hasOpenRouterKey = !string.IsNullOrWhiteSpace(scope.ServiceProvider
+            .GetRequiredService<IConfiguration>()["OpenRouter:ApiKey"]);
+        if (hasOpenRouterKey)
+        {
+            var describer = scope.ServiceProvider.GetRequiredService<FrostAura.Foresight.Infrastructure.Live.ModelDescriber>();
+            var missingDescriptions = await db.Models
+                .Where(m => m.SimpleDescription == null)
+                .Select(m => m.Id)
+                .ToListAsync(ct);
+            foreach (var modelId in missingDescriptions)
+            {
+                describer.EnqueueAsync(modelId);
+            }
+            if (missingDescriptions.Count > 0)
+                logger.LogInformation("Enqueued AI description generation for {Count} model(s) missing descriptions", missingDescriptions.Count);
+        }
 
         // Strip the legacy "Foresight " prefix from any tenant-owned model names left over from
         // before the rename. One-shot migration; harmless once all rows are clean.

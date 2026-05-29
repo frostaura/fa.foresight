@@ -188,6 +188,8 @@ public sealed class ForesightDbContext : DbContext
             b.Property(m => m.TrainInterval).HasMaxLength(10);
             b.Property(m => m.TrainingStatus).HasMaxLength(20);
             b.Property(m => m.TrainingError).HasMaxLength(2000);
+            b.Property(m => m.SimpleDescription).HasMaxLength(500);
+            b.Property(m => m.TechnicalDescription).HasMaxLength(1000);
             b.HasIndex(m => new { m.TenantId, m.Name }).IsUnique();
             b.HasIndex(m => new { m.TenantId, m.IsDefault });
         });
