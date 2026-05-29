@@ -14,13 +14,9 @@ import { cn } from "../lib/cn";
  */
 
 export function RichList({ children, className }: { children: React.ReactNode; className?: string }) {
+  // A clean, flat list — no surrounding box/bezel. Rows are separated only by a faint hairline.
   return (
-    <div
-      className={cn(
-        "rounded-xl border border-fa-edge overflow-hidden divide-y divide-fa-edge/60",
-        className,
-      )}
-    >
+    <div className={cn("divide-y divide-fa-edge/30", className)}>
       {children}
     </div>
   );
@@ -56,9 +52,10 @@ export function RichListRow({
           : undefined
       }
       className={cn(
-        "px-4 sm:px-5 py-4 transition",
-        isEven ? "bg-fa-glass/15" : "bg-transparent",
-        onClick && !disabled && "cursor-pointer hover:bg-fa-glass/40",
+        "px-1 sm:px-2 py-4 transition-colors",
+        // Whisper-subtle zebra — just enough to separate rows, never a bright band.
+        isEven ? "bg-fa-frost/[0.015]" : "bg-transparent",
+        onClick && !disabled && "cursor-pointer hover:bg-fa-frost/[0.04]",
         className,
       )}
     >
