@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown, Search, X } from "lucide-react";
 import { cn } from "../lib/cn";
 
@@ -33,15 +34,41 @@ export default function RichMultiSelect({
 }: RichMultiSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [rect, setRect] = useState<{ left: number; top: number; width: number; bottom: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Close on outside click
+  // Measure the trigger so the portalled panel can anchor to it with fixed positioning.
+  // This sidesteps any ancestor `overflow: hidden`/scroll clipping the absolutely-positioned panel.
+  const measure = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setRect({ left: r.left, top: r.top, width: r.width, bottom: r.bottom });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    measure();
+    // Re-measure while open: scroll on any ancestor (capture), and viewport resize.
+    window.addEventListener("scroll", measure, true);
+    window.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("scroll", measure, true);
+      window.removeEventListener("resize", measure);
+    };
+  }, [open, measure]);
+
+  // Close on outside click — the panel is portalled out of the container, so check both.
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const inContainer = containerRef.current?.contains(target);
+      const inPanel = panelRef.current?.contains(target);
+      if (!inContainer && !inPanel) {
         setOpen(false);
         setQuery("");
       }
@@ -140,6 +167,7 @@ export default function RichMultiSelect({
       {/* Trigger — a div (not a button) so the inner Clear button is valid HTML
           (a <button> cannot be nested inside another <button>). */}
       <div
+        ref={triggerRef}
         role="button"
         tabIndex={0}
         aria-haspopup="listbox"
@@ -188,22 +216,39 @@ export default function RichMultiSelect({
         />
       </div>
 
-      {/* Panel */}
-      {open && (
+      {/* Panel — portalled to <body> with fixed positioning so no ancestor
+          `overflow: hidden`/scroll container can clip it. */}
+      {open && rect && createPortal(
+        (() => {
+          const GAP = 4;
+          const spaceBelow = window.innerHeight - rect.bottom - GAP;
+          const spaceAbove = rect.top - GAP;
+          const flipUp = spaceBelow < 240 && spaceAbove > spaceBelow;
+          const maxHeight = Math.max(160, (flipUp ? spaceAbove : spaceBelow) - 8);
+          const panelStyle: React.CSSProperties = {
+            position: "fixed",
+            left: rect.left,
+            width: rect.width,
+            maxHeight,
+            ...(flipUp
+              ? { bottom: window.innerHeight - rect.top + GAP }
+              : { top: rect.bottom + GAP }),
+          };
+          return (
         <div
           ref={panelRef}
           role="listbox"
           aria-multiselectable="true"
           aria-label={label ?? placeholder}
+          style={panelStyle}
           className={cn(
-            "absolute z-50 mt-1 w-full min-w-[180px]",
-            "rounded-md border border-fa-edge bg-fa-ink-2 shadow-lg",
-            "data-[side=bottom]:slide-in-from-top-1"
+            "z-[60] min-w-[180px] flex flex-col",
+            "rounded-md border border-fa-edge bg-fa-ink-2 shadow-lg"
           )}
         >
           {/* Search */}
           {searchable && (
-            <div className="flex items-center gap-2 px-2.5 py-2 border-b border-fa-edge">
+            <div className="flex items-center gap-2 px-2.5 py-2 border-b border-fa-edge shrink-0">
               <Search className="h-3.5 w-3.5 shrink-0 text-fa-frost-dim" />
               <input
                 ref={searchRef}
@@ -228,7 +273,7 @@ export default function RichMultiSelect({
           )}
 
           {/* Options */}
-          <div className="max-h-72 overflow-y-auto py-1" role="presentation">
+          <div className="flex-1 min-h-0 overflow-y-auto py-1" role="presentation">
             {filtered.length === 0 ? (
               <div className="px-3 py-4 text-center text-xs text-fa-frost-dim">
                 No options match
@@ -293,6 +338,9 @@ export default function RichMultiSelect({
             )}
           </div>
         </div>
+          );
+        })(),
+        document.body
       )}
     </div>
   );
