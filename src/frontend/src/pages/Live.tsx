@@ -9,8 +9,8 @@
  */
 import { useState } from "react";
 import {
-  Activity,
   ChevronDown,
+  CircleDollarSign,
   Info,
   Plus,
   ShieldAlert,
@@ -23,9 +23,12 @@ import LiveBitcoinChart from "../components/LiveBitcoinChart";
 import { type BinanceInterval } from "../lib/binance";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { Tooltip } from "../components/ui";
 import { cn } from "../lib/cn";
 import { pnlClass } from "../lib/pnl";
+
+// "flat" → "Flat", "edge_kelly" → "Edge kelly". Mirrors the paper strip's label treatment.
+const prettyStrategy = (id: string) =>
+  id ? id.replace(/[_-]+/g, " ").replace(/^\w/, (c) => c.toUpperCase()) : id;
 import {
   useListSessionsQuery,
   useCreateSessionMutation,
@@ -317,6 +320,10 @@ function CreateSessionForm({ armed, onCreated }: { armed: boolean; onCreated?: (
 }
 
 // ── Active live session card — chart + real-money numbers strip ──────────────────
+// The strip deliberately mirrors PaperTradingPanel's ActiveSession layout: a single headline row
+// (identity · balance · bet size · P&L) and a thin secondary row (hit rate / bets · Stop). The
+// only differences vs paper are the amber "Live" identity (real-money cue) and the source data
+// (a NormalizedSession rather than a PaperSession).
 function LiveNumbers({ session, onStop, stopping }: {
   session: NormalizedSession;
   onStop: () => void;
@@ -324,116 +331,84 @@ function LiveNumbers({ session, onStop, stopping }: {
 }) {
   const pnl = session.currentBalance - session.initialBalance;
   const pnlPct = session.initialBalance > 0 ? (pnl / session.initialBalance) * 100 : 0;
-  const hitRate = session.betsPlaced > 0
-    ? ((session.betsWon / session.betsPlaced) * 100).toFixed(1) + "%"
-    : "—";
+  const hitRate = session.betsPlaced > 0 ? (session.betsWon / session.betsPlaced) * 100 : null;
+  const pnlText = `${pnl >= 0 ? "+" : "-"}$${Math.abs(pnl).toFixed(2)}`;
 
   if (session.bust) {
     return (
-      <div className="mt-3 pt-3 border-t border-rose-300/30">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 fa-caption tabular-nums">
-          <span className="text-rose-300 uppercase tracking-wider inline-flex items-center gap-1 font-semibold">
-            Bankrupt
-          </span>
-          <span className="text-fa-frost-bright">${session.currentBalance.toFixed(2)}</span>
-          <span className={pnlClass(pnl)}>
-            {pnl >= 0 ? "+" : "-"}${Math.abs(pnl).toFixed(2)} ({pnl >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)
-          </span>
-          <button
-            onClick={onStop}
-            disabled={stopping}
-            className="ml-auto inline-flex items-center gap-1 text-fa-frost-dim hover:text-fa-frost-bright transition disabled:opacity-50"
-            title="Dismiss this bankrupt session"
-          >
-            <Square className="h-3 w-3" />
-            {stopping ? "Stopping…" : "Dismiss"}
-          </button>
-        </div>
+      <div className="mt-3 pt-3 border-t border-rose-300/30 flex items-center justify-between gap-x-3 fa-caption tabular-nums">
+        <span className="inline-flex items-center gap-1 text-rose-300 uppercase tracking-wider font-semibold">
+          <CircleDollarSign className="h-3 w-3" /> Bankrupt
+        </span>
+        <span className="text-fa-frost-bright">${session.currentBalance.toFixed(2)}</span>
+        <span className={pnlClass(pnl)}>{pnlText} ({pnl >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)</span>
+        <button
+          onClick={onStop}
+          disabled={stopping}
+          className="ml-auto inline-flex items-center gap-1 text-fa-frost-dim hover:text-fa-frost-bright transition disabled:opacity-50"
+          title="Dismiss this bankrupt session"
+        >
+          <Square className="h-3 w-3" /> {stopping ? "Stopping…" : "Dismiss"}
+        </button>
       </div>
     );
   }
 
   return (
     <div className="mt-3 pt-3 border-t border-fa-edge/60">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-3 gap-y-2.5 tabular-nums">
-        <Stat label="Balance">
-          <span className="text-fa-frost-bright">${session.currentBalance.toFixed(2)}</span>
-        </Stat>
-        <Stat label="P&L">
-          <span className={pnlClass(pnl)}>
-            {pnl >= 0 ? "+" : "-"}${Math.abs(pnl).toFixed(2)}
-            <span className="ml-1 text-xs opacity-80">({pnl >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)</span>
-          </span>
-        </Stat>
-        <Stat label="Hit rate">
-          <span className="text-fa-frost">{hitRate}</span>
-          <span className="ml-1 fa-caption text-fa-frost-dim">{session.betsWon}/{session.betsPlaced}</span>
-        </Stat>
-        <Stat label="Bets placed">
-          <span className="text-fa-frost">{session.betsPlaced}</span>
-        </Stat>
-        <Stat label="Bet size">
-          <span className="text-fa-frost">${session.currentBetSize.toFixed(2)}</span>
-          {session.currentBetSize > 0 && session.initialBalance > 0 && (
-            <Tooltip content="Current stake vs the session's starting balance.">
-              <span className="ml-1 fa-caption text-amber-300 cursor-help">
-                ×{(session.currentBetSize / session.initialBalance * 100).toFixed(1)}%
-              </span>
-            </Tooltip>
-          )}
-        </Stat>
-        <Stat label="Reserved">
-          <span className="text-fa-frost">
-            {session.reservedAmount != null ? `$${session.reservedAmount.toFixed(2)}` : "—"}
-          </span>
-        </Stat>
+      {/* Row 1 — identity + headline numbers (fans across the full width like the paper strip). */}
+      <div className="flex items-center justify-between gap-x-3 fa-caption tabular-nums">
+        <span className="inline-flex items-center gap-1 text-amber-300 uppercase tracking-wider">
+          <CircleDollarSign className="h-3 w-3" />
+          Live · <span className="text-fa-frost normal-case tracking-normal">{prettyStrategy(session.strategyId)}</span>
+        </span>
+        <span className="text-fa-frost-bright">${session.currentBalance.toFixed(2)}</span>
+        <span className="text-fa-frost-dim">${session.currentBetSize.toFixed(2)}</span>
+        <span className={pnlClass(pnl)}>
+          {pnlText}
+          <span className="ml-1 opacity-80">({pnl >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)</span>
+        </span>
       </div>
-      <div className="mt-3 flex items-center">
+      {/* Row 2 — hit rate / bets (left) · reserved · Stop (right). */}
+      <div className="mt-1.5 flex items-center gap-3 fa-caption tabular-nums text-fa-frost-dim">
+        <span>
+          {hitRate != null ? `${hitRate.toFixed(0)}% hit` : "— hit"} · {session.betsWon}/{session.betsPlaced} bets
+        </span>
+        {session.reservedAmount != null && session.reservedAmount > 0 && (
+          <span>${session.reservedAmount.toFixed(2)} reserved</span>
+        )}
         <button
           onClick={onStop}
           disabled={stopping}
-          className="ml-auto inline-flex items-center gap-1 fa-caption text-fa-frost-dim hover:text-rose-300 transition disabled:opacity-50"
+          className="ml-auto inline-flex items-center gap-1 hover:text-rose-300 transition disabled:opacity-50"
           title="Stop this live session"
         >
-          <Square className="h-3 w-3" />
-          {stopping ? "Stopping…" : "Stop"}
+          <Square className="h-3 w-3" /> {stopping ? "Stopping…" : "Stop"}
         </button>
       </div>
     </div>
   );
 }
 
-function Stat({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="fa-overline text-fa-frost-dim mb-0.5">{label}</div>
-      <div className="fa-caption font-medium">{children}</div>
-    </div>
-  );
-}
-
 function LiveSessionCard({ session }: { session: NormalizedSession }) {
   const [stopSession, { isLoading: stopping }] = useStopSessionMutation();
+  // The amber ring (fa-live-accent) is the real-money cue — no overlay pill, so the chart's own
+  // top-right controls (fullscreen/expand) stay clear. rounded-xl + overflow-hidden keep the ring
+  // flush to the chart's own rounded card edge.
   return (
-    <div className="fa-live-accent rounded-xl">
-      <div className="relative">
-        <span className="pointer-events-none absolute right-3 top-3 z-10 inline-flex items-center gap-1 rounded-full border border-amber-300/50 bg-amber-300/15 px-2 py-0.5 fa-overline text-amber-300">
-          <Activity className="h-3 w-3" />
-          Live
-        </span>
-        <LiveBitcoinChart
-          symbol={session.symbol}
-          interval={session.interval as BinanceInterval}
-          kind="candle"
-          hidePaperPanel
+    <div className="fa-live-accent rounded-xl overflow-hidden">
+      <LiveBitcoinChart
+        symbol={session.symbol}
+        interval={session.interval as BinanceInterval}
+        kind="candle"
+        hidePaperPanel
+      />
+      <div className="px-4 pb-4 -mt-1">
+        <LiveNumbers
+          session={session}
+          stopping={stopping}
+          onStop={() => { void stopSession(session.id); }}
         />
-        <div className="px-4 pb-4 -mt-1">
-          <LiveNumbers
-            session={session}
-            stopping={stopping}
-            onStop={() => { void stopSession(session.id); }}
-          />
-        </div>
       </div>
     </div>
   );
