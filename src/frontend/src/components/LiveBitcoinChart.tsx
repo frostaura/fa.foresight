@@ -16,6 +16,7 @@ import {
 import { ArrowDown, ArrowUp, Maximize2, Minimize2, Sparkles, Star } from "lucide-react";
 import PaperTradingPanel from "./PaperTradingPanel";
 import InfoTip, { TipBody } from "./InfoTip";
+import { modelNeedsTraining, useModelTrainGate } from "./ModelTrainGate";
 import ShimmerOnChange from "./ShimmerOnChange";
 // `Tooltip` from recharts (above) collides with our UI Tooltip — alias to keep both.
 import { LivePulse, Spinner, Tooltip as UiTooltip } from "./ui";
@@ -1654,6 +1655,7 @@ function ModelPicker({ symbol, interval, grow = false, status = "idle" }:
   const { data: models } = useListModelsQuery();
   const { data: active } = useListActiveModelsQuery();
   const [setActive] = useSetActiveModelMutation();
+  const ensureTrained = useModelTrainGate();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -1727,11 +1729,17 @@ function ModelPicker({ symbol, interval, grow = false, status = "idle" }:
         <div className="absolute left-0 top-full mt-1 z-50 min-w-full w-max max-w-[280px] max-h-72 overflow-auto rounded-md border border-fa-edge bg-fa-ink-2/95 backdrop-blur-md shadow-2xl shadow-fa-ink/80 py-1">
           {models.map((m) => {
             const selected = m.id === currentId;
+            const needsTraining = modelNeedsTraining(m);
             return (
               <button
                 key={m.id}
                 type="button"
-                onClick={() => { setActive({ symbol, interval, modelId: m.id }); setOpen(false); }}
+                onClick={async () => {
+                  setOpen(false);
+                  // An untrained model produces no forecasts — gate selection behind training.
+                  if (needsTraining && !(await ensureTrained(m))) return;
+                  setActive({ symbol, interval, modelId: m.id });
+                }}
                 className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-[11px] text-left transition ${
                   selected ? "bg-emerald-400/10 text-fa-frost-bright" : "text-fa-frost-dim hover:bg-fa-frost/10 hover:text-fa-frost-bright"
                 }`}
@@ -1739,14 +1747,16 @@ function ModelPicker({ symbol, interval, grow = false, status = "idle" }:
                 {/* Selected = emerald (live-pulsing when forecasting); others = dim slate orb. */}
                 <span className="relative inline-flex h-2 w-2 shrink-0">
                   {selected && status === "live" && <span className="absolute inset-0 rounded-full bg-emerald-400 opacity-75 animate-ping" />}
-                  <span className={`relative h-2 w-2 rounded-full ${selected ? "bg-emerald-400" : "bg-slate-500/60"}`} />
+                  <span className={`relative h-2 w-2 rounded-full ${selected ? "bg-emerald-400" : needsTraining ? "bg-amber-400/70" : "bg-slate-500/60"}`} />
                 </span>
                 <span className="flex-1 truncate">{m.name}</span>
-                {selected && (
+                {needsTraining ? (
+                  <span className="shrink-0 text-[9px] font-medium text-amber-200 bg-amber-400/10 border border-amber-400/30 rounded px-1 py-0.5">Train</span>
+                ) : selected ? (
                   <svg className="h-3 w-3 shrink-0 text-emerald-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M3.5 8.5l3 3 6-7" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
-                )}
+                ) : null}
               </button>
             );
           })}

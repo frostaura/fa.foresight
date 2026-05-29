@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, Search, X } from "lucide-react";
+import { Check, ChevronDown, Cpu, Search, X } from "lucide-react";
 import { cn } from "../lib/cn";
 
 export interface RichMultiSelectOption {
@@ -9,6 +9,11 @@ export interface RichMultiSelectOption {
   sublabel?: string;
   stat?: string;
   disabled?: boolean;
+  /** When true, clicking the option fires `onOptionAction(value)` instead of toggling selection,
+   *  and the row renders a call-to-action pill (e.g. "Train") in place of the checkbox + stat. */
+  locked?: boolean;
+  /** Label for the call-to-action pill on a locked row. Defaults to "Action". */
+  actionLabel?: string;
 }
 
 export interface RichMultiSelectProps {
@@ -20,6 +25,9 @@ export interface RichMultiSelectProps {
   searchable?: boolean;
   minSelected?: number;
   className?: string;
+  /** Invoked when a `locked` option is activated (click / Enter / Space). The panel closes so a
+   *  follow-up dialog can take over; the parent decides whether to add the value to the selection. */
+  onOptionAction?: (value: string) => void;
 }
 
 export default function RichMultiSelect({
@@ -31,6 +39,7 @@ export default function RichMultiSelect({
   searchable = true,
   minSelected,
   className,
+  onOptionAction,
 }: RichMultiSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -116,13 +125,6 @@ export default function RichMultiSelect({
     },
     [value, onChange, minSelected]
   );
-
-  const handleKeyDown = (e: React.KeyboardEvent, optValue: string) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      toggle(optValue);
-    }
-  };
 
   // Trigger label rendering
   const selectedOptions = options.filter((o) => value.includes(o.value));
@@ -280,9 +282,20 @@ export default function RichMultiSelect({
               </div>
             ) : (
               filtered.map((opt) => {
-                const isSelected = value.includes(opt.value);
+                const isLocked = !!opt.locked;
+                const isSelected = !isLocked && value.includes(opt.value);
                 const isAtMin = isSelected && minSelected != null && value.length <= minSelected;
-                const isDisabled = opt.disabled || isAtMin;
+                const isDisabled = !isLocked && (opt.disabled || isAtMin);
+
+                const activate = () => {
+                  if (isLocked) {
+                    setOpen(false);
+                    setQuery("");
+                    onOptionAction?.(opt.value);
+                  } else if (!isDisabled) {
+                    toggle(opt.value);
+                  }
+                };
 
                 return (
                   <div
@@ -291,8 +304,13 @@ export default function RichMultiSelect({
                     aria-selected={isSelected}
                     aria-disabled={isDisabled}
                     tabIndex={isDisabled ? -1 : 0}
-                    onClick={() => !isDisabled && toggle(opt.value)}
-                    onKeyDown={(e) => !isDisabled && handleKeyDown(e, opt.value)}
+                    onClick={activate}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        activate();
+                      }
+                    }}
                     className={cn(
                       "flex items-center gap-2.5 px-2.5 py-2 text-xs cursor-pointer transition-colors",
                       "focus:outline-none focus-visible:bg-fa-frost/[0.06]",
@@ -302,17 +320,23 @@ export default function RichMultiSelect({
                       isDisabled && "opacity-50 cursor-not-allowed"
                     )}
                   >
-                    {/* Checkbox indicator */}
-                    <span
-                      className={cn(
-                        "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors",
-                        isSelected
-                          ? "bg-fa-frost-bright/20 border-fa-frost-bright/50"
-                          : "border-fa-edge bg-transparent"
-                      )}
-                    >
-                      {isSelected && <Check className="h-2.5 w-2.5 text-fa-frost-bright" />}
-                    </span>
+                    {/* Indicator — checkbox for selectable options, a train-cog for locked ones */}
+                    {isLocked ? (
+                      <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-amber-300/80">
+                        <Cpu className="h-3 w-3" />
+                      </span>
+                    ) : (
+                      <span
+                        className={cn(
+                          "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors",
+                          isSelected
+                            ? "bg-fa-frost-bright/20 border-fa-frost-bright/50"
+                            : "border-fa-edge bg-transparent"
+                        )}
+                      >
+                        {isSelected && <Check className="h-2.5 w-2.5 text-fa-frost-bright" />}
+                      </span>
+                    )}
 
                     {/* Label + sublabel */}
                     <span className="flex-1 min-w-0">
@@ -326,12 +350,16 @@ export default function RichMultiSelect({
                       )}
                     </span>
 
-                    {/* Stat chip */}
-                    {opt.stat && (
+                    {/* Right side — action pill for locked rows, otherwise the stat chip */}
+                    {isLocked ? (
+                      <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-medium text-amber-200 bg-amber-400/10 border border-amber-400/30 rounded px-1.5 py-0.5">
+                        {opt.actionLabel ?? "Action"}
+                      </span>
+                    ) : opt.stat ? (
                       <span className="shrink-0 text-[10px] tabular-nums text-fa-frost-dim bg-fa-glass border border-fa-edge rounded px-1.5 py-0.5">
                         {opt.stat}
                       </span>
-                    )}
+                    ) : null}
                   </div>
                 );
               })

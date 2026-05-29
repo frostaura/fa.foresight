@@ -21,7 +21,8 @@ import { cn } from "../lib/cn";
 import { fmtRunDate, fmtRunTime } from "../lib/format";
 import { useSort, SortHeader } from "../lib/sort";
 import { useLocalStorageState } from "../lib/persistedState";
-import { parseIntervalWfStats } from "./Models";
+import { computeModelScore, parseIntervalWfStats } from "./Models";
+import { modelNeedsTraining, useModelTrainGate } from "../components/ModelTrainGate";
 import {
   useClearBacktestsMutation,
   useGetBacktestBatchQuery,
@@ -84,6 +85,56 @@ export default function Testing() {
       </div>
     </div>
   );
+}
+
+// ── Model selection helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Maps eligible models to RichMultiSelect options. Deterministic models that haven't been trained
+ * yet are rendered `locked` with a "Train" pill — clicking them opens the train gate instead of
+ * selecting. Trained deterministic models always carry their walk-forward score; LLM models (which
+ * never train) show an "LLM" tag.
+ */
+function buildModelOptions(eligible: Model[]): RichMultiSelectOption[] {
+  return eligible.map((m) => {
+    const needs = modelNeedsTraining(m);
+    const score = computeModelScore(m);
+    return {
+      value: m.id,
+      label: m.name,
+      sublabel: m.kind,
+      stat: needs
+        ? undefined
+        : score != null
+          ? `${score.toFixed(1)}%`
+          : m.kind === "llm"
+            ? "LLM"
+            : undefined,
+      locked: needs,
+      actionLabel: m.trainingStatus === "training" ? "Training…" : "Train",
+    };
+  });
+}
+
+/** First eligible model that's ready to use (trained, or an LLM that needs no training). */
+function firstUsableModel(eligible: Model[]): Model | undefined {
+  return eligible.find((m) => !modelNeedsTraining(m));
+}
+
+/**
+ * Keeps a model selection valid: drops ids that are gone or untrained (e.g. a stale localStorage
+ * pick from before the train gate existed), falling back to the first usable model when nothing
+ * usable remains. Returns the same array reference when no change is needed (loop-safe in effects).
+ */
+function sanitizeModelSelection(prev: string[], eligible: Model[]): string[] {
+  const cleaned = prev.filter((id) => {
+    const m = eligible.find((x) => x.id === id);
+    return m != null && !modelNeedsTraining(m);
+  });
+  const next = cleaned.length > 0
+    ? cleaned
+    : (() => { const f = firstUsableModel(eligible); return f ? [f.id] : []; })();
+  return next.length === prev.length && next.every((id, i) => id === prev[i]) ? prev : next;
 }
 
 // ── Risk math helpers ─────────────────────────────────────────────────────────────────────────
@@ -698,11 +749,12 @@ function BacktestHistory({ rows, models, runningProgress }:
 function BacktestTab({ models, eligible }: { models: Model[]; eligible: Model[] }) {
   const { data: symbolsResp } = useGetSymbolsQuery();
   const { data: strategiesResp } = useGetStakingStrategiesQuery();
+  const ensureTrained = useModelTrainGate();
   const supportedSymbols = symbolsResp?.symbols ?? ["BTCUSDT"];
   const supportedIntervals = ["5m"];
   const availableStrategies = strategiesResp?.strategies ?? [{ id: "flat", name: "Flat", description: "" }];
 
-  const [modelIds, setModelIds] = useLocalStorageState<string[]>("fa.backtesting.modelIds", () => eligible[0] ? [eligible[0].id] : []);
+  const [modelIds, setModelIds] = useLocalStorageState<string[]>("fa.backtesting.modelIds", () => { const m = firstUsableModel(eligible); return m ? [m.id] : []; });
   const [strategyIds, setStrategyIds] = useLocalStorageState<string[]>("fa.backtesting.strategyIds", ["flat"]);
   const [symbol, setSymbol] = useLocalStorageState<string>("fa.backtesting.symbol", supportedSymbols[0] ?? "BTCUSDT");
   const [interval, setInterval] = useLocalStorageState<string>("fa.backtesting.interval", "5m");
@@ -720,8 +772,15 @@ function BacktestTab({ models, eligible }: { models: Model[]; eligible: Model[] 
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (modelIds.length === 0 && eligible[0]) setModelIds([eligible[0].id]);
-  }, [eligible, modelIds.length]);
+    setModelIds((prev) => sanitizeModelSelection(prev, eligible));
+  }, [eligible]);
+
+  // Selecting an untrained model opens the train gate; we only add it once trained.
+  const handleModelAction = async (id: string) => {
+    const m = eligible.find((x) => x.id === id);
+    if (!m) return;
+    if (await ensureTrained(m)) setModelIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  };
 
   useEffect(() => {
     if (initialBetSize > initialBalance) setInitialBetSize(initialBalance);
@@ -848,14 +907,10 @@ function BacktestTab({ models, eligible }: { models: Model[]; eligible: Model[] 
           <Field label={`Models${modelIds.length > 1 ? ` (${modelIds.length} selected)` : ""}`}
             info={{ title: "Models", body: "Pick one model to backtest, or several to fan out runs in parallel. Selecting multiple here AND multiple strategies produces an A/B grid." }}>
             <RichMultiSelect
-              options={eligible.map((m): RichMultiSelectOption => ({
-                value: m.id,
-                label: m.name,
-                sublabel: m.kind,
-                stat: m.averageScore != null ? `${m.averageScore.toFixed(1)}%` : undefined,
-              }))}
+              options={buildModelOptions(eligible)}
               value={modelIds}
               onChange={setModelIds}
+              onOptionAction={handleModelAction}
               placeholder="Select models…"
             />
           </Field>
@@ -985,10 +1040,11 @@ function BacktestTab({ models, eligible }: { models: Model[]; eligible: Model[] 
 function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) {
   const { data: symbolsResp } = useGetSymbolsQuery();
   const { data: strategiesResp } = useGetStakingStrategiesQuery();
+  const ensureTrained = useModelTrainGate();
   const supportedSymbols = symbolsResp?.symbols ?? ["BTCUSDT"];
   const availableStrategies = strategiesResp?.strategies ?? [{ id: "flat", name: "Flat", description: "" }];
 
-  const [modelIds, setModelIds] = useLocalStorageState<string[]>("fa.chaos.modelIds", () => eligible[0] ? [eligible[0].id] : []);
+  const [modelIds, setModelIds] = useLocalStorageState<string[]>("fa.chaos.modelIds", () => { const m = firstUsableModel(eligible); return m ? [m.id] : []; });
   const [strategyId, setStrategyId] = useLocalStorageState<string>("fa.chaos.strategyId", "flat");
   const [symbol, setSymbol] = useLocalStorageState<string>("fa.chaos.symbol", supportedSymbols[0] ?? "BTCUSDT");
   const [interval] = useLocalStorageState<string>("fa.chaos.interval", "5m");
@@ -1005,8 +1061,15 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
   const subscriptions = useRef<Map<string, EventSource>>(new Map());
 
   useEffect(() => {
-    if (modelIds.length === 0 && eligible[0]) setModelIds([eligible[0].id]);
-  }, [eligible, modelIds.length]);
+    setModelIds((prev) => sanitizeModelSelection(prev, eligible));
+  }, [eligible]);
+
+  // Selecting an untrained model opens the train gate; we only add it once trained.
+  const handleModelAction = async (id: string) => {
+    const m = eligible.find((x) => x.id === id);
+    if (!m) return;
+    if (await ensureTrained(m)) setModelIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  };
 
   useEffect(() => {
     if (initialBetSize > initialBalance) setInitialBetSize(initialBalance);
@@ -1112,14 +1175,10 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
           <Field label={`Models${modelIds.length > 1 ? ` (${modelIds.length})` : ""}`}
             info={{ title: "Models", body: "Pick one or more deterministic models. Each selected model gets its own bust-test batch (N rungs in series)." }}>
             <RichMultiSelect
-              options={eligible.map((m): RichMultiSelectOption => ({
-                value: m.id,
-                label: m.name,
-                sublabel: m.kind,
-                stat: m.averageScore != null ? `${m.averageScore.toFixed(1)}%` : undefined,
-              }))}
+              options={buildModelOptions(eligible)}
               value={modelIds}
               onChange={setModelIds}
+              onOptionAction={handleModelAction}
               placeholder="Select models…"
             />
           </Field>

@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import { ConfirmProvider } from "./components/ConfirmDialog";
+import { ModelTrainGateProvider } from "./components/ModelTrainGate";
 import Models from "./pages/Models";
 import ModelDesignerPage from "./pages/ModelDesignerPage";
 import PaperTrading from "./pages/PaperTrading";
@@ -14,6 +15,7 @@ export default function App() {
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ConfirmProvider>
+        <ModelTrainGateProvider>
         <Routes>
           <Route element={<Layout />}>
             {/* Default → Trading → Status */}
@@ -49,6 +51,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/trading/status" replace />} />
           </Route>
         </Routes>
+        </ModelTrainGateProvider>
       </ConfirmProvider>
     </BrowserRouter>
   );
