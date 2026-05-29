@@ -58,6 +58,7 @@ public sealed class PaperTradingService : IPaperTradingService
     private readonly IPaperTradingEventHub _events;
     private readonly ICalibrationRescaler _calibration;
     private readonly IVenuePriceStore _venuePrices;
+    private readonly Live.TradingNotifier _notifier;
     private readonly ILogger<PaperTradingService> _logger;
     private static readonly bool Disable5m = string.Equals(
         Environment.GetEnvironmentVariable("FORESIGHT_5M_PAPER_DISABLED"), "true",
@@ -70,6 +71,7 @@ public sealed class PaperTradingService : IPaperTradingService
         IPaperTradingEventHub events,
         ICalibrationRescaler calibration,
         IVenuePriceStore venuePrices,
+        Live.TradingNotifier notifier,
         ILogger<PaperTradingService> logger)
     {
         _db = db;
@@ -78,6 +80,7 @@ public sealed class PaperTradingService : IPaperTradingService
         _events = events;
         _calibration = calibration;
         _venuePrices = venuePrices;
+        _notifier = notifier;
         _logger = logger;
     }
 
@@ -256,6 +259,12 @@ public sealed class PaperTradingService : IPaperTradingService
                         _events.Publish(new PaperTradingEvent(PaperTradingEventKind.BetResolved, tracked, openBet));
                         if (tracked.Bust)
                             _events.Publish(new PaperTradingEvent(PaperTradingEventKind.SessionBust, tracked, null));
+                        // Notify bet resolution via channel adapter (best-effort).
+                        await _notifier.NotifyBetResolvedAsync(
+                            tracked.TenantId, tracked.Id, openBet.Id,
+                            openBet.Side, openBet.Size, step.Payout, step.Won, tracked.CurrentBalance, ct);
+                        if (tracked.Bust)
+                            await _notifier.NotifySessionBustAsync(tracked.TenantId, tracked.Id, "paper", tracked.CurrentBalance, ct);
                         openBet = null; // freed; placement can now consider this candle's slot
                     }
                 }
@@ -342,6 +351,7 @@ public sealed class PaperTradingService : IPaperTradingService
                                     tracked.StoppedAt = DateTimeOffset.UtcNow;
                                     await _db.SaveChangesAsync(ct);
                                     _events.Publish(new PaperTradingEvent(PaperTradingEventKind.SessionBust, tracked, null));
+                                    await _notifier.NotifySessionBustAsync(tracked.TenantId, tracked.Id, "paper", tracked.CurrentBalance, ct);
                                 }
                                 else
                                 {

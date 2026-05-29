@@ -61,6 +61,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
     private readonly ICalibrationRescaler _calibration;
     private readonly IVenuePriceStore   _venuePrices;
     private readonly TradingGuardrailOptions _guardrails;
+    private readonly TradingNotifier    _notifier;
     private readonly ILogger<LiveSessionEngine> _logger;
 
     public LiveSessionEngine(
@@ -72,6 +73,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
         ICalibrationRescaler calibration,
         IVenuePriceStore venuePrices,
         IOptions<TradingGuardrailOptions> guardrails,
+        TradingNotifier notifier,
         ILogger<LiveSessionEngine> logger)
     {
         _db          = db;
@@ -82,6 +84,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
         _calibration = calibration;
         _venuePrices = venuePrices;
         _guardrails  = guardrails.Value;
+        _notifier    = notifier;
         _logger      = logger;
     }
 
@@ -202,6 +205,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
             var tracked2 = await _db.LiveSessions.FirstOrDefaultAsync(s => s.Id == session.Id, ct);
             if (tracked2 is not null) { tracked2.Bust = true; tracked2.StoppedAt = DateTimeOffset.UtcNow; await _db.SaveChangesAsync(ct); }
             await _ledger.ReleaseAsync(tenantId, session.Id, ct);
+            await _notifier.NotifyCircuitBreakerAsync(tenantId, session.Id, drawdown, _guardrails.SessionDrawdownCircuitBreakerPct, ct);
             return tracked2 ?? session;
         }
 
@@ -263,6 +267,14 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                     // Recompute ledger reservation after settle.
                     await _ledger.RecomputeAsync(tenantId, tracked.Id, tracked.CurrentBalance, ct);
                     if (tracked.Bust) await _ledger.ReleaseAsync(tenantId, tracked.Id, ct);
+
+                    // Notify bet resolution (best-effort).
+                    await _notifier.NotifyBetResolvedAsync(
+                        tenantId, tracked.Id, openBet.Id,
+                        openBet.Side, openBet.Size, step.Payout, step.Won, tracked.CurrentBalance, ct);
+                    if (tracked.Bust)
+                        await _notifier.NotifySessionBustAsync(tenantId, tracked.Id, "live", tracked.CurrentBalance, ct);
+
                     openBet = null;
                 }
             }
@@ -317,6 +329,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                                     tracked.Bust = true; tracked.StoppedAt = DateTimeOffset.UtcNow;
                                     await _db.SaveChangesAsync(ct);
                                     await _ledger.ReleaseAsync(tenantId, tracked.Id, ct);
+                                    await _notifier.NotifySessionBustAsync(tenantId, tracked.Id, "live", tracked.CurrentBalance, ct);
                                 }
                                 else
                                 {
@@ -334,8 +347,12 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                                                 new OrderRequest(entryQuote.MarketExternalId ?? "", orderSide, shares, entryPrice, tenantId), ct);
                                             externalOrderId = receipt.OrderId;
                                             _logger.LogInformation("Live bet placed: {OrderId} {Side} {Shares}@{Price}", externalOrderId, side, shares, entryPrice);
+                                            // Notify trade placed (best-effort).
+                                            await _notifier.NotifyTradePlacedAsync(
+                                                tenantId, tracked.Id, externalOrderId,
+                                                side, nextStake, entryPrice, entryQuote.MarketExternalId, ct);
                                         }
-                                        catch (Exception ex)
+                                        catch (Exception ex) when (ex is not OperationCanceledException)
                                         {
                                             _logger.LogError(ex, "Live order placement failed — bet NOT recorded");
                                             return tracked;

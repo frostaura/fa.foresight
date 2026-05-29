@@ -222,6 +222,9 @@ public sealed class LivePredictionService : ILivePredictionService
                 p.ModelId == modelId, ct);
             return theirs ?? prediction;
         }
+        _logger.LogInformation(
+            "Prediction generated — model={ModelId} symbol={Symbol} interval={Interval} targetOpen={TargetOpenTime} pUp={PUp:F4} confidence={Confidence:F4}",
+            modelId, symbol, interval, targetOpenTime, prediction.DirectionUpProbability, prediction.Confidence);
         _events.Publish(new LivePredictionEvent(LivePredictionEventKind.Created, prediction));
         return prediction;
     }

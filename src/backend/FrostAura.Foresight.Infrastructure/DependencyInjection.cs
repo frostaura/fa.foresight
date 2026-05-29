@@ -217,6 +217,13 @@ public static class DependencyInjection
         services.AddHostedService<LiveSessionProcessorService>();
         services.AddSingleton<IVenueCapabilities, PolymarketBtcCapabilities>();
 
+        // Outbound notifications: thin best-effort facade over IChannelAdapter.
+        // Scoped so it shares the same channel singleton across a request/tick scope.
+        services.AddScoped<TradingNotifier>();
+
+        // Scheduled reservation reconcile loop (Phase E).
+        services.AddHostedService<AccountReconciliationService>();
+
         return services;
     }
 }
