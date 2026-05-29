@@ -5,7 +5,6 @@ import {
   Bar,
   CartesianGrid,
   ComposedChart,
-  Line,
   ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
@@ -631,20 +630,17 @@ export default function LiveBitcoinChart({
     return points;
   }, [paperSession, interval]);
 
-  // Balance Y-domain (hidden secondary YAxis). The balance line reads as a mini-chart sitting on the
-  // SAME bottom baseline as the price candles: recharts maps domain[0] → the plot's bottom edge, so
-  // we anchor domain[0] just below the lowest balance (trough hugs the bottom border) and stretch
-  // the domain top so the peak only reaches ~45% of the height — keeping the whole balance trend in
-  // the lower portion, overlaid on the big chart with their bottoms matching.
+  // Balance Y-domain (hidden secondary YAxis). The axis ALWAYS includes 0 so the dotted zero-balance
+  // baseline is on-domain, and `0` maps just above the plot's bottom edge. The top is stretched so
+  // the balance line sits around the lower half — the translucent area under it reads as the balance
+  // "cushion" above zero, like a line-mode area chart anchored to the bottom.
   const balanceYDomain = useMemo<[number, number]>(() => {
     if (balanceSeries.length === 0) return [0, 1];
     const vals = balanceSeries.map((p) => p.balance);
-    const maxBal = Math.max(...vals);
-    const minBal = Math.min(...vals);
-    // Floor the span for a flat/single-point series so the line doesn't blow up to full height.
-    const span = Math.max(maxBal - minBal, Math.max(maxBal * 0.02, 1));
-    const lo = minBal - span * 0.05;  // trough ~flush with the bottom border
-    const hi = lo + span / 0.45;      // peak reaches ~45% up → bottom-anchored mini-chart
+    const maxBal = Math.max(...vals, 1);
+    const minBal = Math.min(...vals, 0);          // always fold 0 in
+    const lo = minBal - maxBal * 0.04;            // a hair below 0 so the zero line clears the edge
+    const hi = lo + (maxBal - lo) / 0.5;          // balance peak ~50% up → area fills the lower half
     return [lo, hi];
   }, [balanceSeries]);
 
@@ -827,10 +823,15 @@ export default function LiveBitcoinChart({
                   so it composites on top of the price series. connectNulls=false lets the line draw
                   only between resolved-bet candles (gaps for candles with no bet outcome). */}
               {balanceSeries.length > 0 && (
-                <Line yAxisId="balance" type="monotone" dataKey="balance"
-                  stroke="#A4D4F4" strokeWidth={1.5} dot={false} isAnimationActive={false}
-                  connectNulls={false} strokeOpacity={0.5} strokeDasharray="2 4" strokeLinecap="round"
+                <Area yAxisId="balance" type="monotone" dataKey="balance"
+                  stroke="#A4D4F4" strokeWidth={2} strokeOpacity={0.9} dot={false}
+                  isAnimationActive={false} connectNulls={false}
+                  fill="#FFFFFF" fillOpacity={0.08}
                 />
+              )}
+              {balanceSeries.length > 0 && (
+                <ReferenceLine yAxisId="balance" y={0} stroke="#A4D4F4" strokeOpacity={0.35}
+                  strokeWidth={1} strokeDasharray="3 3" />
               )}
               {resultDots.map((d) => (
                 <ReferenceDot
@@ -900,10 +901,15 @@ export default function LiveBitcoinChart({
                 }}
               />
               {balanceSeries.length > 0 && (
-                <Line yAxisId="balance" type="monotone" dataKey="balance"
-                  stroke="#A4D4F4" strokeWidth={1.5} dot={false} isAnimationActive={false}
-                  connectNulls={false} strokeOpacity={0.5} strokeDasharray="2 4" strokeLinecap="round"
+                <Area yAxisId="balance" type="monotone" dataKey="balance"
+                  stroke="#A4D4F4" strokeWidth={2} strokeOpacity={0.9} dot={false}
+                  isAnimationActive={false} connectNulls={false}
+                  fill="#FFFFFF" fillOpacity={0.08}
                 />
+              )}
+              {balanceSeries.length > 0 && (
+                <ReferenceLine yAxisId="balance" y={0} stroke="#A4D4F4" strokeOpacity={0.35}
+                  strokeWidth={1} strokeDasharray="3 3" />
               )}
               {resultDots.map((d) => (
                 <ReferenceDot
@@ -960,10 +966,15 @@ export default function LiveBitcoinChart({
                   Y-axis so the balance scale is independent of the BTC price scale. Only shown when
                   a paper session with at least one resolved bet exists. */}
               {balanceSeries.length > 0 && (
-                <Line yAxisId="balance" type="monotone" dataKey="balance"
-                  stroke="#A4D4F4" strokeWidth={1.5} dot={false} isAnimationActive={false}
-                  connectNulls={false} strokeOpacity={0.5} strokeDasharray="2 4" strokeLinecap="round"
+                <Area yAxisId="balance" type="monotone" dataKey="balance"
+                  stroke="#A4D4F4" strokeWidth={2} strokeOpacity={0.9} dot={false}
+                  isAnimationActive={false} connectNulls={false}
+                  fill="#FFFFFF" fillOpacity={0.08}
                 />
+              )}
+              {balanceSeries.length > 0 && (
+                <ReferenceLine yAxisId="balance" y={0} stroke="#A4D4F4" strokeOpacity={0.35}
+                  strokeWidth={1} strokeDasharray="3 3" />
               )}
               {resultDots.map((d) => (
                 <ReferenceDot
