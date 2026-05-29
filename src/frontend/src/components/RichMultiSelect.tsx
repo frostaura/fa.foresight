@@ -295,10 +295,10 @@ export default function RichMultiSelect({
                     onKeyDown={(e) => !isDisabled && handleKeyDown(e, opt.value)}
                     className={cn(
                       "flex items-center gap-2.5 px-2.5 py-2 text-xs cursor-pointer transition-colors",
-                      "focus:outline-none focus-visible:bg-fa-glass",
+                      "focus:outline-none focus-visible:bg-fa-frost/[0.06]",
                       isSelected
-                        ? "bg-fa-glass text-fa-frost-bright"
-                        : "text-fa-frost-dim hover:bg-fa-glass/60 hover:text-fa-frost-bright",
+                        ? "bg-fa-frost/[0.08] text-fa-frost-bright"
+                        : "text-fa-frost-dim hover:bg-fa-frost/[0.06] hover:text-fa-frost-bright",
                       isDisabled && "opacity-50 cursor-not-allowed"
                     )}
                   >
