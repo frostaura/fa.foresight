@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { BookOpen, FlaskConical, Layers, Lock, Plus, Trash2 } from "lucide-react";
 import { useConfirm } from "../components/ConfirmDialog";
 import PageHeader from "../components/PageHeader";
+import { RichList, RichListRow } from "../components/RichList";
 import { cn } from "../lib/cn";
 import { useLocalStorageState } from "../lib/persistedState";
 import { pnlClass } from "../lib/pnl";
@@ -101,7 +102,7 @@ export default function Strategies() {
               {/* Description mode — Simple | Data-scientist */}
               <div
                 className="inline-flex items-center rounded-md border border-fa-edge bg-fa-glass overflow-hidden text-[11px]"
-                title="Switch the AI-generated description shown on each card between plain-language (Simple) and technical (Data-scientist). Falls back to the static description when the AI variant is not yet available."
+                title="Switch the AI-generated description shown on each row between plain-language (Simple) and technical (Data-scientist). Falls back to the static description when the AI variant is not yet available."
               >
                 {(["simple", "technical"] as DescriptionMode[]).map((mode) => {
                   const active = descMode === mode;
@@ -154,25 +155,29 @@ export default function Strategies() {
             </div>
           )}
 
-          {/* Card grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-            {ordered.map((s) => (
-              <StrategyCard key={s.id} strategy={s} descMode={descMode} />
-            ))}
-          </div>
+          {/* Rich list */}
+          {ordered.length > 0 && (
+            <RichList>
+              {ordered.map((s, i) => (
+                <StrategyRow key={s.id} strategy={s} index={i} descMode={descMode} />
+              ))}
+            </RichList>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-// ── Strategy card ─────────────────────────────────────────────────────────────────────────────
+// ── Strategy row ──────────────────────────────────────────────────────────────────────────────
 
-function StrategyCard({
+function StrategyRow({
   strategy,
+  index,
   descMode,
 }: {
   strategy: StrategyDetail;
+  index: number;
   descMode: DescriptionMode;
 }) {
   const navigate = useNavigate();
@@ -214,105 +219,97 @@ function StrategyCard({
   };
 
   return (
-    <div
-      className="fa-card px-5 py-4 flex flex-col gap-3 cursor-pointer hover:border-fa-frost/30 transition"
+    <RichListRow
+      index={index}
       onClick={() => navigate(`/strategies/${strategy.id}/designer`)}
-      title="Open designer"
     >
-      {/* Card header */}
-      <div className="flex items-start justify-between gap-3 min-w-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <Layers className="h-4 w-4 text-fa-frost-bright shrink-0" />
-          <div
-            className="text-fa-frost-bright text-sm font-medium truncate"
-            title={strategy.name}
-          >
-            {strategy.name}
+      {/* Responsive row layout: sm+ = side-by-side main + actions; mobile = stacked */}
+      <div className="flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-4 min-w-0">
+        {/* ── Main column ── */}
+        <div className="flex-1 min-w-0 space-y-1.5">
+          {/* Title line */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <Layers className="h-4 w-4 text-fa-frost-bright shrink-0" />
+            <span className="text-fa-frost-bright text-sm font-medium" title={strategy.name}>
+              {strategy.name}
+            </span>
+            {strategy.isBuiltIn && (
+              <Lock className="h-3.5 w-3.5 text-fa-frost-dim shrink-0" aria-label="Built-in (read-only)" />
+            )}
+            {/* Kind badge */}
+            <span
+              className={cn(
+                "text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border",
+                strategy.kind === "code"
+                  ? "border-fa-edge text-fa-frost-dim bg-fa-glass"
+                  : "border-fa-frost/20 text-fa-frost-bright bg-fa-glass-strong",
+              )}
+            >
+              {strategy.kind}
+            </span>
           </div>
-          {strategy.isBuiltIn && (
-            <Lock
-              className="h-3.5 w-3.5 text-fa-frost-dim shrink-0"
-              aria-label="Built-in (read-only)"
-            />
-          )}
-        </div>
 
-        {/* Kind badge */}
-        <span
-          className={cn(
-            "shrink-0 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border",
-            strategy.kind === "code"
-              ? "border-fa-edge text-fa-frost-dim bg-fa-glass"
-              : "border-fa-frost/20 text-fa-frost-bright bg-fa-glass-strong",
+          {/* Description — full text, no clamp */}
+          {displayDescription ? (
+            <p className="text-fa-frost-dim text-sm leading-relaxed">{displayDescription}</p>
+          ) : (
+            <p className="text-fa-frost-dim/40 text-xs italic">No description available.</p>
           )}
-        >
-          {strategy.kind}
-        </span>
-      </div>
 
-      {/* Description */}
-      {displayDescription ? (
-        <p className="text-fa-frost-dim text-xs leading-relaxed line-clamp-2">
-          {displayDescription}
-        </p>
-      ) : (
-        <p className="text-fa-frost-dim/40 text-xs italic">No description available.</p>
-      )}
-
-      {/* Stats row */}
-      {hasScore && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-fa-frost-dim">
-          {strategy.averageScore != null && (
-            <div title="Mean hit-rate across all intervals that have a completed backtest.">
-              <div className="uppercase tracking-wider text-[10px]">Score</div>
-              <div
-                className={cn(
-                  "tabular-nums",
-                  pnlClass(strategy.averageScore - 50),
-                )}
-              >
-                {strategy.averageScore.toFixed(1)}%
-              </div>
-            </div>
-          )}
-          {strategy.backtestsRun != null && strategy.backtestsRun > 0 && (
-            <div title="Total number of backtests run against this strategy.">
-              <div className="uppercase tracking-wider text-[10px]">Backtests</div>
-              <div className="text-fa-frost-bright">{strategy.backtestsRun}</div>
-            </div>
-          )}
-          {strategy.scoresByInterval &&
-            Object.entries(strategy.scoresByInterval)
-              .filter(([, v]) => v != null)
-              .map(([iv, score]) => (
-                <div
-                  key={iv}
-                  title={`Hit-rate for the ${iv} interval from the most-recent completed backtest.`}
-                >
-                  <div className="uppercase tracking-wider text-[10px]">{iv.toUpperCase()}</div>
-                  <div className={cn("tabular-nums", pnlClass(score - 50))}>
-                    {score.toFixed(1)}%
-                  </div>
+          {/* Stats row */}
+          {hasScore && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-fa-frost-dim pt-0.5">
+              {strategy.averageScore != null && (
+                <div title="Mean hit-rate across all intervals that have a completed backtest.">
+                  <span className="uppercase tracking-wider text-[10px]">Score</span>
+                  <span className={cn("tabular-nums ml-1.5", pnlClass(strategy.averageScore - 50))}>
+                    {strategy.averageScore.toFixed(1)}%
+                  </span>
                 </div>
-              ))}
-        </div>
-      )}
+              )}
+              {strategy.backtestsRun != null && strategy.backtestsRun > 0 && (
+                <div title="Total number of backtests run against this strategy.">
+                  <span className="uppercase tracking-wider text-[10px]">Backtests</span>
+                  <span className="text-fa-frost-bright ml-1.5">{strategy.backtestsRun}</span>
+                </div>
+              )}
+              {strategy.scoresByInterval &&
+                Object.entries(strategy.scoresByInterval)
+                  .filter(([, v]) => v != null)
+                  .map(([iv, score]) => (
+                    <div
+                      key={iv}
+                      title={`Hit-rate for the ${iv} interval from the most-recent completed backtest.`}
+                    >
+                      <span className="uppercase tracking-wider text-[10px]">{iv.toUpperCase()}</span>
+                      <span className={cn("tabular-nums ml-1.5", pnlClass(score - 50))}>
+                        {score.toFixed(1)}%
+                      </span>
+                    </div>
+                  ))}
+            </div>
+          )}
 
-      {/* Action row */}
-      {!strategy.isBuiltIn && (
-        <div className="flex items-center gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onDelete}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-rose-300/10 hover:border-rose-300/30 text-fa-frost-dim hover:text-rose-300 text-[11px] transition ml-auto"
+          {error && <div className="text-rose-300 text-[11px]">{error}</div>}
+        </div>
+
+        {/* ── Actions cluster ── */}
+        {!strategy.isBuiltIn && (
+          <div
+            className="flex items-center gap-2 shrink-0"
+            onClick={(e) => e.stopPropagation()}
           >
-            <Trash2 className="h-3 w-3" />
-            Delete
-          </button>
-        </div>
-      )}
-
-      {error && <div className="text-rose-300 text-[11px]">{error}</div>}
-    </div>
+            <button
+              type="button"
+              onClick={onDelete}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-rose-300/10 hover:border-rose-300/30 text-fa-frost-dim hover:text-rose-300 text-[11px] transition"
+            >
+              <Trash2 className="h-3 w-3" />
+              Delete
+            </button>
+          </div>
+        )}
+      </div>
+    </RichListRow>
   );
 }

@@ -4,6 +4,7 @@ import { Star, Lock, FlaskConical, Brain, Plus, Loader2, Cpu, Trash2, Archive, A
 import { useConfirm } from "../components/ConfirmDialog";
 import CreateModelDialog from "../components/CreateModelDialog";
 import PageHeader from "../components/PageHeader";
+import { RichList, RichListRow } from "../components/RichList";
 import Ticker, { type TickerItem } from "../components/Ticker";
 import { cn } from "../lib/cn";
 import { fmtRunDate } from "../lib/format";
@@ -230,7 +231,7 @@ function DefinitionsTab({
           {archiveView === "active" && (
             <div
               className="inline-flex items-center rounded-md border border-fa-edge bg-fa-glass overflow-hidden text-[11px]"
-              title="Switch the AI-generated description shown on each card between plain-language (Simple) and technical (Data-scientist). Falls back to the static description when the AI variant is not yet available."
+              title="Switch the AI-generated description shown on each row between plain-language (Simple) and technical (Data-scientist). Falls back to the static description when the AI variant is not yet available."
             >
               {(["simple", "technical"] as DescriptionMode[]).map((mode) => {
                 const active = descMode === mode;
@@ -305,17 +306,20 @@ function DefinitionsTab({
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-        {sortedModels.map((m) => (
-          <ModelCard
-            key={m.id}
-            model={m}
-            isEffectiveDefault={m.id === effectiveDefaultId}
-            descMode={descMode}
-            isArchivedView={archiveView === "archived"}
-          />
-        ))}
-      </div>
+      {sortedModels.length > 0 && (
+        <RichList>
+          {sortedModels.map((m, i) => (
+            <ModelRow
+              key={m.id}
+              model={m}
+              index={i}
+              isEffectiveDefault={m.id === effectiveDefaultId}
+              descMode={descMode}
+              isArchivedView={archiveView === "archived"}
+            />
+          ))}
+        </RichList>
+      )}
     </div>
   );
 }
@@ -425,13 +429,15 @@ function TopPerformersTicker({ models }: { models: Model[] }) {
   );
 }
 
-function ModelCard({
+function ModelRow({
   model,
+  index,
   isEffectiveDefault,
   descMode,
   isArchivedView,
 }: {
   model: Model;
+  index: number;
   isEffectiveDefault: boolean;
   descMode: DescriptionMode;
   isArchivedView: boolean;
@@ -509,141 +515,152 @@ function ModelCard({
   };
 
   return (
-    <div
-      className={cn(
-        "fa-card px-5 py-4 flex flex-col gap-3 cursor-pointer hover:border-fa-frost/30 transition",
-        isArchivedView && "opacity-70 hover:opacity-90"
-      )}
-      onClick={() => !isArchivedView && navigate(`/models/${model.id}/designer`)}
-      title={isArchivedView ? "Archived model" : "Open designer"}
+    <RichListRow
+      index={index}
+      onClick={!isArchivedView ? () => navigate(`/models/${model.id}/designer`) : undefined}
+      className={cn(isArchivedView && "opacity-70")}
     >
-      {/* Card header */}
-      <div className="flex items-start justify-between gap-3 min-w-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <KindIcon className="h-4 w-4 text-fa-frost-bright shrink-0" />
-          <div className="text-fa-frost-bright text-sm font-medium truncate" title={model.name}>
-            {model.name}
-          </div>
-          {model.isBuiltIn && (
-            <Lock className="h-3.5 w-3.5 text-fa-frost-dim shrink-0" aria-label="Built-in (read-only)" />
-          )}
-          {isArchivedView && (
-            <Archive className="h-3.5 w-3.5 text-fa-frost-dim/60 shrink-0" aria-label="Archived" />
-          )}
-        </div>
-        {!isArchivedView && (
-          <button
-            onClick={(e) => { e.stopPropagation(); if (!isEffectiveDefault) setDefault(model.id); }}
-            disabled={isEffectiveDefault}
-            className="text-[10px] uppercase tracking-wider flex items-center gap-1 shrink-0 transition disabled:cursor-default"
-            title={isEffectiveDefault ? "This is the current default" : "Set as the tenant default"}
-          >
-            {isEffectiveDefault ? (
-              <span className="text-amber-300 flex items-center gap-1"><Star className="h-3 w-3 fill-amber-300" /> Default</span>
-            ) : (
-              <span className="text-fa-frost-dim hover:text-amber-300"><Star className="h-3 w-3" /></span>
+      {/* Responsive row layout: sm+ = side-by-side main + actions; mobile = stacked */}
+      <div className="flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-4 min-w-0">
+        {/* ── Main column ── */}
+        <div className="flex-1 min-w-0 space-y-1.5">
+          {/* Title line */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <KindIcon className="h-4 w-4 text-fa-frost-bright shrink-0" />
+            <span className="text-fa-frost-bright text-sm font-medium" title={model.name}>
+              {model.name}
+            </span>
+            {model.isBuiltIn && (
+              <Lock className="h-3.5 w-3.5 text-fa-frost-dim shrink-0" aria-label="Built-in (read-only)" />
             )}
-          </button>
-        )}
-      </div>
-
-      {/* Description */}
-      {displayDescription && (
-        <p className="text-fa-frost-dim text-xs leading-relaxed line-clamp-2">{displayDescription}</p>
-      )}
-
-      {/* Per-interval stats row */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-fa-frost-dim">
-        <div>
-          <div className="uppercase tracking-wider text-[10px]">Kind</div>
-          <div className="text-fa-frost-bright">{model.kind === "llm" ? "LLM" : "Deterministic"}</div>
-        </div>
-        {["1m", "5m", "15m"].map((iv) => (
-          <div
-            key={iv}
-            title={`Walk-forward validation accuracy of the ${iv} variant.`}
-          >
-            <div className="uppercase tracking-wider text-[10px]">{iv.toUpperCase()}</div>
-            <div className="text-fa-frost-bright tabular-nums">
-              {intervalAccs[iv] == null ? "—" : `${(intervalAccs[iv] * 100).toFixed(1)}%`}
-            </div>
+            {isArchivedView && (
+              <Archive className="h-3.5 w-3.5 text-fa-frost-dim/60 shrink-0" aria-label="Archived" />
+            )}
+            {/* Default badge */}
+            {!isArchivedView && isEffectiveDefault && (
+              <span className="text-amber-300 flex items-center gap-1 text-[10px] uppercase tracking-wider">
+                <Star className="h-3 w-3 fill-amber-300" /> Default
+              </span>
+            )}
           </div>
-        ))}
-        {(() => {
-          const score = computeModelScore(model);
-          const tooltip = score == null
-            ? "No trained state — train the model to see a score."
-            : "Arithmetic mean of the per-interval walk-forward accuracies shown above.";
-          return (
-            <div title={tooltip}>
-              <div className="uppercase tracking-wider text-[10px]">Score</div>
-              <div className={cn("tabular-nums", score == null ? "text-fa-frost-dim" : pnlClass(score - 50))}>
-                {score == null ? "—" : `${score.toFixed(1)}%`}
-              </div>
+
+          {/* Description — full text, no clamp */}
+          {displayDescription ? (
+            <p className="text-fa-frost-dim text-sm leading-relaxed">{displayDescription}</p>
+          ) : (
+            <p className="text-fa-frost-dim/40 text-xs italic">No description available.</p>
+          )}
+
+          {/* Stats row */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-fa-frost-dim pt-0.5">
+            <div>
+              <span className="uppercase tracking-wider text-[10px]">Kind</span>
+              <span className="text-fa-frost-bright ml-1.5">{model.kind === "llm" ? "LLM" : "Deterministic"}</span>
             </div>
-          );
-        })()}
+            {["1m", "5m", "15m"].map((iv) => (
+              <div key={iv} title={`Walk-forward validation accuracy of the ${iv} variant.`}>
+                <span className="uppercase tracking-wider text-[10px]">{iv.toUpperCase()}</span>
+                <span className="text-fa-frost-bright tabular-nums ml-1.5">
+                  {intervalAccs[iv] == null ? "—" : `${(intervalAccs[iv] * 100).toFixed(1)}%`}
+                </span>
+              </div>
+            ))}
+            {(() => {
+              const score = computeModelScore(model);
+              const tooltip = score == null
+                ? "No trained state — train the model to see a score."
+                : "Arithmetic mean of the per-interval walk-forward accuracies shown above.";
+              return (
+                <div title={tooltip}>
+                  <span className="uppercase tracking-wider text-[10px]">Score</span>
+                  <span className={cn("tabular-nums ml-1.5", score == null ? "text-fa-frost-dim" : pnlClass(score - 50))}>
+                    {score == null ? "—" : `${score.toFixed(1)}%`}
+                  </span>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Training range / status footnotes */}
+          {hasTrainingRange && (
+            <div className="text-[10px] text-fa-frost-dim/70 break-words" title="The candle range the model was trained on.">
+              Trained {model.trainSymbol}/{model.trainInterval} · {fmtRunDate(new Date(model.trainStartMs as number))} → {fmtRunDate(new Date(model.trainEndMs as number))}
+            </div>
+          )}
+          {isTrainingNow && (
+            <div className="text-[10px] text-fa-frost-dim/70" title="Training runs on the server and keeps going if you close this page.">
+              Training in progress (server-side){model.trainingStartedAt ? ` · started ${fmtRunDate(new Date(model.trainingStartedAt))}` : ""} — safe to leave this page.
+            </div>
+          )}
+          {!isTrainingNow && model.trainingStatus === "failed" && (
+            <div className="text-rose-300 text-[11px]" title={model.trainingError ?? undefined}>
+              Last training failed: {model.trainingError ?? "unknown error"}
+            </div>
+          )}
+          {error && <div className="text-rose-300 text-[11px]">{error}</div>}
+        </div>
+
+        {/* ── Actions cluster ── */}
+        <div
+          className="flex flex-wrap items-center gap-2 shrink-0"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Set-default star (active, non-default only) */}
+          {!isArchivedView && !isEffectiveDefault && (
+            <button
+              onClick={() => setDefault(model.id)}
+              className="text-fa-frost-dim hover:text-amber-300 transition shrink-0"
+              title="Set as the tenant default"
+            >
+              <Star className="h-3.5 w-3.5" />
+            </button>
+          )}
+
+          {/* Train (active, deterministic, non-built-in) */}
+          {!isArchivedView && model.kind === "deterministic" && !model.isBuiltIn && (
+            <button
+              onClick={onTrain}
+              disabled={isTrainingNow}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-bright text-[11px] transition disabled:opacity-50"
+            >
+              {isTrainingNow ? <Loader2 className="h-3 w-3 animate-spin" /> : <Cpu className="h-3 w-3" />}
+              {isTrainingNow ? "Training…" : "Train"}
+            </button>
+          )}
+
+          {/* Archive / Unarchive */}
+          {isArchivedView ? (
+            <button
+              onClick={onUnarchive}
+              disabled={isUnarchiving}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-bright text-[11px] transition disabled:opacity-50"
+            >
+              {isUnarchiving ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArchiveRestore className="h-3 w-3" />}
+              Unarchive
+            </button>
+          ) : (
+            <button
+              onClick={onArchive}
+              disabled={isArchiving}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-dim hover:text-fa-frost-bright text-[11px] transition disabled:opacity-50"
+            >
+              {isArchiving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Archive className="h-3 w-3" />}
+              Archive
+            </button>
+          )}
+
+          {/* Delete (active, non-built-in only) */}
+          {!isArchivedView && !model.isBuiltIn && (
+            <button
+              onClick={onDelete}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-rose-300/10 hover:border-rose-300/30 text-fa-frost-dim hover:text-rose-300 text-[11px] transition"
+            >
+              <Trash2 className="h-3 w-3" />
+              Delete
+            </button>
+          )}
+        </div>
       </div>
-
-      {/* Action row */}
-      <div className="flex flex-wrap items-center gap-2 pt-1">
-        {/* Active model actions */}
-        {!isArchivedView && model.kind === "deterministic" && !model.isBuiltIn && (
-          <button onClick={(e) => { e.stopPropagation(); onTrain(); }} disabled={isTrainingNow}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-bright text-[11px] transition disabled:opacity-50">
-            {isTrainingNow ? <Loader2 className="h-3 w-3 animate-spin" /> : <Cpu className="h-3 w-3" />}
-            {isTrainingNow ? "Training…" : "Train"}
-          </button>
-        )}
-
-        {/* Archive / Unarchive */}
-        {isArchivedView ? (
-          <button
-            onClick={(e) => { e.stopPropagation(); onUnarchive(); }}
-            disabled={isUnarchiving}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-bright text-[11px] transition disabled:opacity-50"
-          >
-            {isUnarchiving ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArchiveRestore className="h-3 w-3" />}
-            Unarchive
-          </button>
-        ) : (
-          <button
-            onClick={(e) => { e.stopPropagation(); onArchive(); }}
-            disabled={isArchiving}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-dim hover:text-fa-frost-bright text-[11px] transition disabled:opacity-50"
-          >
-            {isArchiving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Archive className="h-3 w-3" />}
-            Archive
-          </button>
-        )}
-
-        {/* Delete (active, non-built-in only) */}
-        {!isArchivedView && !model.isBuiltIn && (
-          <button onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-rose-300/10 hover:border-rose-300/30 text-fa-frost-dim hover:text-rose-300 text-[11px] transition ml-auto">
-            <Trash2 className="h-3 w-3" />
-            Delete
-          </button>
-        )}
-      </div>
-
-      {hasTrainingRange && (
-        <div className="text-[10px] text-fa-frost-dim/70 -mt-1 break-words" title="The candle range the model was trained on.">
-          Trained {model.trainSymbol}/{model.trainInterval} · {fmtRunDate(new Date(model.trainStartMs as number))} → {fmtRunDate(new Date(model.trainEndMs as number))}
-        </div>
-      )}
-
-      {isTrainingNow && (
-        <div className="text-[10px] text-fa-frost-dim/70 -mt-1" title="Training runs on the server and keeps going if you close this page.">
-          Training in progress (server-side){model.trainingStartedAt ? ` · started ${fmtRunDate(new Date(model.trainingStartedAt))}` : ""} — safe to leave this page.
-        </div>
-      )}
-      {!isTrainingNow && model.trainingStatus === "failed" && (
-        <div className="text-rose-300 text-[11px]" title={model.trainingError ?? undefined}>
-          Last training failed: {model.trainingError ?? "unknown error"}
-        </div>
-      )}
-      {error && <div className="text-rose-300 text-[11px]">{error}</div>}
-    </div>
+    </RichListRow>
   );
 }
