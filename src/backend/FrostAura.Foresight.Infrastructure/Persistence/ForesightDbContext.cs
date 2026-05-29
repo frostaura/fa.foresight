@@ -146,6 +146,7 @@ public sealed class ForesightDbContext : DbContext
             b.Property(s => s.Interval).HasMaxLength(10).IsRequired();
             b.Property(s => s.Label).HasMaxLength(60).IsRequired();
             b.Property(s => s.StrategyId).HasMaxLength(32).IsRequired();
+            b.Property(s => s.ConfigHash).HasMaxLength(64);
             b.Property(s => s.InitialBalance).HasColumnType("numeric(20,4)");
             b.Property(s => s.InitialBetSize).HasColumnType("numeric(20,4)");
             b.Property(s => s.CurrentBalance).HasColumnType("numeric(20,4)");

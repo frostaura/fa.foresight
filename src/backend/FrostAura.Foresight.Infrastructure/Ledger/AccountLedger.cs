@@ -1,11 +1,28 @@
+using System.Numerics;
+using System.Text;
 using System.Text.Json;
 using FrostAura.Foresight.Domain.Ledger;
 using FrostAura.Foresight.Domain.Ports;
+using FrostAura.Foresight.Infrastructure.Adapters;
 using FrostAura.Foresight.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace FrostAura.Foresight.Infrastructure.Ledger;
+
+/// <summary>Options for the Polygon RPC used to read the on-chain pUSD balance.</summary>
+public sealed class PolygonOptions
+{
+    /// <summary>Polygon RPC endpoint. Defaults to a public node; can be overridden with Alchemy/Infura.</summary>
+    public string RpcUrl { get; set; } = "https://polygon-rpc.com";
+
+    /// <summary>ERC-20 contract address for pUSD on Polygon Mainnet (chain 137).</summary>
+    public string PusdContractAddress { get; set; } = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB";
+
+    /// <summary>Decimal places for pUSD (6, like USDC).</summary>
+    public int PusdDecimals { get; set; } = 6;
+}
 
 /// <summary>
 /// Postgres-backed reservation ledger.
@@ -14,30 +31,129 @@ namespace FrostAura.Foresight.Infrastructure.Ledger;
 /// The invariant is ALWAYS derived by a live query — never from summing ledger delta rows (which would
 /// accumulate rounding / double-count errors). Audit rows exist only for observability.
 ///
-/// wallet pUSD is fetched via a stub (0 for now; wired to the real on-chain balance in Phase 5).
+/// Wallet pUSD is fetched from the Polygon chain via a minimal eth_call (balanceOf) to the pUSD ERC-20
+/// contract. Returns 0 gracefully when no wallet is configured or the RPC is unreachable.
 /// </summary>
 public sealed class AccountLedger : IAccountLedger
 {
     private const string Venue = "polymarket";
 
-    private readonly ForesightDbContext _db;
-    private readonly IChannelAdapter    _channel;
+    private readonly ForesightDbContext  _db;
+    private readonly IChannelAdapter     _channel;
+    private readonly IKeyVault           _vault;
+    private readonly HttpClient          _http;
+    private readonly PolygonOptions      _polygonOpts;
+    private readonly KeyVaultOptions     _keyVaultOpts;
     private readonly ILogger<AccountLedger> _logger;
 
-    public AccountLedger(ForesightDbContext db, IChannelAdapter channel, ILogger<AccountLedger> logger)
+    public AccountLedger(
+        ForesightDbContext db,
+        IChannelAdapter channel,
+        IKeyVault vault,
+        HttpClient http,
+        IOptions<PolygonOptions> polygonOpts,
+        IOptions<KeyVaultOptions> keyVaultOpts,
+        ILogger<AccountLedger> logger)
     {
-        _db      = db;
-        _channel = channel;
-        _logger  = logger;
+        _db           = db;
+        _channel      = channel;
+        _vault        = vault;
+        _http         = http;
+        _polygonOpts  = polygonOpts.Value;
+        _keyVaultOpts = keyVaultOpts.Value;
+        _logger       = logger;
     }
 
     /// <inheritdoc/>
     /// <remarks>
-    /// Phase E: returns a hardcoded 0 (no on-chain call yet). Wire to pUSD balance endpoint after
-    /// the supervised $1 order passes — the on-chain balance only matters for live execution.
+    /// Reads the real on-chain pUSD ERC-20 balance from Polygon via a JSON-RPC eth_call to
+    /// balanceOf(walletAddress) on the pUSD contract. Returns 0 gracefully when:
+    ///   - no wallet private key is configured (KeyVault:PrivateKey is empty)
+    ///   - no wallet address can be resolved
+    ///   - the RPC endpoint is unreachable or returns an error
+    ///   - the live trading gate is disarmed (balance stays at 0 so reservation logic is inert)
     /// </remarks>
-    public Task<decimal> GetWalletPusdAsync(Guid tenantId, CancellationToken ct)
-        => Task.FromResult(0m); // Stubbed pending live funding.
+    public async Task<decimal> GetWalletPusdAsync(Guid tenantId, CancellationToken ct)
+    {
+        // Only meaningful with a wallet configured (live path only).
+        if (!_keyVaultOpts.HasKey) return 0m;
+
+        try
+        {
+            var address = await _vault.GetPublicAddressAsync(ct);
+            return await ReadPusdBalanceAsync(address, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "GetWalletPusdAsync: on-chain read failed — returning 0 (pUSD balance unconfirmed)");
+            return 0m;
+        }
+    }
+
+    /// <summary>
+    /// Read pUSD ERC-20 balance from Polygon via eth_call to balanceOf(address).
+    /// Uses minimal JSON-RPC (no Nethereum ABI overhead) to keep the dependency surface light.
+    /// ABI-encodes the balanceOf(address) call manually: 4-byte selector + 32-byte padded address.
+    /// </summary>
+    internal async Task<decimal> ReadPusdBalanceAsync(string walletAddress, CancellationToken ct)
+    {
+        // balanceOf(address) selector: keccak256("balanceOf(address)")[0:4] = 0x70a08231
+        const string selector = "70a08231";
+        // ABI-encode: 32 bytes, left-padded with zeros, last 20 bytes = address (strip 0x prefix).
+        var cleanAddr = walletAddress.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? walletAddress[2..] : walletAddress;
+        var callData = "0x" + selector + cleanAddr.PadLeft(64, '0');
+
+        var rpcBody = JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            method  = "eth_call",
+            @params = new object[]
+            {
+                new { to = _polygonOpts.PusdContractAddress, data = callData },
+                "latest"
+            },
+            id = 1
+        });
+
+        using var req  = new HttpRequestMessage(HttpMethod.Post, _polygonOpts.RpcUrl)
+            { Content = new StringContent(rpcBody, Encoding.UTF8, "application/json") };
+        using var resp = await _http.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("Polygon RPC returned {Status} for balanceOf — returning 0", resp.StatusCode);
+            return 0m;
+        }
+
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        using var doc  = JsonDocument.Parse(body);
+        if (!doc.RootElement.TryGetProperty("result", out var resultEl))
+        {
+            _logger.LogWarning("Polygon RPC response missing 'result' field — returning 0. Body: {Body}", body[..Math.Min(body.Length, 200)]);
+            return 0m;
+        }
+
+        var hex = resultEl.GetString() ?? "0x0";
+        if (hex == "0x" || hex == "0x0") return 0m;
+
+        // Parse the 32-byte ABI-encoded uint256 result.
+        var cleanHex = hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? hex[2..] : hex;
+        if (!BigInteger.TryParse(cleanHex, System.Globalization.NumberStyles.HexNumber, null, out var raw))
+        {
+            _logger.LogWarning("Could not parse Polygon RPC result '{Hex}' as uint256 — returning 0", hex);
+            return 0m;
+        }
+
+        // Scale from integer (6 decimals) to decimal pUSD.
+        var divisor = BigInteger.Pow(10, _polygonOpts.PusdDecimals);
+        var whole   = (decimal)(raw / divisor);
+        var frac    = (decimal)(raw % divisor) / (decimal)divisor;
+        var balance = whole + frac;
+
+        _logger.LogDebug("On-chain pUSD balance for {Address}: {Balance} (raw={Raw})", walletAddress, balance, raw);
+        return balance;
+    }
 
     /// <inheritdoc/>
     /// <remarks>

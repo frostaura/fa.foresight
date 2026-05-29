@@ -21,6 +21,13 @@ public sealed class PaperSession : ITenantScoped
     /// carry a non-empty label (e.g. the strategy id) so several can run in parallel on one market.
     /// </summary>
     public string Label { get; init; } = "";
+    /// <summary>
+    /// Stable SHA-256 config hash over {venue,symbol,interval,strategyId,initialBalance,initialBetSize}
+    /// EXCLUDING mode. Mirrors the same hash computed by LiveSessionEngine so the cross-mode dedup check
+    /// can compare paper and live sessions in a single query. Nullable for sessions created before this
+    /// column existed (pre-Phase-E2 rows).
+    /// </summary>
+    public string? ConfigHash { get; init; }
     public DateTimeOffset StartedAt { get; init; }
     /// <summary>Set when the user clicks Stop or when the session goes bust. While null, the
     /// background processor will continue ticking this session.</summary>

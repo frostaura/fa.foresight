@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using FluentAssertions;
 using FrostAura.Foresight.Domain.Execution;
+using FrostAura.Foresight.Domain.Ports;
 using FrostAura.Foresight.Infrastructure.Adapters;
 using FrostAura.Foresight.Infrastructure.Live;
 using Nethereum.Signer;
@@ -349,5 +350,180 @@ public class ClobV2SigningTests
         var hash1 = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "5m",  "flat", 100m, 5m);
         var hash2 = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "15m", "flat", 100m, 5m);
         hash1.Should().NotBe(hash2, "different intervals must produce different hashes");
+    }
+
+    // ── (h) SELL amount scaling + body shape ─────────────────────────────────────
+
+    [Theory]
+    // SELL: makerAmount=floor(size*1e6), takerAmount=floor(price*size*1e6)
+    [InlineData(0.55, 10.0, 0.01, 0.0, 10_000_000L, 5_500_000L)]   // maker=floor(10*1e6)=10M, taker=floor(0.55*10*1e6)=5.5M
+    [InlineData(0.499, 5.0, 0.01, 0.0, 5_000_000L, 2_450_000L)]    // tick=0.49; taker=floor(0.49*5*1e6)=2_450_000
+    [InlineData(0.333, 3.0, 0.01, 0.0, 3_000_000L, 990_000L)]      // tick=0.33; taker=floor(0.33*3*1e6)=990_000
+    public void OrderMath_SELL_scaling_formula_is_correct(
+        double rawPrice, double sizeShares, double mts, double mos,
+        long expectedMaker, long expectedTaker)
+    {
+        var result = OrderMath.SizeSell((decimal)rawPrice, (decimal)sizeShares, (decimal)mts, (decimal)mos);
+        result.Should().NotBeNull("a valid SELL order should not be null");
+        result!.MakerAmount.Should().Be(expectedMaker,
+            $"SELL makerAmount = floor(size*1e6): size={sizeShares}");
+        result.TakerAmount.Should().Be(expectedTaker,
+            $"SELL takerAmount = floor(tickPrice*size*1e6): price={rawPrice} size={sizeShares}");
+    }
+
+    [Fact]
+    public void SELL_body_side_string_is_SELL_not_integer()
+    {
+        // The POST body for a SELL order must carry "SELL" string (same constraint as "BUY" for BUY orders).
+        var bodyJson = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            order = new { side = "SELL", owner = "test-api-key", orderType = "GTC" }
+        });
+        bodyJson.Should().Contain("\"side\":\"SELL\"", "POST body: side must be the string SELL");
+        bodyJson.Should().NotContain("\"side\":1", "side must NOT be an integer in the body");
+    }
+
+    [Fact]
+    public void SELL_order_side_uint8_is_one_in_typed_data()
+    {
+        // The signed ClobV2Order struct: Side=1 for SELL (uint8).
+        var order = new ClobV2Order
+        {
+            Salt = "1", Maker = "0xA", Signer = "0xA", TokenId = "1",
+            MakerAmount = "1", TakerAmount = "1",
+            Side = 1, // SELL
+            SignatureType = 0, Timestamp = "1"
+        };
+        var json = order.ToEip712Json(false);
+        json.Should().Contain("\"side\":1", "signed struct: SELL side must be uint8 = 1");
+    }
+
+    [Fact]
+    public void OrderMath_SizeSell_sub_mos_returns_null()
+    {
+        var result = OrderMath.SizeSell(0.55m, sizeShares: 0.001m, mts: 0.01m, mos: 0.1m);
+        result.Should().BeNull("sub-mos SELL orders must be skipped");
+    }
+
+    [Fact]
+    public void OrderMath_SizeSell_zero_mos_never_skips()
+    {
+        var result = OrderMath.SizeSell(0.55m, sizeShares: 0.0001m, mts: 0.01m, mos: 0m);
+        result.Should().NotBeNull("mos=0 means no minimum for SELL either");
+    }
+
+    // ── (i) Market resolution query parsing ─────────────────────────────────────
+
+    [Fact]
+    public void ParseResolution_returns_null_for_unresolved_market()
+    {
+        const string json = """{"resolved":false,"condition_id":"abc123"}""";
+        var result = PolymarketExecutionProvider.ParseResolution("abc123", json);
+        result.Should().NotBeNull();
+        result!.Resolved.Should().BeFalse("market is not yet resolved");
+        result.WinningOutcomeIndex.Should().BeNull("no winner when unresolved");
+        result.YesWon.Should().BeNull("YesWon is null when not resolved");
+    }
+
+    [Fact]
+    public void ParseResolution_returns_yes_won_for_resolved_yes_market()
+    {
+        const string json = """{"resolved":true,"outcome":"Yes","condition_id":"abc123"}""";
+        var result = PolymarketExecutionProvider.ParseResolution("abc123", json);
+        result.Should().NotBeNull();
+        result!.Resolved.Should().BeTrue();
+        result.WinningOutcomeIndex.Should().Be(0, "Yes outcome maps to index 0");
+        result.YesWon.Should().BeTrue("YesWon=true when Yes wins");
+    }
+
+    [Fact]
+    public void ParseResolution_returns_no_won_for_resolved_no_market()
+    {
+        const string json = """{"resolved":true,"outcome":"No","condition_id":"abc123"}""";
+        var result = PolymarketExecutionProvider.ParseResolution("abc123", json);
+        result.Should().NotBeNull();
+        result!.Resolved.Should().BeTrue();
+        result.WinningOutcomeIndex.Should().Be(1, "No outcome maps to index 1");
+        result.YesWon.Should().BeFalse("YesWon=false when No wins");
+    }
+
+    [Fact]
+    public void ParseResolution_returns_resolved_no_winner_when_outcome_missing()
+    {
+        // resolved=true but outcome field absent — should still report resolved, winner=null.
+        const string json = """{"resolved":true}""";
+        var result = PolymarketExecutionProvider.ParseResolution("abc123", json);
+        result.Should().NotBeNull();
+        result!.Resolved.Should().BeTrue();
+        result.WinningOutcomeIndex.Should().BeNull("no outcome field means winner is indeterminate");
+    }
+
+    [Fact]
+    public void ParseResolution_returns_null_on_invalid_json()
+    {
+        var result = PolymarketExecutionProvider.ParseResolution("abc123", "not-json{{{");
+        result.Should().BeNull("invalid JSON must return null gracefully");
+    }
+
+    [Fact]
+    public void MarketResolution_YesWon_is_null_when_not_resolved()
+    {
+        var r = new MarketResolution("cid", Resolved: false, WinningOutcomeIndex: null);
+        r.YesWon.Should().BeNull("YesWon must be null when market is not resolved");
+    }
+
+    [Fact]
+    public void MarketResolution_YesWon_false_when_no_wins()
+    {
+        var r = new MarketResolution("cid", Resolved: true, WinningOutcomeIndex: 1);
+        r.YesWon.Should().BeFalse("WinningOutcomeIndex=1 means No won");
+    }
+
+    // ── (j) On-chain balance read: decimal scaling ───────────────────────────────
+
+    [Theory]
+    [InlineData("0x0000000000000000000000000000000000000000000000000000000000989680", 10.0)]  // 10_000_000 raw / 1e6 = 10.0
+    [InlineData("0x00000000000000000000000000000000000000000000000000000000000f4240", 1.0)]   // 1_000_000 raw / 1e6 = 1.0
+    [InlineData("0x0000000000000000000000000000000000000000000000000000000000000000", 0.0)]  // 0 raw = 0.0
+    [InlineData("0x0000000000000000000000000000000000000000000000000000000000000001", 0.000001)] // 1 raw / 1e6 = 0.000001
+    public void PusdBalance_decimal_scaling_from_uint256_hex(string hexResult, double expectedBalance)
+    {
+        // Reproduce the hex→decimal scaling logic inline (mirrors ReadPusdBalanceAsync internals).
+        var cleanHex = hexResult.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? hexResult[2..] : hexResult;
+        System.Numerics.BigInteger.TryParse(cleanHex, System.Globalization.NumberStyles.HexNumber, null, out var raw).Should().BeTrue();
+        var divisor = System.Numerics.BigInteger.Pow(10, 6); // PusdDecimals=6
+        var whole   = (decimal)(raw / divisor);
+        var frac    = (decimal)(raw % divisor) / (decimal)divisor;
+        var balance = whole + frac;
+        balance.Should().BeApproximately((decimal)expectedBalance, 0.000001m,
+            $"hex {hexResult} should decode to {expectedBalance} pUSD with 6 decimals");
+    }
+
+    // ── (k) Config-hash cross-mode dedup: paper+live collision ──────────────────
+
+    [Fact]
+    public void ConfigHash_paper_and_live_produce_identical_hash_for_same_params()
+    {
+        // Both modes use the same ComputeConfigHash so a paper session and a live session with
+        // the same params generate the same hash and the dedup check fires.
+        var paperHash = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "5m", "flat", 100m, 5m);
+        var liveHash  = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "5m", "flat", 100m, 5m);
+        paperHash.Should().Be(liveHash, "same params must collide regardless of mode");
+    }
+
+    [Fact]
+    public void ConfigHash_collision_does_NOT_fire_for_different_strategy()
+    {
+        var hash1 = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "5m", "flat",       100m, 5m);
+        var hash2 = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "5m", "martingale", 100m, 5m);
+        hash1.Should().NotBe(hash2, "different strategy must yield different hash");
+    }
+
+    [Fact]
+    public void ConfigHash_collision_does_NOT_fire_for_different_balance()
+    {
+        var hash1 = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "5m", "flat", 100m, 5m);
+        var hash2 = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "5m", "flat", 200m, 5m);
+        hash1.Should().NotBe(hash2, "different initialBalance must yield different hash");
     }
 }

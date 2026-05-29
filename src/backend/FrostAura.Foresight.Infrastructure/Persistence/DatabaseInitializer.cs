@@ -510,6 +510,19 @@ public static class DatabaseInitializer
             CREATE INDEX IF NOT EXISTS ix_account_ledger_tenant_venue_created
                 ON account_ledger (""TenantId"", ""Venue"", ""CreatedAt"");
 
+            -- Phase E2: config_hash cross-mode dedup on paper_sessions ----------------------
+            -- Mirrors the config_hash column on live_sessions so a single query can check
+            -- whether a paper and a live session with the same config are both active (409).
+            ALTER TABLE paper_sessions
+                ADD COLUMN IF NOT EXISTS ""ConfigHash"" varchar(64) NULL;
+            -- Partial unique index: one active paper session per config hash. NULL hashes (legacy rows)
+            -- are excluded from the uniqueness check (IS NOT DISTINCT FROM NULL would group all NULLs).
+            -- PostgreSQL partial indexes with a NULL-column predicate: use WHERE ""ConfigHash"" IS NOT NULL
+            -- so legacy rows remain unrestricted while new rows are deduped.
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_paper_sessions_active_config
+                ON paper_sessions (""ConfigHash"")
+                WHERE ""StoppedAt"" IS NULL AND ""ConfigHash"" IS NOT NULL;
+
             -- Workstream F: custom DAG strategies -------------------------------------------
             -- Mirrors the models table pattern: partial unique indexes keep tenant vs built-in
             -- name scoping clean. Definition is jsonb (strategy-kind FlowDefinition); Params is

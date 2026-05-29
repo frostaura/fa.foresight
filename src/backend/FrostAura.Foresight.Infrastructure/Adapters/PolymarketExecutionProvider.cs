@@ -205,8 +205,157 @@ public sealed class PolymarketExecutionProvider : IExecutionProvider
         }
     }
 
+    public async Task<OrderReceipt?> SellAsync(SellRequest request, CancellationToken ct)
+    {
+        if (!_opts.LiveTrading)
+        {
+            _logger.LogWarning("[BLOCKED] PolymarketExecutionProvider.SellAsync invoked with LiveTrading=false — refusing to place a live SELL order.");
+            return null;
+        }
+
+        var address = await EnsureAddressAsync(ct);
+        var creds   = await EnsureCredsAsync(ct);
+
+        var info    = await _marketInfo.GetMarketInfoAsync(request.MarketExternalId, ct);
+        var tokenId = request.Side == OrderSide.Yes ? info.YesTokenId : info.NoTokenId;
+
+        // SELL V2 amounts: makerAmount=floor(size*1e6), takerAmount=floor(price*size*1e6).
+        var rawPrice = decimal.Round(request.LimitPrice, 4, MidpointRounding.ToZero);
+        var amounts  = OrderMath.SizeSell(rawPrice, request.QuantityShares, info.Mts, info.Mos);
+        if (amounts is null)
+        {
+            _logger.LogWarning("SELL order skipped: size {Qty} below min-order-size {Mos} or price rounded to zero on {Market}",
+                request.QuantityShares, info.Mos, request.MarketExternalId);
+            return null;
+        }
+
+        var salt      = Random.Shared.NextInt64(1, long.MaxValue).ToString(CultureInfo.InvariantCulture);
+        var tsMs      = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
+        var makerAddr = string.IsNullOrWhiteSpace(_keyOpts.Funder) ? address : _keyOpts.Funder;
+
+        var order = new ClobV2Order
+        {
+            Salt          = salt,
+            Maker         = makerAddr,
+            Signer        = address,
+            TokenId       = tokenId,
+            MakerAmount   = amounts.MakerAmount.ToString(CultureInfo.InvariantCulture),
+            TakerAmount   = amounts.TakerAmount.ToString(CultureInfo.InvariantCulture),
+            Side          = 1, // SELL = 1 (uint8 in struct)
+            SignatureType = _keyOpts.SignatureType,
+            Timestamp     = tsMs
+        };
+
+        var typedDataJson = order.ToEip712Json(info.NegRisk);
+        var signature     = await _vault.SignTypedDataAsync(typedDataJson, ct);
+
+        var bodyObj = new
+        {
+            order = new
+            {
+                salt          = order.Salt,
+                maker         = order.Maker,
+                signer        = order.Signer,
+                tokenId       = order.TokenId,
+                makerAmount   = order.MakerAmount,
+                takerAmount   = order.TakerAmount,
+                side          = "SELL",   // string in body
+                signatureType = order.SignatureType,
+                timestamp     = order.Timestamp,
+                metadata      = order.Metadata,
+                builder       = order.Builder,
+                signature
+            },
+            owner     = creds.ApiKey,
+            orderType = "GTC"
+        };
+        var body = JsonSerializer.Serialize(bodyObj);
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, "order")
+            { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+        AddL2Headers(req, creds, address, "POST", "/order", body);
+
+        using var resp = await _http.SendAsync(req, ct);
+        var respBody = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            _logger.LogError("Polymarket V2 SELL order failed: {Status} {Body}", resp.StatusCode, respBody);
+            throw new HttpRequestException($"Polymarket V2 SELL order {(int)resp.StatusCode}: {respBody}");
+        }
+
+        var parsed  = JsonSerializer.Deserialize<OrderPostResponse>(respBody);
+        var orderId = parsed?.OrderId ?? parsed?.OrderHashes?.FirstOrDefault() ?? $"clob-sell-{salt}";
+        _logger.LogInformation("Polymarket V2 SELL order accepted: {OrderId}", orderId);
+        var state = new OrderState(orderId, request.Side, request.QuantityShares, 0m, amounts.TickPrice, OrderStatus.Pending, DateTimeOffset.UtcNow);
+        return new OrderReceipt(orderId, state);
+    }
+
     public Task<IReadOnlyList<PositionState>> GetOpenPositionsAsync(CancellationToken ct)
         => Task.FromResult<IReadOnlyList<PositionState>>(Array.Empty<PositionState>());
+
+    /// <summary>
+    /// Query the market's own resolution status from the Polymarket data API.
+    /// Endpoint: GET https://clob.polymarket.com/markets/{conditionId}
+    /// The market is resolved when resolved=true; winningOutcomeIndex follows Polymarket CTF convention
+    /// (0 = Yes, 1 = No).
+    /// Always returns null gracefully on network/parse error or when LiveTrading is disarmed — the caller
+    /// treats null as "not resolved yet" and falls back to the candle-proxy settlement.
+    /// </summary>
+    public async Task<MarketResolution?> GetMarketResolutionAsync(string conditionId, CancellationToken ct)
+    {
+        try
+        {
+            var url  = $"{_opts.ClobBaseUrl.TrimEnd('/')}/markets/{Uri.EscapeDataString(conditionId)}";
+            using var resp = await _http.GetAsync(url, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("GetMarketResolution: CLOB /markets/{ConditionId} returned {Status}", conditionId, resp.StatusCode);
+                return null;
+            }
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            return ParseResolution(conditionId, body);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "GetMarketResolution failed for {ConditionId} — degrading to null (not resolved)", conditionId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Parse resolution status from a CLOB /markets/{id} JSON response.
+    /// Fields: resolved (bool), outcome (string "Yes"/"No"/null), tokens array for index mapping.
+    /// Internal (testable) — kept internal for offline test coverage.
+    /// </summary>
+    internal static MarketResolution? ParseResolution(string conditionId, string json)
+    {
+        try
+        {
+            using var doc  = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            // Polymarket CLOB: "resolved" is a bool.
+            var resolved = root.TryGetProperty("resolved", out var resolvedEl) && resolvedEl.ValueKind == JsonValueKind.True;
+            if (!resolved)
+                return new MarketResolution(conditionId, Resolved: false, WinningOutcomeIndex: null);
+
+            // "outcome" is a string: "Yes" | "No" (present when resolved=true).
+            int? winningIdx = null;
+            if (root.TryGetProperty("outcome", out var outcomeEl) && outcomeEl.ValueKind == JsonValueKind.String)
+            {
+                var outcome = outcomeEl.GetString() ?? "";
+                winningIdx = string.Equals(outcome, "Yes", StringComparison.OrdinalIgnoreCase) ? 0 :
+                             string.Equals(outcome, "No",  StringComparison.OrdinalIgnoreCase) ? 1 : null;
+            }
+
+            return new MarketResolution(conditionId, Resolved: true, WinningOutcomeIndex: winningIdx);
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     // ── L1 auth — derive CLOB API credentials ────────────────────────────────────
 

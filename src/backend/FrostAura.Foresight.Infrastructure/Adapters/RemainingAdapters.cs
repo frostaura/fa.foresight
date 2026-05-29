@@ -21,6 +21,13 @@ public sealed class NullExecutionProvider : IExecutionProvider
         return Task.FromResult(new OrderReceipt(orderId, state));
     }
 
+    public Task<OrderReceipt?> SellAsync(SellRequest request, CancellationToken ct)
+    {
+        _logger.LogInformation("[SHADOW] would SELL {Side} {Qty}@{Price} on {Mkt} (tenant {Tenant})",
+            request.Side, request.QuantityShares, request.LimitPrice, request.MarketExternalId, request.TenantId);
+        return Task.FromResult<OrderReceipt?>(null); // disarmed — shadow logs only
+    }
+
     public Task<OrderState> GetOrderStateAsync(string orderId, CancellationToken ct)
         => Task.FromResult(new OrderState(orderId, OrderSide.Yes, 0m, 0m, 0m, OrderStatus.Pending, DateTimeOffset.UtcNow));
 
@@ -28,6 +35,9 @@ public sealed class NullExecutionProvider : IExecutionProvider
 
     public Task<IReadOnlyList<PositionState>> GetOpenPositionsAsync(CancellationToken ct)
         => Task.FromResult<IReadOnlyList<PositionState>>(Array.Empty<PositionState>());
+
+    public Task<MarketResolution?> GetMarketResolutionAsync(string conditionId, CancellationToken ct)
+        => Task.FromResult<MarketResolution?>(null); // shadow — always "not resolved yet"
 }
 
 public sealed class KeyVaultOptions

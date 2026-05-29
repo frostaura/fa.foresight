@@ -105,6 +105,22 @@ public sealed class PaperTradingService : IPaperTradingService
             resolvedStrategy = StakingStrategies.Resolve(strategyId).Id;
         label ??= "";
 
+        // Compute the config hash (same algorithm as LiveSessionEngine, venue always "polymarket").
+        var configHash = LiveSessionEngine.ComputeConfigHash("polymarket", symbol, interval, resolvedStrategy, initialBalance, initialBetSize);
+
+        // Cross-mode dedup: reject if an active live session or another active paper session has
+        // the same config hash. This prevents running equivalent paper + live sessions concurrently
+        // (which would produce misleading P&L comparison data) and guards against double-start.
+        var liveConflict = await _db.LiveSessions
+            .AnyAsync(s => s.TenantId == _tenant.TenantId!.Value && s.ConfigHash == configHash && s.StoppedAt == null, ct);
+        if (liveConflict)
+            throw new InvalidOperationException($"An active live session with this configuration already exists (config_hash={configHash}). Stop it before starting a paper session with the same settings. [409]");
+
+        var paperHashConflict = await _db.PaperSessions
+            .AnyAsync(s => s.TenantId == _tenant.TenantId!.Value && s.ConfigHash == configHash && s.StoppedAt == null, ct);
+        if (paperHashConflict)
+            throw new InvalidOperationException($"An active paper session with this configuration already exists (config_hash={configHash}). Stop it first. [409]");
+
         // Enforce the partial-unique-index contract (now keyed by label) at the API boundary too, so a
         // duplicate Start returns a clean error rather than a Postgres unique-violation 500. Different
         // labels on the same market are allowed (parallel comparison); same label collides.
@@ -126,6 +142,7 @@ public sealed class PaperTradingService : IPaperTradingService
             InitialBetSize = initialBetSize,
             StrategyId = resolvedStrategy,
             Gated = gated,
+            ConfigHash = configHash,
             CurrentBalance = initialBalance,
             CurrentBetSize = initialBetSize,
             Bust = false

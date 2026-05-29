@@ -33,6 +33,7 @@ public static class DependencyInjection
         services.Configure<PolymarketOptions>(config.GetSection("Polymarket"));
         services.Configure<PolymarketExecutionOptions>(config.GetSection("Polymarket"));
         services.Configure<KeyVaultOptions>(config.GetSection("KeyVault"));
+        services.Configure<Ledger.PolygonOptions>(config.GetSection("Polygon"));
         services.Configure<TelegramBotOptions>(config.GetSection("TelegramBot"));
         services.Configure<DiscordBotOptions>(config.GetSection("DiscordBot"));
 
@@ -227,7 +228,12 @@ public static class DependencyInjection
         services.AddSingleton<Infrastructure.Chaos.IChaosEventHub, Infrastructure.Chaos.ChaosEventHub>();
 
         // Workstream E: live sessions + reservation ledger + venue capabilities.
-        services.AddScoped<IAccountLedger, AccountLedger>();
+        // AccountLedger uses a typed HttpClient for Polygon RPC calls (on-chain pUSD balance).
+        services.AddHttpClient<IAccountLedger, AccountLedger>(c =>
+        {
+            // Base address not set — AccountLedger uses the full RpcUrl from PolygonOptions per call.
+            c.Timeout = TimeSpan.FromSeconds(10);
+        });
         services.AddScoped<ILiveSessionEngine, LiveSessionEngine>();
         services.AddHostedService<LiveSessionProcessorService>();
         services.AddSingleton<IVenueCapabilities, PolymarketBtcCapabilities>();

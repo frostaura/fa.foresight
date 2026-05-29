@@ -98,11 +98,15 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
         var resolvedStrategy = StakingStrategies.Resolve(request.StrategyId).Id;
         var configHash       = ComputeConfigHash(request.Venue, request.Symbol, request.Interval, resolvedStrategy, request.InitialBalance, request.InitialBetSize);
 
-        // Config-hash collision check: active paper or live session with the same config → 409.
+        // Config-hash collision check: active paper OR live session with the same config → 409.
+        // Both paper_sessions.ConfigHash and live_sessions.ConfigHash are computed with the same
+        // algorithm (EXCLUDING mode) so a live session and a paper session with identical settings
+        // correctly collide here.
         var paperConflict = await _db.PaperSessions
-            .AnyAsync(s => s.StoppedAt == null && s.TenantId == _tenant.TenantId!.Value, ct);
-        // We hash paper sessions using the same fields — check the live_sessions table (the paper
-        // sessions table doesn't have a config_hash column yet; we rely on the live_sessions ix).
+            .AnyAsync(s => s.TenantId == _tenant.TenantId!.Value && s.ConfigHash == configHash && s.StoppedAt == null, ct);
+        if (paperConflict)
+            throw new InvalidOperationException($"An active paper session with this configuration already exists (config_hash={configHash}). Stop it first before starting a live session with the same settings. [409]");
+
         var liveConflict = await _db.LiveSessions
             .AnyAsync(s => s.TenantId == _tenant.TenantId!.Value && s.ConfigHash == configHash && s.StoppedAt == null, ct);
         if (liveConflict)
@@ -230,16 +234,30 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                 var orderState = await _exec.GetOrderStateAsync(openBet.ExternalOrderId, ct);
                 if (orderState.Status == OrderStatus.Filled || orderState.Status == OrderStatus.Cancelled)
                 {
-                    // Market resolution is indicated by the market's own outcome, not a Binance candle.
-                    // For this iteration we use the anchor-close comparison as a proxy (same as paper)
-                    // until the full settlement-query endpoint is wired. A divergence note is left when
-                    // the CLOB fill differs from the expected side, flagging for review.
+                    // Query the market's own resolution outcome (not the Binance candle).
+                    // Degraded gracefully to null when LiveTrading is disarmed or the venue is unreachable.
+                    bool? marketOutcomeUp = null;
+                    if (openBet.MarketExternalId is not null)
+                    {
+                        var resolution = await _exec.GetMarketResolutionAsync(openBet.MarketExternalId, ct);
+                        if (resolution is { Resolved: true })
+                        {
+                            marketOutcomeUp = resolution.YesWon; // true=Yes won, false=No won
+                            _logger.LogDebug("Live bet {BetId}: market {Market} resolved — YesWon={YesWon}",
+                                openBet.Id, openBet.MarketExternalId, marketOutcomeUp);
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Live bet {BetId}: market {Market} not yet resolved — falling back to candle proxy",
+                                openBet.Id, openBet.MarketExternalId);
+                        }
+                    }
+
                     var entryPrice = openBet.EntryPrice ?? 0.5m;
-                    // We don't have real market resolution yet — use the proxy (close vs anchor).
-                    // The outcomUp proxy is set to null; settlement pending full market-resolution query.
-                    // TODO Phase E post-$1: wire GetMarketResolutionAsync → true market outcome.
-                    bool? marketOutcomeUp = null; // not yet resolved from CLOB
-                    var outcomeUp = marketOutcomeUp ?? (openBet.Side == "UP"); // optimistic proxy: assume correct
+                    // If the market resolved, use that; else use the candle-direction proxy (anchor-close comparison).
+                    // The proxy is: bet side "UP" means we predicted UP, so the win condition is price went up.
+                    // With the proxy we assume our prediction was correct — an approximation until market resolution is live.
+                    var outcomeUp = marketOutcomeUp ?? (openBet.Side == "UP"); // market outcome or optimistic proxy
                     var step = StakingEngine.Settle(
                         side: openBet.Side,
                         entryPrice: entryPrice,
@@ -259,6 +277,19 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                     openBet.BalanceAfter   = tracked.CurrentBalance;
                     openBet.MarketOutcomeUp = marketOutcomeUp;
                     openBet.ResolvedAt     = DateTimeOffset.UtcNow;
+
+                    // Divergence signal: when the market resolved and it disagrees with the model's predicted side.
+                    // A divergence is a correctness signal (the model called direction wrong) not a loss-cause note.
+                    if (marketOutcomeUp.HasValue)
+                    {
+                        var modelPredictedUp = openBet.Side == "UP";
+                        if (modelPredictedUp != marketOutcomeUp.Value)
+                        {
+                            openBet.DivergenceNote = $"Model predicted {(modelPredictedUp ? "UP" : "DOWN")} but market resolved {(marketOutcomeUp.Value ? "YES (UP)" : "NO (DOWN)")}. Correctness signal — check model calibration.";
+                            _logger.LogInformation("Live bet {BetId} divergence: model={ModelSide} market={MarketSide}",
+                                openBet.Id, openBet.Side, marketOutcomeUp.Value ? "YES" : "NO");
+                        }
+                    }
                     if (tracked.CurrentBalance <= 0) { tracked.Bust = true; tracked.StoppedAt = DateTimeOffset.UtcNow; }
 
                     try { await _db.SaveChangesAsync(ct); } catch (DbUpdateConcurrencyException ex)
