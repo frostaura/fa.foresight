@@ -58,6 +58,7 @@ app.MapModelsEndpoints();
 app.MapBacktestsEndpoints();
 app.MapFlowsEndpoints();
 app.MapChaosEndpoints();
+app.MapGoLiveEndpoints();
 
 app.Run();
 

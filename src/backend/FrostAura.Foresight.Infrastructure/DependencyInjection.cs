@@ -7,6 +7,7 @@ using FrostAura.Foresight.Application.Models;
 using FrostAura.Foresight.Application.Tenancy;
 using FrostAura.Foresight.Domain.Ports;
 using FrostAura.Foresight.Infrastructure.Adapters;
+using FrostAura.Foresight.Infrastructure.Ledger;
 using FrostAura.Foresight.Infrastructure.Live;
 using FrostAura.Foresight.Infrastructure.Markets;
 using FrostAura.Foresight.Infrastructure.Paper;
@@ -54,6 +55,7 @@ public static class DependencyInjection
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("polymarket-clob"),
                 sp.GetRequiredService<IKeyVault>(),
                 sp.GetRequiredService<IOptions<PolymarketExecutionOptions>>(),
+                sp.GetRequiredService<IOptions<KeyVaultOptions>>(),
                 sp.GetRequiredService<ILogger<PolymarketExecutionProvider>>()));
         }
         else
@@ -208,6 +210,12 @@ public static class DependencyInjection
         // Workstream D: chaos/bust test engine.
         services.AddScoped<IChaosService, Infrastructure.Chaos.ChaosService>();
         services.AddSingleton<Infrastructure.Chaos.IChaosEventHub, Infrastructure.Chaos.ChaosEventHub>();
+
+        // Workstream E: live sessions + reservation ledger + venue capabilities.
+        services.AddScoped<IAccountLedger, AccountLedger>();
+        services.AddScoped<ILiveSessionEngine, LiveSessionEngine>();
+        services.AddHostedService<LiveSessionProcessorService>();
+        services.AddSingleton<IVenueCapabilities, PolymarketBtcCapabilities>();
 
         return services;
     }

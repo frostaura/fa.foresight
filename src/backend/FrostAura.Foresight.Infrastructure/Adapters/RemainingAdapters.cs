@@ -38,6 +38,19 @@ public sealed class KeyVaultOptions
     /// uses the LocalKeyVault stub and cannot sign. Supplied only via secret/env, never committed.</summary>
     public string PrivateKey { get; set; } = "";
 
+    /// <summary>
+    /// Polymarket EIP-712 signatureType field:
+    ///   0 = EOA (default), 1 = POLY_PROXY, 2 = POLY_GNOSIS_SAFE.
+    /// Configurable so a proxy wallet can be switched in without a code rewrite.
+    /// </summary>
+    public int SignatureType { get; set; } = 0;
+
+    /// <summary>
+    /// Optional funder/maker address override. When null the signing EOA is used as maker.
+    /// Set this when using POLY_PROXY or POLY_GNOSIS_SAFE where the funder differs from the signer.
+    /// </summary>
+    public string? Funder { get; set; } = null;
+
     public bool HasKey => !string.IsNullOrWhiteSpace(PrivateKey);
 }
 

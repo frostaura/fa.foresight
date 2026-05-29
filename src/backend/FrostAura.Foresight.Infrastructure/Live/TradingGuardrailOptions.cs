@@ -41,4 +41,16 @@ public sealed class TradingGuardrailOptions
 
     /// <summary>Don't re-forecast a market more than once within this many hours.</summary>
     public int MinReforecastHours { get; set; } = 12;
+
+    // ── Workstream E: live session guardrails ─────────────────────────────────
+
+    /// <summary>Maximum number of simultaneously active live sessions (not paper) per tenant.</summary>
+    public int MaxConcurrentLiveSessions { get; set; } = 2;
+
+    /// <summary>
+    /// Per-session drawdown fraction that trips the session circuit breaker and auto-stops.
+    /// Default 0.50 = stop when the session has lost 50% of its initial balance.
+    /// </summary>
+    public decimal SessionDrawdownCircuitBreakerPct { get; set; } = 0.50m;
+
 }

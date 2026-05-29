@@ -2,6 +2,7 @@ using System.Text.Json;
 using FrostAura.Foresight.Domain.Backtesting;
 using FrostAura.Foresight.Domain.Bankroll;
 using FrostAura.Foresight.Domain.Chaos;
+using FrostAura.Foresight.Domain.Ledger;
 using FrostAura.Foresight.Domain.Live;
 using FrostAura.Foresight.Domain.MarketData;
 using FrostAura.Foresight.Domain.Markets;
@@ -36,6 +37,9 @@ public sealed class ForesightDbContext : DbContext
     public DbSet<VenueMarketPrice> VenueMarketPrices => Set<VenueMarketPrice>();
     public DbSet<ChaosRun> ChaosRuns => Set<ChaosRun>();
     public DbSet<ChaosSample> ChaosSamples => Set<ChaosSample>();
+    public DbSet<LiveSession> LiveSessions => Set<LiveSession>();
+    public DbSet<LiveBet> LiveBets => Set<LiveBet>();
+    public DbSet<AccountLedgerEntry> AccountLedger => Set<AccountLedgerEntry>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -325,6 +329,75 @@ public sealed class ForesightDbContext : DbContext
             b.Property(s => s.FinalBalance).HasColumnType("numeric(20,4)");
             b.Property(s => s.MaxDrawdown).HasColumnType("numeric(20,4)");
             b.HasIndex(s => s.ChaosRunId);
+        });
+
+        // ── Workstream E: live sessions ───────────────────────────────────────────
+
+        mb.Entity<LiveSession>(b =>
+        {
+            b.ToTable("live_sessions");
+            b.HasKey(s => s.Id);
+            b.Property(s => s.Symbol).HasMaxLength(20).IsRequired();
+            b.Property(s => s.Interval).HasMaxLength(10).IsRequired();
+            b.Property(s => s.Venue).HasMaxLength(60).IsRequired();
+            b.Property(s => s.Mode).HasMaxLength(10).IsRequired();
+            b.Property(s => s.ConfigHash).HasMaxLength(64).IsRequired();
+            b.Property(s => s.StrategyId).HasMaxLength(32).IsRequired();
+            b.Property(s => s.InitialBalance).HasColumnType("numeric(20,4)");
+            b.Property(s => s.InitialBetSize).HasColumnType("numeric(20,4)");
+            b.Property(s => s.CurrentBalance).HasColumnType("numeric(20,4)");
+            b.Property(s => s.CurrentBetSize).HasColumnType("numeric(20,4)");
+            b.Property(s => s.PeakBorrowed).HasColumnType("numeric(20,4)");
+            b.Property(s => s.ReservedAmount).HasColumnType("numeric(20,4)");
+            // Partial unique index on config_hash: only one active session with the same hash at a time
+            // (paper OR live — both count). Stopped sessions may reuse the same config.
+            b.HasIndex(s => s.ConfigHash)
+                .IsUnique()
+                .HasFilter("\"StoppedAt\" IS NULL");
+            b.HasIndex(s => new { s.TenantId, s.StartedAt });
+            b.HasMany(s => s.Bets)
+                .WithOne()
+                .HasForeignKey(x => x.SessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<LiveBet>(b =>
+        {
+            b.ToTable("live_bets");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Side).HasMaxLength(4).IsRequired();
+            b.Property(x => x.Outcome).HasMaxLength(8);
+            b.Property(x => x.PredictedProbUp).HasColumnType("numeric(6,5)");
+            b.Property(x => x.AnchorClose).HasColumnType("numeric(20,8)");
+            b.Property(x => x.Size).HasColumnType("numeric(20,4)");
+            b.Property(x => x.BalanceBefore).HasColumnType("numeric(20,4)");
+            b.Property(x => x.Payout).HasColumnType("numeric(20,4)");
+            b.Property(x => x.BalanceAfter).HasColumnType("numeric(20,4)");
+            b.Property(x => x.EntryPrice).HasColumnType("numeric(8,5)");
+            b.Property(x => x.Shares).HasColumnType("numeric(18,6)");
+            b.Property(x => x.MarketExternalId).HasMaxLength(200);
+            b.Property(x => x.ExternalOrderId).HasMaxLength(200);
+            b.Property(x => x.DivergenceNote).HasMaxLength(2000);
+            b.Property(x => x.NotesJson).HasColumnType("jsonb");
+            // Idempotency: never two bets on the same candle within a session.
+            b.HasIndex(x => new { x.SessionId, x.TargetOpenTime }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.SessionId, x.Resolved });
+        });
+
+        // ── Workstream E: account reservation ledger (append-only) ───────────────
+
+        mb.Entity<AccountLedgerEntry>(b =>
+        {
+            b.ToTable("account_ledger");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Venue).HasMaxLength(60).IsRequired();
+            b.Property(x => x.EntryKind).HasMaxLength(20).IsRequired();
+            b.Property(x => x.Amount).HasColumnType("numeric(20,6)");
+            b.Property(x => x.WalletPusd).HasColumnType("numeric(20,6)");
+            b.Property(x => x.FreeAfter).HasColumnType("numeric(20,6)");
+            b.Property(x => x.Drift).HasColumnType("numeric(20,6)");
+            b.Property(x => x.Note).HasColumnType("jsonb");
+            b.HasIndex(x => new { x.TenantId, x.Venue, x.CreatedAt });
         });
     }
 }

@@ -437,6 +437,83 @@ public static class DatabaseInitializer
                 ""CompletedAt"" = NOW(),
                 ""Error"" = COALESCE(NULLIF(""Error"", ''), 'Interrupted by backend restart')
             WHERE ""Status"" = 'running';
+
+            -- Workstream E: live sessions + live bets --------------------------------
+            CREATE TABLE IF NOT EXISTS live_sessions (
+                ""Id""               uuid PRIMARY KEY,
+                ""TenantId""         uuid NOT NULL,
+                ""Symbol""           varchar(20) NOT NULL,
+                ""Interval""         varchar(10) NOT NULL,
+                ""Venue""            varchar(60) NOT NULL DEFAULT 'polymarket',
+                ""Mode""             varchar(10) NOT NULL DEFAULT 'live',
+                ""ConfigHash""       varchar(64) NOT NULL,
+                ""StartedAt""        timestamptz NOT NULL,
+                ""StoppedAt""        timestamptz NULL,
+                ""InitialBalance""   numeric(20,4) NOT NULL,
+                ""InitialBetSize""   numeric(20,4) NOT NULL,
+                ""StrategyId""       varchar(32) NOT NULL DEFAULT 'flat',
+                ""Gated""            boolean NOT NULL DEFAULT false,
+                ""CurrentBalance""   numeric(20,4) NOT NULL,
+                ""CurrentBetSize""   numeric(20,4) NOT NULL,
+                ""Bust""             boolean NOT NULL DEFAULT false,
+                ""ZeroCrossingsCount"" int NOT NULL DEFAULT 0,
+                ""PeakBorrowed""     numeric(20,4) NOT NULL DEFAULT 0,
+                ""ReservedAmount""   numeric(20,4) NOT NULL DEFAULT 0,
+                ""LastProcessedAt""  timestamptz NULL
+            );
+            -- Only one active session per config hash (paper OR live dedup).
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_live_sessions_active_config
+                ON live_sessions (""ConfigHash"")
+                WHERE ""StoppedAt"" IS NULL;
+            CREATE INDEX IF NOT EXISTS ix_live_sessions_tenant_started
+                ON live_sessions (""TenantId"", ""StartedAt"");
+
+            CREATE TABLE IF NOT EXISTS live_bets (
+                ""Id""               uuid PRIMARY KEY,
+                ""TenantId""         uuid NOT NULL,
+                ""SessionId""        uuid NOT NULL REFERENCES live_sessions(""Id"") ON DELETE CASCADE,
+                ""TargetOpenTime""   bigint NOT NULL,
+                ""Side""             varchar(4) NOT NULL,
+                ""PredictedProbUp""  numeric(6,5) NOT NULL,
+                ""AnchorClose""      numeric(20,8) NOT NULL,
+                ""Size""             numeric(20,4) NOT NULL,
+                ""BalanceBefore""    numeric(20,4) NOT NULL,
+                ""PlacedAt""         timestamptz NOT NULL,
+                ""ExternalOrderId""  varchar(200) NULL,
+                ""Resolved""         boolean NOT NULL DEFAULT false,
+                ""Outcome""          varchar(8) NULL,
+                ""Payout""           numeric(20,4) NULL,
+                ""BalanceAfter""     numeric(20,4) NULL,
+                ""ResolvedAt""       timestamptz NULL,
+                ""MarketOutcomeUp""  boolean NULL,
+                ""EntryPrice""       numeric(8,5) NULL,
+                ""Shares""           numeric(18,6) NULL,
+                ""DivergenceNote""   varchar(2000) NULL,
+                ""NotesJson""        jsonb NULL,
+                ""MarketExternalId"" varchar(200) NULL
+            );
+            -- Idempotency: one bet per candle per session.
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_live_bets_session_target
+                ON live_bets (""SessionId"", ""TargetOpenTime"");
+            CREATE INDEX IF NOT EXISTS ix_live_bets_tenant_open
+                ON live_bets (""TenantId"", ""SessionId"", ""Resolved"");
+
+            -- Workstream E: account reservation ledger (append-only audit) -----------
+            CREATE TABLE IF NOT EXISTS account_ledger (
+                ""Id""         uuid PRIMARY KEY,
+                ""TenantId""   uuid NOT NULL,
+                ""Venue""      varchar(60) NOT NULL,
+                ""EntryKind""  varchar(20) NOT NULL,
+                ""SessionId""  uuid NULL,
+                ""Amount""     numeric(20,6) NOT NULL DEFAULT 0,
+                ""WalletPusd"" numeric(20,6) NOT NULL DEFAULT 0,
+                ""FreeAfter""  numeric(20,6) NOT NULL DEFAULT 0,
+                ""Drift""      numeric(20,6) NULL,
+                ""Note""       jsonb NULL,
+                ""CreatedAt""  timestamptz NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_account_ledger_tenant_venue_created
+                ON account_ledger (""TenantId"", ""Venue"", ""CreatedAt"");
         ", ct);
 
         // Seed default tenant if none exists.
