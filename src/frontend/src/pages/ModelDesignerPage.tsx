@@ -1,6 +1,10 @@
 import { useNavigate, useParams } from "react-router-dom";
 import FlowDesigner from "../components/FlowDesigner";
-import { useListModelsQuery } from "../store/api";
+import {
+  useGetNodeCatalogueQuery,
+  useListModelsQuery,
+  useUpdateModelMutation,
+} from "../store/api";
 
 /**
  * Full-page route for the model flow designer.
@@ -16,9 +20,12 @@ import { useListModelsQuery } from "../store/api";
 export default function ModelDesignerPage() {
   const { modelId } = useParams<{ modelId: string }>();
   const navigate = useNavigate();
-  const { data: models, isLoading } = useListModelsQuery();
+  const { data: models, isLoading: modelsLoading } = useListModelsQuery();
+  const { data: catalogue, isLoading: catalogueLoading } = useGetNodeCatalogueQuery();
+  const [updateModel] = useUpdateModelMutation();
 
   const model = models?.find((m) => m.id === modelId);
+  const isLoading = modelsLoading || catalogueLoading;
 
   if (isLoading) {
     return (
@@ -42,9 +49,24 @@ export default function ModelDesignerPage() {
     );
   }
 
+  const headerLabel = `${model.name}${
+    model.kind === "llm" ? " · LLM model" : " · Deterministic model"
+  }${model.supportsBacktesting ? " · backtestable" : " · live-only"}`;
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <FlowDesigner model={model} onClose={() => navigate("/models")} />
+      <FlowDesigner
+        title={headerLabel}
+        definitionJson={model.definition}
+        isBuiltIn={model.isBuiltIn}
+        catalogue={catalogue ?? {}}
+        entityKind="model"
+        onSave={async (defJson) => {
+          await updateModel({ id: model.id, body: { definition: defJson } }).unwrap();
+          navigate("/models");
+        }}
+        onClose={() => navigate("/models")}
+      />
     </div>
   );
 }

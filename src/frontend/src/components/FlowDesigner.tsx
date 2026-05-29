@@ -14,65 +14,94 @@ import ReactFlow, {
   useReactFlow
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { AlertTriangle, Loader2, Play, Save, Terminal, X } from "lucide-react";
+import { AlertTriangle, Code2, Layout, Loader2, Play, Save, Terminal, X } from "lucide-react";
 import { cn } from "../lib/cn";
 import {
-  useGetNodeCatalogueQuery,
   useRunFlowNodeMutation,
-  useUpdateModelMutation,
   type FlowDefinition,
   type FlowEdge,
   type FlowNode,
-  type Model,
   type NodeCatalogueEntry
 } from "../store/api";
 
 /**
- * Visual flow designer — the canvas users build prediction models in. Layered on reactflow:
- * one custom node component per category (data / indicator / feature / compute / model /
- * aggregator / output), source-driven from the server's NodeRegistry.GetCatalogueDescriptor()
- * so adding a new IFlowNode in the backend automatically surfaces in the palette without
- * frontend changes.
+ * Generic FlowDesigner — serves both model and strategy DAG authoring.
  *
- * The canvas is read-only for built-in models (the seeded "Foresight Default LLM" — users
- * duplicate it to edit). Editable models support drag-and-drop adds from the left palette,
- * edge drawing between port handles, per-node params editing in the right sidebar, and an
- * AI assistant chat at the bottom of the sidebar that emits structured diffs the user can
- * preview and apply.
+ * Props:
+ *   title        — display name in the header strip
+ *   definitionJson — the raw JSON string of the FlowDefinition (source of truth)
+ *   isBuiltIn    — when true the canvas and code view are both read-only
+ *   catalogue    — the NodeCatalogueEntry registry (from useGetNodeCatalogueQuery)
+ *   onSave       — called with the serialized FlowDefinition JSON; async or sync
+ *   onClose      — called when the user clicks "Back"
+ *   entityKind   — "model" | "strategy"; gates model-only features (run-node sandbox)
  *
- * The flow definition is the source of truth — reactflow nodes/edges are derived from
- * (and synced back to) the parsed JSON. Save serializes back to the API.
+ * Dual-view (Design ↔ Code):
+ *   Design = ReactFlow canvas (unchanged behavior).
+ *   Code   = editable <textarea> showing pretty-printed FlowDefinition JSON.
+ *   Switching Design→Code serializes via rfToDefinition; Code→Design parses and rebuilds.
+ *   Invalid JSON shows an inline error and keeps the user in Code view.
+ *   Save from either view: Code view validates first; blocks save on invalid JSON.
+ *
+ * Auto-layout:
+ *   Applied when saved positions are missing or any two nodes overlap.
+ *   Left-to-right layered layout (depth = longest-path from source).
+ *   fitView ensures the graph is framed nicely on load.
  */
-/**
- * FlowDesigner — renders inside the normal app layout (no portal, no fixed overlay).
- * The parent page is responsible for giving it a full-height flex container.
- */
-export default function FlowDesigner({ model, onClose }: { model: Model; onClose: () => void }) {
+
+// ── Public props shape ─────────────────────────────────────────────────────────────────────────
+
+export interface FlowDesignerProps {
+  title: string;
+  definitionJson: string;
+  isBuiltIn: boolean;
+  catalogue: Record<string, NodeCatalogueEntry>;
+  onSave: (definitionJson: string) => Promise<void> | void;
+  onClose: () => void;
+  entityKind: "model" | "strategy";
+}
+
+export default function FlowDesigner(props: FlowDesignerProps) {
   return (
     <ReactFlowProvider>
-      <DesignerInner model={model} onClose={onClose} />
+      <DesignerInner {...props} />
     </ReactFlowProvider>
   );
 }
 
-function DesignerInner({ model, onClose }: { model: Model; onClose: () => void }) {
-  const { data: catalogue } = useGetNodeCatalogueQuery();
-  const [updateModel, { isLoading: isSaving }] = useUpdateModelMutation();
+// ── Inner component (needs ReactFlowProvider context) ──────────────────────────────────────────
+
+type ViewMode = "design" | "code";
+
+function DesignerInner({
+  title,
+  definitionJson,
+  isBuiltIn,
+  catalogue,
+  onSave,
+  onClose,
+  entityKind,
+}: FlowDesignerProps) {
   const [runNode, { isLoading: isRunning }] = useRunFlowNodeMutation();
   const [error, setError] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [runOutput, setRunOutput] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
-  // Parse the current flow definition once on mount + when it changes (e.g. after assistant apply).
+  // Dual-view state
+  const [viewMode, setViewMode] = useState<ViewMode>("design");
+  const [codeText, setCodeText] = useState<string>("");
+  const [codeError, setCodeError] = useState<string | null>(null);
+
+  // Parse the current flow definition once on mount + when it changes.
   const initialDef = useMemo<FlowDefinition | null>(() => {
-    try { return JSON.parse(model.definition); } catch { return null; }
-  }, [model.definition]);
+    try { return JSON.parse(definitionJson); } catch { return null; }
+  }, [definitionJson]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(definitionToRfNodes(initialDef, catalogue));
   const [edges, setEdges, onEdgesChange] = useEdgesState(definitionToRfEdges(initialDef));
   const { project } = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
-  const isBuiltIn = model.isBuiltIn;
 
   useEffect(() => {
     if (initialDef && catalogue) {
@@ -80,6 +109,38 @@ function DesignerInner({ model, onClose }: { model: Model; onClose: () => void }
       setEdges(definitionToRfEdges(initialDef));
     }
   }, [initialDef, catalogue, setNodes, setEdges]);
+
+  // ── View-mode switching ──────────────────────────────────────────────────────────────────────
+
+  const switchToCode = useCallback(() => {
+    // Serialize current canvas state into the code textarea
+    const def = rfToDefinition(nodes, edges, initialDef ?? defaultFlowSkeleton());
+    setCodeText(JSON.stringify(def, null, 2));
+    setCodeError(null);
+    setViewMode("code");
+  }, [nodes, edges, initialDef]);
+
+  const switchToDesign = useCallback(() => {
+    // Parse and validate code text before switching
+    try {
+      const parsed = JSON.parse(codeText) as FlowDefinition;
+      setNodes(definitionToRfNodes(parsed, catalogue));
+      setEdges(definitionToRfEdges(parsed));
+      setCodeError(null);
+      setViewMode("design");
+    } catch (e) {
+      setCodeError(`Invalid JSON: ${(e as Error).message}`);
+      // Stay in code view — do not switch
+    }
+  }, [codeText, catalogue, setNodes, setEdges]);
+
+  const handleViewToggle = (next: ViewMode) => {
+    if (next === viewMode) return;
+    if (next === "code") switchToCode();
+    else switchToDesign();
+  };
+
+  // ── Edge / drop callbacks ────────────────────────────────────────────────────────────────────
 
   const onConnect = useCallback(
     (params: { source: string | null; target: string | null; sourceHandle: string | null; targetHandle: string | null }) => {
@@ -129,18 +190,41 @@ function DesignerInner({ model, onClose }: { model: Model; onClose: () => void }
     event.dataTransfer.dropEffect = "move";
   }, []);
 
-  const onSave = async () => {
+  // ── Save ─────────────────────────────────────────────────────────────────────────────────────
+
+  const handleSave = async () => {
     if (isBuiltIn) return;
     setError(null);
-    const def = rfToDefinition(nodes, edges, initialDef ?? defaultFlowSkeleton());
+    setCodeError(null);
+
+    let defJson: string;
+
+    if (viewMode === "code") {
+      // Validate code view first
+      try {
+        JSON.parse(codeText); // validate
+        defJson = codeText;
+      } catch (e) {
+        setCodeError(`Invalid JSON — save blocked: ${(e as Error).message}`);
+        return;
+      }
+    } else {
+      const def = rfToDefinition(nodes, edges, initialDef ?? defaultFlowSkeleton());
+      defJson = JSON.stringify(def);
+    }
+
+    setIsSaving(true);
     try {
-      await updateModel({ id: model.id, body: { definition: JSON.stringify(def) } }).unwrap();
-      onClose();
+      await onSave(defJson);
     } catch (e: unknown) {
-      const err = e as { data?: { error?: string } };
-      setError(err.data?.error ?? "Save failed");
+      const err = e as { data?: { error?: string }; message?: string };
+      setError(err.data?.error ?? err.message ?? "Save failed");
+    } finally {
+      setIsSaving(false);
     }
   };
+
+  // ── Node inspector ────────────────────────────────────────────────────────────────────────────
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
   const updateSelectedParams = (nextParams: Record<string, unknown>) => {
@@ -148,9 +232,10 @@ function DesignerInner({ model, onClose }: { model: Model; onClose: () => void }
     setNodes((nds) => nds.map((n) => (n.id === selectedNode.id ? { ...n, data: { ...n.data, params: nextParams } } : n)));
   };
 
-  // Run the currently-selected node through the sandbox sidecar.
+  // ── Run node (model-only) ─────────────────────────────────────────────────────────────────────
+
   const onRunNode = async () => {
-    if (!selectedNode) return;
+    if (!selectedNode || entityKind !== "model") return;
     setRunOutput(null);
     setError(null);
     try {
@@ -173,103 +258,183 @@ function DesignerInner({ model, onClose }: { model: Model; onClose: () => void }
 
   const nodeTypes = useMemo(() => ({ "fa-node": FlowNodeComponent }), []);
 
+  // ── Render ────────────────────────────────────────────────────────────────────────────────────
+
   return (
-    <div
-      className="flex-1 flex min-h-0 overflow-hidden"
-      data-fa-designer
-    >
-      {/* Left: palette + canvas */}
+    <div className="flex-1 flex min-h-0 overflow-hidden" data-fa-designer>
+      {/* Left: palette + canvas/code */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header strip — model name, Save, Back */}
+
+        {/* Header strip */}
         <div className="shrink-0 px-4 sm:px-5 py-3 border-b border-fa-edge flex items-center gap-2 sm:gap-3 bg-fa-ink-2/40 backdrop-blur">
           <div className="min-w-0 flex-1">
-            <h2 className="text-fa-frost-bright text-sm sm:text-base font-light truncate">{model.name}</h2>
-            <div className="text-fa-frost-dim text-[10px] sm:text-[11px] hidden sm:block">
-              {model.kind === "llm" ? "LLM model" : "Deterministic model"} · {model.supportsBacktesting ? "backtestable" : "live-only"}
-              {isBuiltIn && " · read-only (built-in; duplicate to edit)"}
-            </div>
+            <h2 className="text-fa-frost-bright text-sm sm:text-base font-light truncate">{title}</h2>
+            {isBuiltIn && (
+              <div className="text-fa-frost-dim text-[10px] sm:text-[11px] hidden sm:block">
+                read-only (built-in; duplicate to edit)
+              </div>
+            )}
           </div>
+
+          {/* Design | Code toggle */}
+          <div className="shrink-0 flex items-center rounded-md border border-fa-edge bg-fa-glass overflow-hidden">
+            <button
+              onClick={() => handleViewToggle("design")}
+              className={cn(
+                "inline-flex items-center gap-1 px-2.5 py-1 text-xs transition",
+                viewMode === "design"
+                  ? "bg-fa-frost-bright/20 text-fa-frost-bright"
+                  : "text-fa-frost-dim hover:text-fa-frost-bright hover:bg-fa-glass-strong"
+              )}
+            >
+              <Layout className="h-3 w-3" />
+              Design
+            </button>
+            <div className="w-px h-4 bg-fa-edge" />
+            <button
+              onClick={() => handleViewToggle("code")}
+              className={cn(
+                "inline-flex items-center gap-1 px-2.5 py-1 text-xs transition",
+                viewMode === "code"
+                  ? "bg-fa-frost-bright/20 text-fa-frost-bright"
+                  : "text-fa-frost-dim hover:text-fa-frost-bright hover:bg-fa-glass-strong"
+              )}
+            >
+              <Code2 className="h-3 w-3" />
+              Code
+            </button>
+          </div>
+
           <div className="flex items-center gap-2 shrink-0">
             {!isBuiltIn && (
-              <button onClick={onSave} disabled={isSaving}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-fa-frost-bright/20 hover:bg-fa-frost-bright/30 text-fa-frost-bright text-xs border border-fa-frost-bright/30 disabled:opacity-50 disabled:cursor-not-allowed transition">
+              <button
+                onClick={handleSave}
+                disabled={isSaving}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-fa-frost-bright/20 hover:bg-fa-frost-bright/30 text-fa-frost-bright text-xs border border-fa-frost-bright/30 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
                 {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                 Save
               </button>
             )}
-            <button onClick={onClose} data-fa-designer-close
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-dim hover:text-fa-frost-bright text-xs transition">
+            <button
+              onClick={onClose}
+              data-fa-designer-close
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-dim hover:text-fa-frost-bright text-xs transition"
+            >
               <X className="h-3.5 w-3.5" />
               Back
             </button>
           </div>
         </div>
 
-        {/* Canvas row: palette (hidden on mobile) + flow */}
+        {/* Canvas / Code row */}
         <div className="flex-1 flex min-h-0">
-          {/* Palette: hidden at < sm so the canvas gets all horizontal space on mobile. */}
-          {!isBuiltIn && (
+          {/* Palette (design-only, hidden on mobile) */}
+          {!isBuiltIn && viewMode === "design" && (
             <div className="hidden sm:block">
               <NodePalette catalogue={catalogue ?? {}} />
             </div>
           )}
-          <div ref={wrapper} className="flex-1 relative" onDrop={onDrop} onDragOver={onDragOver}>
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onNodeClick={(_e, n) => setSelectedNodeId(n.id)}
-              onPaneClick={() => setSelectedNodeId(null)}
-              nodeTypes={nodeTypes}
-              fitView
-              fitViewOptions={{ padding: 0.15, includeHiddenNodes: false, minZoom: 0.4, maxZoom: 1.2 }}
-              minZoom={0.2}
-              maxZoom={2}
-              defaultEdgeOptions={{
-                type: "smoothstep",
-                animated: true,
-                markerEnd: { type: MarkerType.ArrowClosed, color: "#7CE3B6", width: 16, height: 16 },
-                style: { stroke: "#7CE3B6", strokeWidth: 2, opacity: 0.85 }
-              }}
-              proOptions={{ hideAttribution: true }}
-              nodesDraggable={!isBuiltIn}
-              nodesConnectable={!isBuiltIn}
-              elementsSelectable
-            >
-              <Background gap={20} size={1} color="#1d2c43" />
-              <Controls showInteractive={false} />
-            </ReactFlow>
-            {error && (
-              <div className="absolute bottom-3 left-3 right-3 flex items-start gap-2 p-3 rounded-md border border-rose-300/30 bg-rose-300/5 text-rose-300 text-xs">
-                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                <pre className="whitespace-pre-wrap font-mono">{error}</pre>
-              </div>
-            )}
-          </div>
+
+          {viewMode === "design" ? (
+            /* ── Design view ── */
+            <div ref={wrapper} className="flex-1 relative" onDrop={onDrop} onDragOver={onDragOver}>
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                onNodeClick={(_e, n) => setSelectedNodeId(n.id)}
+                onPaneClick={() => setSelectedNodeId(null)}
+                nodeTypes={nodeTypes}
+                fitView
+                fitViewOptions={{ padding: 0.15, includeHiddenNodes: false, minZoom: 0.4, maxZoom: 1.2 }}
+                minZoom={0.2}
+                maxZoom={2}
+                defaultEdgeOptions={{
+                  type: "smoothstep",
+                  animated: true,
+                  markerEnd: { type: MarkerType.ArrowClosed, color: "#7CE3B6", width: 16, height: 16 },
+                  style: { stroke: "#7CE3B6", strokeWidth: 2, opacity: 0.85 }
+                }}
+                proOptions={{ hideAttribution: true }}
+                nodesDraggable={!isBuiltIn}
+                nodesConnectable={!isBuiltIn}
+                elementsSelectable
+              >
+                <Background gap={20} size={1} color="#1d2c43" />
+                <Controls showInteractive={false} />
+              </ReactFlow>
+              {error && (
+                <div className="absolute bottom-3 left-3 right-3 flex items-start gap-2 p-3 rounded-md border border-rose-300/30 bg-rose-300/5 text-rose-300 text-xs">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <pre className="whitespace-pre-wrap font-mono">{error}</pre>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* ── Code view ── */
+            <div className="flex-1 flex flex-col min-h-0 relative">
+              <textarea
+                className={cn(
+                  "flex-1 w-full resize-none font-mono text-xs leading-relaxed p-4",
+                  "bg-fa-ink text-fa-frost-bright border-0 outline-none focus:outline-none",
+                  "placeholder:text-fa-frost-dim",
+                  isBuiltIn && "opacity-60 cursor-default"
+                )}
+                value={codeText}
+                readOnly={isBuiltIn}
+                onChange={(e) => {
+                  setCodeText(e.target.value);
+                  setCodeError(null);
+                }}
+                spellCheck={false}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                placeholder='{"schemaVersion":1,"nodes":[],"edges":[]}'
+              />
+              {(codeError || error) && (
+                <div className="absolute bottom-3 left-3 right-3 flex items-start gap-2 p-3 rounded-md border border-rose-300/30 bg-rose-300/5 text-rose-300 text-xs">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <pre className="whitespace-pre-wrap font-mono">{codeError ?? error}</pre>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Right: inspector + run panel — hidden on mobile to avoid horizontal overflow on
-          the canvas. At sm+ it slides back in at its usual width. */}
+      {/* Right: inspector + run panel (hidden on mobile) */}
       <div className="hidden sm:flex w-[280px] lg:w-[320px] shrink-0 border-l border-fa-edge bg-fa-ink-2/40 flex-col min-h-0">
         <div className="px-4 py-3 border-b border-fa-edge text-fa-frost-bright text-sm">Inspector</div>
         <div className="flex-1 overflow-y-auto">
-          {selectedNode ? (
-            <NodeInspector node={selectedNode} catalogue={catalogue ?? {}} onChange={updateSelectedParams} disabled={isBuiltIn} />
+          {viewMode === "code" ? (
+            <div className="p-4 text-fa-frost-dim text-xs">
+              Switch to <span className="text-fa-frost-bright">Design</span> view to inspect and edit individual nodes.
+            </div>
+          ) : selectedNode ? (
+            <NodeInspector
+              node={selectedNode}
+              catalogue={catalogue ?? {}}
+              onChange={updateSelectedParams}
+              disabled={isBuiltIn}
+            />
           ) : (
             <div className="p-4 text-fa-frost-dim text-xs">Select a node to edit its params.</div>
           )}
         </div>
-        {/* Run & Inspect panel — replaces the AI assistant chat. Runs the selected node
-            through the sandbox sidecar (POST /api/flows/run-node) and shows stdout + outputs. */}
-        <RunInspectPanel
-          selectedNode={selectedNode}
-          isRunning={isRunning}
-          output={runOutput}
-          onRun={onRunNode}
-        />
+
+        {/* Run & Inspect panel — model-only feature */}
+        {entityKind === "model" && (
+          <RunInspectPanel
+            selectedNode={viewMode === "design" ? selectedNode : null}
+            isRunning={isRunning}
+            output={runOutput}
+            onRun={onRunNode}
+          />
+        )}
       </div>
     </div>
   );
@@ -319,12 +484,6 @@ function NodePalette({ catalogue }: { catalogue: Record<string, NodeCatalogueEnt
 
 // ── Custom node component ───────────────────────────────────────────────────────────────────
 
-// Per-category palette. Card edge is bright (60% opacity) and the fill is a deeper translucent
-// wash (15%) over the dark canvas so the node body reads clearly against the grid background.
-// Category headers also tint to the same hue.
-// Per-category palette. Card body is opaque (~85%) so node interiors read clearly against the
-// dark grid; borders use the full hue at 70% for a vivid edge. Header is a deeper saturated wash
-// of the same hue so the eye groups nodes by category instantly.
 const CATEGORY_COLORS: Record<string, { card: string; header: string; accent: string; glow: string }> = {
   data:       { card: "border-sky-400/70 bg-[#0E2740]",       header: "bg-sky-500/40 text-sky-50",       accent: "#38BDF8", glow: "rgba(56,189,248,0.35)" },
   indicator:  { card: "border-violet-400/70 bg-[#231A40]",    header: "bg-violet-500/40 text-violet-50", accent: "#A78BFA", glow: "rgba(167,139,250,0.35)" },
@@ -339,10 +498,6 @@ interface FaNodeData {
   typeId: string;
   params: Record<string, unknown>;
   spec: NodeCatalogueEntry;
-  // Dynamic per-column input ports for nodes with acceptsAdditionalInputs (e.g. feature.matrix_builder):
-  // the target-port names of incoming edges that aren't fixed inputs in the spec. Rendered as extra
-  // handles so each connected feature column anchors to a visible dot instead of dangling — otherwise
-  // the upstream feature packs look like their outputs go nowhere.
   dynamicInputs: string[];
 }
 
@@ -352,8 +507,6 @@ function FlowNodeComponent({ data, selected }: { data: FaNodeData; selected: boo
     card: "border-fa-edge bg-fa-glass", header: "bg-fa-glass-strong text-fa-frost-bright",
     accent: "#5C8AB4", glow: "rgba(92,138,180,0.25)"
   };
-  // When selected, lift the card with a colored glow ring so the inspector picks up the focused node
-  // immediately. Default state still has a soft ambient shadow so the cards have weight on the canvas.
   const shadow = selected ? `0 0 0 2px ${palette.accent}, 0 12px 32px ${palette.glow}` : `0 8px 22px rgba(0,0,0,0.35)`;
   return (
     <div className={cn("rounded-lg border-2 text-fa-frost-bright transition-shadow", palette.card)}
@@ -375,9 +528,6 @@ function FlowNodeComponent({ data, selected }: { data: FaNodeData; selected: boo
               <span className="ml-1 truncate" title={`${p.name} (${p.typeTag})`}>{p.name}</span>
             </div>
           ))}
-          {/* Dynamic per-column inputs (matrix_builder): one handle per wired feature column so the
-              upstream packs visibly land on a port instead of dangling. Hollow dot distinguishes them
-              from the spec's fixed inputs. */}
           {data.dynamicInputs.map((name) => (
             <div key={`dyn-${name}`} className="relative flex items-center text-[10px] text-white/70 pl-2 pr-1 py-0.5">
               <Handle
@@ -449,11 +599,7 @@ function NodeInspector({ node, catalogue, onChange, disabled }:
   );
 }
 
-// ── Run & Inspect panel (replaces AI chat) ───────────────────────────────────────────────────
-//
-// Runs the currently-selected node through the sandbox sidecar (POST /api/flows/run-node)
-// and surfaces stdout + outputs. The sandbox is network-isolated and purity-enforced so the
-// result is deterministic — same definition + inputs = identical output.
+// ── Run & Inspect panel (model-only) ────────────────────────────────────────────────────────
 
 function RunInspectPanel({
   selectedNode,
@@ -503,35 +649,15 @@ function RunInspectPanel({
 // ── Flow ↔ ReactFlow translation ────────────────────────────────────────────────────────────
 
 /**
- * Estimate the rendered height (in pixels) of a single FlowNodeComponent.
- *
- * The custom node renders as:
- *   ┌─────────────────────────┐  ← category header   py-1.5 ≈ 26px
- *   │ type label              │  ← label row          py-2   ≈ 30px  (+ 1px border-b)
- *   ├─────────────────────────┤
- *   │  input col │ output col │  ← port grid          py-2 wrapper (16px) + rows
- *   └─────────────────────────┘
- *
- * Each port row is a flex item with py-0.5 (4px top+bottom) and a 10px handle + text-[10px]:
- * effective row height ≈ 22px.
- *
- * The grid has two columns so the number of rows = max(inputs, outputs).
- * For matrix_builder with 13 dynamic inputs + fixed inputs the estimate is generous enough
- * that the node's column consumes the vertical room it truly needs.
- *
- * Constants (all in px):
- *   HEADER_H  = 26   – category badge (py-1.5 × 2 + ~10px text line)
- *   LABEL_H   = 31   – type label row (py-2 × 2 + ~11px text + 1px border)
- *   GRID_PAD  = 16   – py-2 on the port grid wrapper (8px top + 8px bottom)
- *   PORT_ROW  = 22   – each port row (py-0.5 × 2 + ~10px text/handle)
- *   MIN_H     = 80   – floor so zero-port nodes still have a visible box
+ * Estimate rendered node height for auto-layout (same formula as before, kept here for
+ * co-location with definitionToRfNodes which uses it directly).
  */
 const NODE_HEADER_H = 26;
 const NODE_LABEL_H  = 31;
 const NODE_GRID_PAD = 16;
 const NODE_PORT_ROW = 22;
 const NODE_MIN_H    = 80;
-const NODE_WIDTH    = 220; // generous estimate; minWidth in CSS is 210
+const NODE_WIDTH    = 220;
 
 function estimateNodeHeight(spec: NodeCatalogueEntry, dynamicInputCount: number): number {
   const portRows = Math.max(spec.inputs.length + dynamicInputCount, spec.outputs.length);
@@ -540,47 +666,22 @@ function estimateNodeHeight(spec: NodeCatalogueEntry, dynamicInputCount: number)
 }
 
 /**
- * Height-aware left→right layered auto-layout.
- *
- * Returns a map of node id → {x, y} position.
- *
- * Algorithm:
- *   1. Assign each node a depth = longest path from any source (node with no in-edges).
- *      Sources get depth 0. BFS propagates max depth to successors.
- *   2. Group nodes by depth into columns (layers).
- *   3. x = depth * COL_GAP + PADDING_X   (COL_GAP = NODE_WIDTH + horizontal breathing room)
- *   4. Within each layer, stack nodes top→down using each node's ESTIMATED height + a gap:
- *        y[i] = PADDING_Y + sum(heights[0..i-1]) + i * ROW_GAP
- *      The tallest layer sets the total canvas height; shorter layers are centred vertically.
- *
- * This means a tall node (e.g. matrix_builder with 13 ports, ~358px estimated height) pushes
- * the next node in its column down by 358px + ROW_GAP, while a compact node with 2 ports
- * (~116px) only needs ~156px of vertical space — so no two nodes in the same column ever
- * collide, regardless of port count.
- *
- * v6 walk-through (Foresight v6 flow, 9 nodes):
- *   depth 0: source.binance.klines           (~116px) → col x=60
- *   depth 1: 5 × indicator.*                 (~116px each) → col x=360, stacked with 40px gap
- *              total column height ≈ 5×116 + 4×40 = 740px
- *   depth 2: feature.matrix_builder          (~358px) → col x=660, centred at 370px
- *   depth 3: model.logistic_regression       (~116px) → col x=960
- *   depth 4: output.prediction               (~116px) → col x=1260
- *
- *   The indicator column (depth 1) is the tallest at ~740px; matrix_builder (one node, 358px)
- *   is centred within that 740px band → its box occupies [191, 549], well clear of any other node.
+ * Height-aware left-to-right layered auto-layout.
+ * Depth = longest path from any source node (topological BFS).
+ * Within each layer, nodes are stacked top-to-bottom and centred vertically
+ * relative to the tallest layer.
  */
 function autoLayout(
   nodeIds: string[],
   edges: Array<{ from: string; to: string }>,
   nodeHeights: Record<string, number>,
-  COL_GAP    = 300,   // horizontal distance between column left edges (NODE_WIDTH + 80px breathing)
-  ROW_GAP    = 40,    // vertical gap inserted between every pair of adjacent nodes in a column
-  PADDING_X  = 60,
-  PADDING_Y  = 60,
+  COL_GAP   = 300,
+  ROW_GAP   = 40,
+  PADDING_X = 60,
+  PADDING_Y = 60,
 ): Record<string, { x: number; y: number }> {
-  // Build adjacency: srcId → Set<dstId>, and in-degree map
   const successors = new Map<string, Set<string>>();
-  const inDegree = new Map<string, number>();
+  const inDegree   = new Map<string, number>();
   for (const id of nodeIds) { successors.set(id, new Set()); inDegree.set(id, 0); }
   for (const e of edges) {
     const src = e.from.split(".")[0];
@@ -589,9 +690,9 @@ function autoLayout(
     successors.get(src)?.add(dst);
     inDegree.set(dst, (inDegree.get(dst) ?? 0) + 1);
   }
-  // Longest-path depth via relaxation (topological BFS from sources)
-  const depth = new Map<string, number>(nodeIds.map((id) => [id, 0]));
-  const queue: string[] = nodeIds.filter((id) => (inDegree.get(id) ?? 0) === 0);
+
+  const depth   = new Map<string, number>(nodeIds.map((id) => [id, 0]));
+  const queue   = nodeIds.filter((id) => (inDegree.get(id) ?? 0) === 0);
   const visited = new Set<string>();
   while (queue.length > 0) {
     const cur = queue.shift()!;
@@ -599,17 +700,15 @@ function autoLayout(
     visited.add(cur);
     const d = depth.get(cur) ?? 0;
     for (const next of successors.get(cur) ?? []) {
-      const nd = depth.get(next) ?? 0;
-      if (d + 1 > nd) depth.set(next, d + 1);
+      if (d + 1 > (depth.get(next) ?? 0)) depth.set(next, d + 1);
       queue.push(next);
     }
   }
-  // Nodes not reached (cycles / islands) get depth = max+1 so they still appear
   const maxDepth = Math.max(0, ...depth.values());
   for (const id of nodeIds) {
     if (!visited.has(id)) depth.set(id, maxDepth + 1);
   }
-  // Group by depth → layers; sort for determinism
+
   const layers = new Map<number, string[]>();
   for (const [id, d] of depth.entries()) {
     if (!layers.has(d)) layers.set(d, []);
@@ -617,7 +716,6 @@ function autoLayout(
   }
   for (const arr of layers.values()) arr.sort();
 
-  // Compute each layer's total height (sum of node heights + gaps between them)
   function layerTotalHeight(ids: string[]): number {
     const sum = ids.reduce((acc, id) => acc + (nodeHeights[id] ?? NODE_MIN_H), 0);
     return sum + Math.max(0, ids.length - 1) * ROW_GAP;
@@ -627,21 +725,15 @@ function autoLayout(
   const positions: Record<string, { x: number; y: number }> = {};
   for (const [d, ids] of layers.entries()) {
     const lh = layerTotalHeight(ids);
-    // Centre this layer vertically within the tallest layer's band
     let y = PADDING_Y + (maxLayerH - lh) / 2;
-    ids.forEach((id) => {
+    for (const id of ids) {
       positions[id] = { x: PADDING_X + d * COL_GAP, y };
       y += (nodeHeights[id] ?? NODE_MIN_H) + ROW_GAP;
-    });
+    }
   }
   return positions;
 }
 
-/**
- * Check whether any two nodes overlap given per-node estimated bounding boxes.
- * Uses the same height estimates as autoLayout so the overlap check is consistent
- * with the layout that will be applied when overlap is detected.
- */
 function hasOverlapEstimated(
   nodes: Array<{ id: string; position: { x: number; y: number } }>,
   nodeHeights: Record<string, number>,
@@ -663,7 +755,6 @@ function hasOverlapEstimated(
 function definitionToRfNodes(def: FlowDefinition | null, catalogue: Record<string, NodeCatalogueEntry> | undefined): RFNode<FaNodeData>[] {
   if (!def || !catalogue) return [];
 
-  // Pre-compute per-node specs and dynamic inputs so we can estimate heights before layout.
   const nodeSpecs = def.nodes.map((n) => {
     const spec = catalogue[n.type] ?? emptySpec();
     const fixed = new Set(spec.inputs.map((p) => p.name));
@@ -678,15 +769,11 @@ function definitionToRfNodes(def: FlowDefinition | null, catalogue: Record<strin
     return { n, spec, dynamicInputs };
   });
 
-  // Build per-node height estimates (used for both overlap-check and layout).
   const nodeHeights: Record<string, number> = {};
   for (const { n, spec, dynamicInputs } of nodeSpecs) {
     nodeHeights[n.id] = estimateNodeHeight(spec, dynamicInputs.length);
   }
 
-  // Decide whether auto-layout is needed:
-  //   • Any node is missing a position, OR
-  //   • Any two nodes overlap given their estimated bounding boxes.
   const hasMissingPos = def.nodes.some((n) => !n.position);
   const savedPositions = def.nodes.map((n) => ({ id: n.id, position: n.position ?? { x: 0, y: 0 } }));
   const needsLayout = hasMissingPos || hasOverlapEstimated(savedPositions, nodeHeights);
@@ -724,8 +811,8 @@ function definitionToRfEdges(def: FlowDefinition | null): RFEdge[] {
       target: dstNode,
       sourceHandle: srcPort,
       targetHandle: dstPort,
-      type: "smoothstep",                              // gentle curves instead of bezier hairpins
-      animated: true,                                   // dashed flow animation
+      type: "smoothstep",
+      animated: true,
       markerEnd: { type: MarkerType.ArrowClosed, color: "#7CE3B6", width: 16, height: 16 },
       style: { stroke: "#7CE3B6", strokeWidth: 2, opacity: 0.85 }
     };

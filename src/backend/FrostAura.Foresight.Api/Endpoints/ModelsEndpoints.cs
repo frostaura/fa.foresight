@@ -14,10 +14,11 @@ public static class ModelsEndpoints
     {
         var g = app.MapGroup("/api/models").WithTags("models");
 
-        g.MapGet("/", async (ITenantContext tc, IModelsService svc, ForesightDbContext db, CancellationToken ct) =>
+        g.MapGet("/", async (ITenantContext tc, IModelsService svc, ForesightDbContext db,
+            bool includeArchived = false, CancellationToken ct = default) =>
         {
             if (!tc.IsResolved) return Results.NotFound();
-            var rows = await svc.ListAsync(ct);
+            var rows = await svc.ListAsync(ct, includeArchived);
 
             // Enrich each model row with the most-recent completed backtest hit-rate per interval.
             // Source of truth = the Backtest table; latest = highest StartedAt for each
@@ -50,7 +51,7 @@ public static class ModelsEndpoints
                 return new
                 {
                     m.Id, m.TenantId, m.Name, m.Description, m.Kind, m.SupportsBacktesting,
-                    m.IsBuiltIn, m.IsDefault, m.Definition, m.TrainedState,
+                    m.IsBuiltIn, m.IsDefault, m.IsArchived, m.Definition, m.TrainedState,
                     m.TrainingValidationAccuracy, m.BacktestAccuracy, m.LastTrainedAt,
                     m.TrainStartMs, m.TrainEndMs, m.TrainSymbol, m.TrainInterval,
                     m.TrainingStatus, m.TrainingStartedAt, m.TrainingError,
@@ -144,6 +145,22 @@ public static class ModelsEndpoints
             if (!tc.IsResolved) return Results.NotFound();
             var m = await svc.SetDefaultAsync(id, ct);
             return m is null ? Results.NotFound() : Results.Ok(m);
+        });
+
+        // Archive / unarchive a model. Archived models are excluded from the default GET /api/models
+        // listing but preserved for history. Allowed on any model including built-ins.
+        g.MapPost("/{id:guid}/archive", async (Guid id, ITenantContext tc, IModelsService svc, CancellationToken ct) =>
+        {
+            if (!tc.IsResolved) return Results.NotFound();
+            var found = await svc.ArchiveAsync(id, archive: true, ct);
+            return found ? Results.NoContent() : Results.NotFound();
+        });
+
+        g.MapPost("/{id:guid}/unarchive", async (Guid id, ITenantContext tc, IModelsService svc, CancellationToken ct) =>
+        {
+            if (!tc.IsResolved) return Results.NotFound();
+            var found = await svc.ArchiveAsync(id, archive: false, ct);
+            return found ? Results.NoContent() : Results.NotFound();
         });
 
         // Leakage-aware backtest. Auto-picks a backtest window strictly outside the model's

@@ -203,6 +203,8 @@ public static class DependencyInjection
         // for its background DB writes, and is injected into the scoped ModelsService safely via
         // the singleton-captures-scoped-through-factory pattern.
         services.AddSingleton<Live.ModelDescriber>();
+        // StrategyDescriber mirrors ModelDescriber: singleton, background scope factory pattern.
+        services.AddSingleton<Live.StrategyDescriber>();
         services.AddScoped<IModelsService, Live.ModelsService>();
         services.AddScoped<Live.ActiveModelsService>();
 

@@ -157,7 +157,7 @@ interface Row extends Candle {
 
 function formatTick(ms: number): string {
   const d = new Date(ms);
-  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
 }
 
 function fmtUsd(v: number): string {
@@ -635,8 +635,11 @@ export default function LiveBitcoinChart({
       ? "fixed inset-0 z-50 bg-fa-ink border border-fa-edge flex flex-col p-4"
       : "fa-card p-4 flex flex-col"
     }>
-      {/* Row 1 — context strip: favorited timeframe pill, live price + delta, view toggle */}
-      <div className="flex items-center gap-3">
+      {/* Row 1 — context strip: favorited timeframe pill, model selector, controls.
+          On narrow cards (mobile) this wraps into two rows: pill + expand on the first row,
+          model selector + gate + view toggle on the second. On sm+ everything sits on one row. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+        {/* Title / interval pill — always visible, anchors the first row on mobile */}
         <InfoTip
           content={
             <TipBody title="Favorite timeframe">
@@ -649,7 +652,7 @@ export default function LiveBitcoinChart({
           <button
             onClick={() => toggle(symbol, interval)}
             aria-label={favorited ? "Unfavorite timeframe" : "Favorite timeframe"}
-            className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] uppercase tracking-wider transition ${
+            className={`shrink-0 inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] uppercase tracking-wider transition ${
               favorited
                 ? "border-amber-300/40 bg-amber-300/10 text-amber-300 hover:bg-amber-300/15"
                 : "border-fa-edge bg-fa-glass text-fa-frost-dim hover:text-fa-frost-bright hover:border-fa-frost/30"
@@ -659,9 +662,26 @@ export default function LiveBitcoinChart({
             {interval}
           </button>
         </InfoTip>
+
+        {/* Full-screen toggle — pinned after the title pill on mobile so it stays in the first
+            row and never overflows. Pushed to the far right by the spacer on sm+. */}
+        <button
+          onClick={() => setFullscreen((v) => !v)}
+          aria-label={fullscreen ? "Exit full screen" : "Full screen"}
+          title={fullscreen ? "Exit full screen (Esc)" : "Full screen"}
+          className="shrink-0 p-1.5 rounded-md border border-fa-edge text-fa-frost-dim hover:text-fa-frost-bright hover:bg-fa-glass transition sm:order-last sm:ml-auto"
+          onKeyDown={(e) => { if (e.key === "Escape") setFullscreen(false); }}
+        >
+          {fullscreen
+            ? <Minimize2 className="h-3.5 w-3.5" />
+            : <Maximize2 className="h-3.5 w-3.5" />}
+        </button>
+
+        {/* Controls row: model selector (flex-1, shrinks) + gate + view toggle.
+            On mobile these wrap below the pill; on sm+ they appear inline after the pill. */}
         {/* Price + delta intentionally removed here — the live price already renders prominently
             above this card, so the model selector takes the freed width (flex-1) instead. */}
-        <div className="flex-1 flex items-center gap-2 min-w-0">
+        <div className="flex flex-1 items-center gap-2 min-w-0 basis-full sm:basis-auto sm:order-none order-last">
           <ModelPicker symbol={symbol} interval={interval} grow status={modelStatus} />
           <InfoTip
             content={
@@ -685,7 +705,7 @@ export default function LiveBitcoinChart({
               Gate
             </button>
           </InfoTip>
-          <div className="flex gap-0.5 rounded-md border border-fa-edge p-0.5">
+          <div className="shrink-0 flex gap-0.5 rounded-md border border-fa-edge p-0.5">
             {(["chart", "table"] as ViewMode[]).map((m) => (
               <button
                 key={m}
@@ -700,19 +720,6 @@ export default function LiveBitcoinChart({
               </button>
             ))}
           </div>
-          {/* Full-screen toggle — expands the chart card to cover the viewport for a tablet
-              dashboard view. Escape key and the button both collapse it. */}
-          <button
-            onClick={() => setFullscreen((v) => !v)}
-            aria-label={fullscreen ? "Exit full screen" : "Full screen"}
-            title={fullscreen ? "Exit full screen (Esc)" : "Full screen"}
-            className="shrink-0 p-1.5 rounded-md border border-fa-edge text-fa-frost-dim hover:text-fa-frost-bright hover:bg-fa-glass transition"
-            onKeyDown={(e) => { if (e.key === "Escape") setFullscreen(false); }}
-          >
-            {fullscreen
-              ? <Minimize2 className="h-3.5 w-3.5" />
-              : <Maximize2 className="h-3.5 w-3.5" />}
-          </button>
         </div>
       </div>
 
@@ -764,7 +771,7 @@ export default function LiveBitcoinChart({
           />
         ) : kind === "line" ? (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={rowsWithBalance} margin={{ top: 20, right: 8, left: -8, bottom: 0 }}>
+            <ComposedChart data={rowsWithBalance} margin={{ top: 20, right: 8, left: 4, bottom: 0 }}>
               <CartesianGrid stroke="rgb(255 255 255 / 0.05)" vertical={false} />
               <XAxis dataKey="openTime" type="number" domain={["dataMin", "dataMax"]} scale="time"
                 tickFormatter={(v: number) => formatTick(v)}
@@ -823,7 +830,7 @@ export default function LiveBitcoinChart({
           </ResponsiveContainer>
         ) : kind === "bar" ? (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={rowsWithBalance} margin={{ top: 20, right: 8, left: -8, bottom: 0 }}>
+            <ComposedChart data={rowsWithBalance} margin={{ top: 20, right: 8, left: 4, bottom: 0 }}>
               <CartesianGrid stroke="rgb(255 255 255 / 0.05)" vertical={false} />
               <XAxis dataKey="openTime" type="category"
                 tickFormatter={(v: number) => formatTick(v)}
@@ -897,7 +904,7 @@ export default function LiveBitcoinChart({
           </ResponsiveContainer>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={rowsWithBalance} margin={{ top: 20, right: 8, left: -8, bottom: 0 }}>
+            <ComposedChart data={rowsWithBalance} margin={{ top: 20, right: 8, left: 4, bottom: 0 }}>
               <CartesianGrid stroke="rgb(255 255 255 / 0.05)" vertical={false} />
               <XAxis dataKey="openTime" type="category"
                 tickFormatter={(v: number) => formatTick(v)}
@@ -1153,7 +1160,7 @@ function NextCandleAction({
             and hit-rate text. items-center because the capsule has its own bordered box; baseline
             alignment would push it visually below the text chips. */}
         {(prediction || tradeSignal || accuracy) && (
-          <div className="flex items-center gap-x-2 text-[11px] tabular-nums leading-none ml-auto">
+          <div className="flex items-center gap-x-2 text-[11px] sm:text-xs tabular-nums leading-none ml-auto whitespace-nowrap">
             {prediction && <BetCapsule pUp={probUp} />}
             {prediction && (tradeSignal || accuracy) && <span className="text-fa-frost-dim/50" aria-hidden>·</span>}
             {tradeSignal && (
@@ -1240,9 +1247,7 @@ function RecapStrip({
   const pUp = prediction.directionUpProbabilityCalibrated ?? prediction.directionUpProbability;
   const up = pUp >= 0.5;
   const dirColor = up ? "text-emerald-300/70" : "text-rose-300/70";
-  const timeLabel = new Date(prediction.targetOpenTime).toLocaleTimeString(undefined, {
-    hour: "2-digit", minute: "2-digit",
-  });
+  const timeLabel = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(prediction.targetOpenTime));
 
   let chip: ReactNode;
   if (kind === "pending") {

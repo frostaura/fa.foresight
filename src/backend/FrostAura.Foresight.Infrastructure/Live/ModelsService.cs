@@ -23,17 +23,35 @@ public sealed class ModelsService : IModelsService
         _describer = describer;
     }
 
-    public async Task<IReadOnlyList<Model>> ListAsync(CancellationToken ct)
+    public async Task<IReadOnlyList<Model>> ListAsync(CancellationToken ct, bool includeArchived = false)
     {
         EnsureTenant();
         // Both the tenant's own models and the global built-ins (TenantId NULL) — frontend renders
-        // them in one list, built-ins flagged read-only.
-        return await _db.Models.AsNoTracking()
-            .Where(m => m.TenantId == _tenant.TenantId || m.TenantId == null)
+        // them in one list, built-ins flagged read-only. Archived models are excluded by default.
+        var query = _db.Models.AsNoTracking()
+            .Where(m => m.TenantId == _tenant.TenantId || m.TenantId == null);
+
+        if (!includeArchived)
+            query = query.Where(m => !m.IsArchived);
+
+        return await query
             .OrderByDescending(m => m.IsDefault)
             .ThenBy(m => m.IsBuiltIn)
             .ThenBy(m => m.Name)
             .ToListAsync(ct);
+    }
+
+    public async Task<bool> ArchiveAsync(Guid id, bool archive, CancellationToken ct)
+    {
+        EnsureTenant();
+        var model = await _db.Models
+            .FirstOrDefaultAsync(m => (m.TenantId == _tenant.TenantId || m.TenantId == null) && m.Id == id, ct);
+        if (model is null) return false;
+
+        model.IsArchived = archive;
+        model.UpdatedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        return true;
     }
 
     public async Task<Model?> GetAsync(Guid id, CancellationToken ct)

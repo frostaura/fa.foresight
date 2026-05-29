@@ -9,7 +9,8 @@ namespace FrostAura.Foresight.Application.Models;
 /// </summary>
 public interface IModelsService
 {
-    Task<IReadOnlyList<Model>> ListAsync(CancellationToken ct);
+    Task<IReadOnlyList<Model>> ListAsync(CancellationToken ct, bool includeArchived = false);
+    Task<bool> ArchiveAsync(Guid id, bool archive, CancellationToken ct);
     Task<Model?> GetAsync(Guid id, CancellationToken ct);
     Task<Model> CreateAsync(string name, string? description, string kind, bool supportsBacktesting, string definition, CancellationToken ct);
     Task<Model?> UpdateAsync(Guid id, string? name, string? description, string? definition, CancellationToken ct);

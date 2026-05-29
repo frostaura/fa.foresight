@@ -17,8 +17,8 @@ export default function PageHeader({ title, subtitle, action, leading, backTo }:
         )}
         {leading}
         <div className="min-w-0">
-          <h1 className="text-2xl font-light text-fa-frost-bright tracking-tight">{title}</h1>
-          {subtitle && <p className="text-fa-frost-dim text-sm mt-1">{subtitle}</p>}
+          <h1 className="text-xl sm:text-2xl font-light text-fa-frost-bright tracking-tight">{title}</h1>
+          {subtitle && <p className="text-fa-frost-dim text-xs sm:text-sm mt-1">{subtitle}</p>}
         </div>
       </div>
       {action}

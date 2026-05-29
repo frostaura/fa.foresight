@@ -55,6 +55,8 @@ public sealed class ForesightDbContext : DbContext
             b.Property(s => s.Description).HasMaxLength(2000);
             b.Property(s => s.Definition).HasColumnType("jsonb");
             b.Property(s => s.Params).HasColumnType("jsonb");
+            b.Property(s => s.SimpleDescription).HasMaxLength(500);
+            b.Property(s => s.TechnicalDescription).HasMaxLength(1000);
             b.HasIndex(s => new { s.TenantId, s.Name }).IsUnique();
         });
 
@@ -202,6 +204,7 @@ public sealed class ForesightDbContext : DbContext
             b.Property(m => m.TrainInterval).HasMaxLength(10);
             b.Property(m => m.TrainingStatus).HasMaxLength(20);
             b.Property(m => m.TrainingError).HasMaxLength(2000);
+            b.Property(m => m.IsArchived).HasDefaultValue(false);
             b.Property(m => m.SimpleDescription).HasMaxLength(500);
             b.Property(m => m.TechnicalDescription).HasMaxLength(1000);
             b.HasIndex(m => new { m.TenantId, m.Name }).IsUnique();

@@ -326,6 +326,12 @@ public static class DatabaseInitializer
             -- AI-generated model descriptions (OpenRouter, generated in background on upsert).
             ALTER TABLE models ADD COLUMN IF NOT EXISTS ""SimpleDescription"" varchar(500) NULL;
             ALTER TABLE models ADD COLUMN IF NOT EXISTS ""TechnicalDescription"" varchar(1000) NULL;
+            -- Model archiving: soft-delete flag. Archived models are excluded from the default listing.
+            ALTER TABLE models ADD COLUMN IF NOT EXISTS ""IsArchived"" boolean NOT NULL DEFAULT false;
+
+            -- Strategy AI descriptions (mirrors models pattern).
+            ALTER TABLE strategies ADD COLUMN IF NOT EXISTS ""SimpleDescription"" varchar(500) NULL;
+            ALTER TABLE strategies ADD COLUMN IF NOT EXISTS ""TechnicalDescription"" varchar(1000) NULL;
 
             -- Zombie training jobs: a model stuck at 'training' at boot is an orphan from a
             -- crashed/restarted process — its background task is gone, so the spinner would never
@@ -803,6 +809,19 @@ public static class DatabaseInitializer
             }
             if (missingDescriptions.Count > 0)
                 logger.LogInformation("Enqueued AI description generation for {Count} model(s) missing descriptions", missingDescriptions.Count);
+
+            // AI description backfill for strategies missing descriptions.
+            var strategyDescriber = scope.ServiceProvider.GetRequiredService<FrostAura.Foresight.Infrastructure.Live.StrategyDescriber>();
+            var missingStrategyDescriptions = await db.Strategies
+                .Where(s => s.SimpleDescription == null)
+                .Select(s => s.Id)
+                .ToListAsync(ct);
+            foreach (var strategyId in missingStrategyDescriptions)
+            {
+                strategyDescriber.EnqueueAsync(strategyId);
+            }
+            if (missingStrategyDescriptions.Count > 0)
+                logger.LogInformation("Enqueued AI description generation for {Count} strategy/ies missing descriptions", missingStrategyDescriptions.Count);
         }
 
         // Strip the legacy "Foresight " prefix from any tenant-owned model names left over from
