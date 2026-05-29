@@ -229,7 +229,8 @@ export default function LiveBitcoinChart({
   kind,
   visibleCount = 15,
   limit = 500,
-  hidePaperPanel = false
+  hidePaperPanel = false,
+  fill = false
 }: {
   symbol: string;
   interval: BinanceInterval;
@@ -242,6 +243,12 @@ export default function LiveBitcoinChart({
    * live session pins one model). Default false → behaviour identical to the Paper Trading surface.
    */
   hidePaperPanel?: boolean;
+  /**
+   * Fill mode. When true the card stretches to its parent's height (`h-full`) and the plot area
+   * grows to fill remaining space (`flex-1 min-h-0`) instead of the fixed `h-56`. Used by the
+   * resizable chart grid so a card's height tracks its resized container. Independent of fullscreen.
+   */
+  fill?: boolean;
 }) {
   const { candles, loading, error } = useLiveKlines(symbol, interval, limit);
   const { isFav, toggle } = useLiveTimeframeFavorites();
@@ -649,7 +656,7 @@ export default function LiveBitcoinChart({
   return (
     <div className={fullscreen
       ? "fixed inset-0 z-50 bg-fa-ink border border-fa-edge flex flex-col p-4"
-      : "fa-card p-4 flex flex-col"
+      : `fa-card p-4 flex flex-col${fill ? " h-full" : ""}`
     }>
       {/* Header — two compact rows that hold regardless of card width (these cards live in a
           responsive grid, so a viewport-keyed breakpoint can't tell how wide the card actually is).
@@ -764,7 +771,7 @@ export default function LiveBitcoinChart({
 
       {/* Chart/table container. h-56 in grid card; flex-1 fills the remaining viewport height
           in fullscreen mode for a proper tablet dashboard view. */}
-      <div className={`${fullscreen ? "flex-1 min-h-0" : "h-56"} mt-3 relative`}>
+      <div className={`${fullscreen || fill ? "flex-1 min-h-0" : "h-56"} mt-3 relative`}>
         {/* LivePulse now lives inside the NextCandleAction header next to "Next candle". */}
         {loading && rows.length === 0 ? (
           <div className="h-full flex items-center justify-center text-fa-frost-dim text-sm gap-2">

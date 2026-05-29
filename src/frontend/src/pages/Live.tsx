@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import LiveBitcoinChart from "../components/LiveBitcoinChart";
+import { ResizableChartGrid, ResizableChartCard } from "../components/ResizableChartGrid";
 import { type BinanceInterval } from "../lib/binance";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -367,7 +368,7 @@ function LiveNumbers({ session, onStop, stopping }: {
 
   if (session.bust) {
     return (
-      <div className="mt-3 pt-3 border-t border-rose-300/30 flex items-center justify-between gap-x-3 fa-caption tabular-nums">
+      <div className="mt-3 pt-3 border-t border-rose-300/30 flex items-center justify-between gap-x-3 pr-5 fa-caption tabular-nums">
         <span className="inline-flex items-center gap-1 text-rose-300 uppercase tracking-wider font-semibold">
           <CircleDollarSign className="h-3 w-3" /> Bankrupt
         </span>
@@ -400,8 +401,9 @@ function LiveNumbers({ session, onStop, stopping }: {
           <span className="ml-1 opacity-80">({pnl >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)</span>
         </span>
       </div>
-      {/* Row 2 — hit rate / bets (left) · reserved · Stop (right). */}
-      <div className="mt-1.5 flex items-center gap-3 fa-caption tabular-nums text-fa-frost-dim">
+      {/* Row 2 — hit rate / bets (left) · reserved · Stop (right). pr-5 keeps the Stop button clear
+          of the card's bottom-right resize grip. */}
+      <div className="mt-1.5 flex items-center gap-3 pr-5 fa-caption tabular-nums text-fa-frost-dim">
         <span>
           {hitRate != null ? `${hitRate.toFixed(0)}% hit` : "— hit"} · {session.betsWon}/{session.betsPlaced} bets
         </span>
@@ -427,14 +429,17 @@ function LiveSessionCard({ session }: { session: NormalizedSession }) {
   // top-right controls (fullscreen/expand) stay clear. rounded-xl + overflow-hidden keep the ring
   // flush to the chart's own rounded card edge.
   return (
-    <div className="fa-live-accent rounded-xl overflow-hidden">
-      <LiveBitcoinChart
-        symbol={session.symbol}
-        interval={session.interval as BinanceInterval}
-        kind="candle"
-        hidePaperPanel
-      />
-      <div className="px-4 pb-4 -mt-1">
+    <div className="fa-live-accent rounded-xl overflow-hidden h-full flex flex-col">
+      <div className="flex-1 min-h-0">
+        <LiveBitcoinChart
+          symbol={session.symbol}
+          interval={session.interval as BinanceInterval}
+          kind="candle"
+          hidePaperPanel
+          fill
+        />
+      </div>
+      <div className="px-4 pb-4 -mt-1 shrink-0">
         <LiveNumbers
           session={session}
           stopping={stopping}
@@ -935,11 +940,13 @@ export default function Live() {
             </div>
           )}
           {hasSessions && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
+            <ResizableChartGrid>
               {liveSessions.map((s) => (
-                <LiveSessionCard key={s.id} session={s} />
+                <ResizableChartCard key={s.id} id={`live-${s.id}`}>
+                  <LiveSessionCard session={s} />
+                </ResizableChartCard>
               ))}
-            </div>
+            </ResizableChartGrid>
           )}
         </div>
       </div>

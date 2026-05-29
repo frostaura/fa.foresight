@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useSearchParams } from "react-router-dom";
 import PageHeader from "../components/PageHeader";
 import LiveBitcoinChart, { type ChartKind } from "../components/LiveBitcoinChart";
+import { ResizableChartGrid, ResizableChartCard } from "../components/ResizableChartGrid";
 import { useLivePrice, type BinanceInterval } from "../lib/binance";
 import { useLiveTimeframeFavorites } from "../lib/liveFavorites";
 import { Star } from "lucide-react";
@@ -230,17 +231,19 @@ export default function PaperTrading() {
             hint="Click the star on any timeframe card under All to pin it here."
           />
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
+          <ResizableChartGrid>
             {shownIntervals.map((iv) => (
-              <LiveBitcoinChart
-                key={`${symbol}-${iv}`}
-                symbol={symbol}
-                interval={iv}
-                kind={kind}
-                visibleCount={visibleCount}
-              />
+              <ResizableChartCard key={`${symbol}-${iv}`} id={`paper-${symbol}-${iv}`}>
+                <LiveBitcoinChart
+                  symbol={symbol}
+                  interval={iv}
+                  kind={kind}
+                  visibleCount={visibleCount}
+                  fill
+                />
+              </ResizableChartCard>
             ))}
-          </div>
+          </ResizableChartGrid>
         )}
       </div>
     </div>
