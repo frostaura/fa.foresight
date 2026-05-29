@@ -7,7 +7,8 @@
  * as a LiveBitcoinChart card with a real-money numbers strip. The new-session form lives inside a
  * collapsible disclosure. No always-on yellow banners — caution appears only while disarmed.
  */
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronDown,
   CircleDollarSign,
@@ -16,9 +17,9 @@ import {
   ShieldAlert,
   ShieldCheck,
   Square,
+  X,
 } from "lucide-react";
 import PageHeader from "../components/PageHeader";
-import InfoTip, { TipBody } from "../components/InfoTip";
 import LiveBitcoinChart from "../components/LiveBitcoinChart";
 import { type BinanceInterval } from "../lib/binance";
 import { Button } from "../components/ui/button";
@@ -47,7 +48,7 @@ const SYMBOLS = ["BTCUSDT"];
 const INTERVALS = ["5m", "15m", "1m"];
 
 // ── Arm flow ──────────────────────────────────────────────────────────────────
-function ArmStatusStrip({ armed }: { armed: boolean }) {
+function ArmStatusStrip({ armed, onShowSetup }: { armed: boolean; onShowSetup: () => void }) {
   const [requestCode, { data: codeResp, isLoading: requesting, reset: resetRequest }] =
     useRequestGoLiveCodeMutation();
   const [confirmGoLive, { isLoading: confirming, error: confirmError, reset: resetConfirm }] =
@@ -72,6 +73,9 @@ function ArmStatusStrip({ armed }: { armed: boolean }) {
         <span className="fa-caption text-fa-frost-dim">
           Live trading is set up. Sessions trade automatically each qualifying candle.
         </span>
+        <button onClick={onShowSetup} className="ml-auto fa-caption text-fa-frost-dim hover:text-fa-frost-bright transition inline-flex items-center gap-1">
+          <Info className="h-3 w-3" /> Setup guide
+        </button>
         <Button
           onClick={async () => {
             await killswitch();
@@ -83,7 +87,6 @@ function ArmStatusStrip({ armed }: { armed: boolean }) {
           disabled={killing}
           variant="destructive"
           size="sm"
-          className="ml-auto"
         >
           <ShieldAlert className="h-3.5 w-3.5" />
           {killing ? "Disarming…" : "Disarm (killswitch)"}
@@ -102,13 +105,15 @@ function ArmStatusStrip({ armed }: { armed: boolean }) {
         <span className="fa-caption text-fa-frost-dim">
           Request a confirmation code, then confirm it to arm live trading.
         </span>
+        <button onClick={onShowSetup} className="ml-auto fa-caption text-fa-frost-dim hover:text-fa-frost-bright transition inline-flex items-center gap-1">
+          <Info className="h-3 w-3" /> Setup guide
+        </button>
         {!codeResp && (
           <Button
             onClick={() => void requestCode()}
             disabled={requesting}
             variant="primary"
             size="sm"
-            className="ml-auto"
           >
             {requesting ? "Requesting…" : "Request code"}
           </Button>
@@ -119,7 +124,7 @@ function ArmStatusStrip({ armed }: { armed: boolean }) {
         <div className="flex flex-wrap items-end gap-3 pt-1">
           <div>
             <div className="fa-overline text-fa-frost-dim mb-1">Your code</div>
-            <code className="inline-flex items-center rounded-md border border-fa-edge bg-fa-glass-strong px-3 py-1.5 font-mono text-base tracking-[0.3em] text-fa-frost-bright tabular-nums">
+            <code className="flex h-9 items-center rounded-md border border-fa-edge bg-fa-glass-strong px-3 font-mono text-base tracking-[0.3em] text-fa-frost-bright tabular-nums">
               {codeResp.code}
             </code>
           </div>
@@ -130,23 +135,28 @@ function ArmStatusStrip({ armed }: { armed: boolean }) {
               onChange={(e) => setCode(e.target.value)}
               placeholder="Enter code"
               inputMode="numeric"
-              className="w-36 font-mono tracking-[0.2em] text-sm"
+              className="h-9 w-36 font-mono tracking-[0.2em] text-sm"
             />
           </div>
-          <Button
-            onClick={async () => {
-              try {
-                await confirmGoLive({ code: code.trim() }).unwrap();
-              } catch {
-                /* surfaced inline below */
-              }
-            }}
-            disabled={confirming || code.trim().length === 0}
-            variant="primary"
-            size="sm"
-          >
-            {confirming ? "Confirming…" : "Confirm & arm"}
-          </Button>
+          {/* Invisible spacer label keeps the button on the same label+control baseline as the
+              two fields beside it; h-9 matches their control height so all three align. */}
+          <div>
+            <div className="fa-overline mb-1 select-none opacity-0" aria-hidden="true">arm</div>
+            <Button
+              onClick={async () => {
+                try {
+                  await confirmGoLive({ code: code.trim() }).unwrap();
+                } catch {
+                  /* surfaced inline below */
+                }
+              }}
+              disabled={confirming || code.trim().length === 0}
+              variant="primary"
+              className="h-9"
+            >
+              {confirming ? "Confirming…" : "Confirm & arm"}
+            </Button>
+          </div>
           {confirmErrMsg && (
             <p className="basis-full fa-caption text-fa-danger -mt-1">{confirmErrMsg}</p>
           )}
@@ -414,6 +424,108 @@ function LiveSessionCard({ session }: { session: NormalizedSession }) {
   );
 }
 
+// ── Setup guide dialog ──────────────────────────────────────────────────────────
+// The full Polymarket connection setup is non-trivial (fund a Polygon wallet, wrap USDC.e → pUSD,
+// approve the exchanges, set env keys, derive CLOB creds, do the $1 validation). A tooltip can't
+// carry that, so it lives in a proper dialog. Exact shell commands are in docs/live-setup.md.
+function SetupStep({ n, title, children }: { n: number; title: string; children: ReactNode }) {
+  return (
+    <div className="flex gap-3">
+      <span className="shrink-0 flex items-center justify-center w-5 h-5 rounded-full border border-fa-frost/30 text-fa-frost fa-overline">{n}</span>
+      <div className="min-w-0 flex-1">
+        <div className="fa-section-title">{title}</div>
+        <div className="fa-caption text-fa-frost-dim mt-0.5 leading-relaxed [&_code]:font-mono [&_code]:text-fa-frost [&_code]:text-xs">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function EnvRow({ k, v }: { k: string; v: string }) {
+  return (
+    <li className="flex flex-wrap items-baseline gap-x-2">
+      <code className="font-mono text-fa-frost text-xs">{k}</code>
+      <span className="text-fa-frost-dim/80">— {v}</span>
+    </li>
+  );
+}
+
+function LiveSetupDialog({ onClose }: { onClose: () => void }) {
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[70] bg-fa-ink/70 backdrop-blur-sm flex items-center justify-center p-6 fa-confirm-enter"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="fa-live-setup-title"
+    >
+      <div
+        className="fa-card w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6 space-y-5 relative shadow-[0_20px_60px_-15px_rgba(0,0,0,0.6)] border border-fa-edge"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3">
+          <div className="shrink-0 flex items-center justify-center w-10 h-10 rounded-full bg-fa-frost-bright/10 text-fa-frost-bright ring-1 ring-fa-frost-bright/30">
+            <Info className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 id="fa-live-setup-title" className="text-fa-frost-bright text-base font-light tracking-tight">
+              Set up live trading
+            </h2>
+            <p className="fa-caption text-fa-frost-dim mt-1">
+              Foresight trades on Polymarket CLOB V2 with your own Polygon wallet. The exact shell
+              commands are in <code className="font-mono text-fa-frost text-xs">docs/live-setup.md</code>.
+            </p>
+          </div>
+          <button onClick={onClose} aria-label="Dismiss" className="shrink-0 -mt-1 -mr-1 text-fa-frost-dim hover:text-fa-frost-bright transition">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <SetupStep n={1} title="Fund a Polygon wallet">
+            Create an EOA on Polygon, hold USDC.e, and wrap it into <span className="text-fa-frost">pUSD</span>{" "}
+            (Polymarket collateral). Approve the CTF exchange and neg-risk exchange to spend your pUSD and
+            CTF outcome tokens. (Doc steps 1–3, run with <code>cast</code>.)
+          </SetupStep>
+          <SetupStep n={2} title="Configure the backend .env">
+            <ul className="mt-1 space-y-1">
+              <EnvRow k="KeyVault__PrivateKey" v="wallet signing key (hex)" />
+              <EnvRow k="KeyVault__SignatureType" v="0 = EOA · 1 = proxy · 2 = Gnosis Safe" />
+              <EnvRow k="Polymarket__WalletAddress" v="your wallet address" />
+              <EnvRow k="Polymarket__ApiKey / ApiSecret / ApiPassphrase" v="auto-derived on first use — leave blank" />
+              <EnvRow k="Polymarket__MaxTradeUsd" v="per-trade cap — start at 1 for validation" />
+              <EnvRow k="Polymarket__LiveTrading" v="keep false until validated" />
+            </ul>
+          </SetupStep>
+          <SetupStep n={3} title="Restart the backend">
+            On boot it loads the wallet and derives its CLOB API credentials via the L1 auth flow
+            (logged at startup) — no manual key creation needed.
+          </SetupStep>
+          <SetupStep n={4} title="Arm">
+            Request a confirmation code and confirm it on this page. Arming is in-memory and resets if the
+            backend restarts.
+          </SetupStep>
+          <SetupStep n={5} title="Supervised $1 validation">
+            With the $1 cap in place, place one real order and confirm it fills and settles on Polymarket
+            before trusting automation.
+          </SetupStep>
+          <SetupStep n={6} title="Go live">
+            Set <code>Polymarket__LiveTrading=true</code>, restart, then create a session below — it trades
+            automatically each qualifying candle while armed. The killswitch (or stopping a session) halts
+            it anytime.
+          </SetupStep>
+        </div>
+
+        <div className="rounded-md border border-fa-edge bg-fa-glass px-3 py-2 fa-caption text-fa-frost-dim">
+          <span className="text-fa-frost">Data is automatic.</span> Each model pipeline fetches and
+          backfills its own candle and order-flow history before it trains or trades — there is no manual
+          data-import step to make the app work.
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export default function Live() {
   const { data: status } = useGetGoLiveStatusQuery(undefined, { pollingInterval: 5000 });
   const armed = status?.armed ?? false;
@@ -435,6 +547,8 @@ export default function Live() {
   const formOpen = formOverride ?? !hasSessions;
   const toggleForm = () => setFormOverride(!formOpen);
 
+  const [showSetup, setShowSetup] = useState(false);
+
   return (
     <div>
       <div className="sticky top-0 z-30 bg-fa-ink/95 backdrop-blur">
@@ -442,38 +556,14 @@ export default function Live() {
           title={
             <span className="inline-flex items-center gap-2">
               Live
-              <InfoTip
-                content={
-                  <TipBody title="Set up live trading">
-                    <ol className="mt-1 space-y-1.5 list-decimal pl-4 text-fa-frost-dim">
-                      <li>
-                        In the backend <code className="font-mono text-fa-frost">.env</code>, set{" "}
-                        <code className="font-mono text-fa-frost">Polymarket__LiveTrading=true</code> and configure the trading wallet key.
-                      </li>
-                      <li>
-                        Arm the session: request a confirmation code, then confirm it (below). Arming is in-memory; it resets if the backend restarts.
-                      </li>
-                      <li>
-                        Place a supervised <span className="text-fa-frost-bright">$1 validation order</span> and confirm it fills and settles on Polymarket before trusting automation.
-                      </li>
-                      <li>
-                        Create a live session below — it trades automatically each qualifying candle while armed.
-                      </li>
-                      <li>
-                        Use the killswitch (or stop the session) to halt anytime.
-                      </li>
-                    </ol>
-                  </TipBody>
-                }
-                width={320}
+              <button
+                onClick={() => setShowSetup(true)}
+                aria-label="How to set up live trading"
+                title="How to set up live trading"
+                className="inline-flex items-center justify-center rounded-full border border-fa-edge text-fa-frost-dim hover:text-fa-frost-bright hover:border-fa-frost/40 transition h-5 w-5"
               >
-                <button
-                  aria-label="How to set up live trading"
-                  className="inline-flex items-center justify-center rounded-full border border-fa-edge text-fa-frost-dim hover:text-fa-frost-bright hover:border-fa-frost/40 transition h-5 w-5"
-                >
-                  <Info className="h-3 w-3" />
-                </button>
-              </InfoTip>
+                <Info className="h-3 w-3" />
+              </button>
             </span>
           }
           subtitle="Automated live-trading sessions against Polymarket CLOB V2."
@@ -482,7 +572,7 @@ export default function Live() {
 
       <div className="p-4 sm:p-8 space-y-6">
         {/* Arm status + flow */}
-        <ArmStatusStrip armed={armed} />
+        <ArmStatusStrip armed={armed} onShowSetup={() => setShowSetup(true)} />
 
         {/* New live session — collapsible */}
         <div className="fa-card overflow-hidden">
@@ -539,6 +629,8 @@ export default function Live() {
           )}
         </div>
       </div>
+
+      {showSetup && <LiveSetupDialog onClose={() => setShowSetup(false)} />}
     </div>
   );
 }
