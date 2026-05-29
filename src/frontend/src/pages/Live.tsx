@@ -428,8 +428,10 @@ function LiveSessionCard({ session }: { session: NormalizedSession }) {
   // The amber ring (fa-live-accent) is the real-money cue — no overlay pill, so the chart's own
   // top-right controls (fullscreen/expand) stay clear. rounded-xl + overflow-hidden keep the ring
   // flush to the chart's own rounded card edge.
+  // One seamless surface: a single rounded card (bg + gold real-money ring) holding the chart
+  // (rendered `bare` so it adds no nested rounded box) above the numbers strip. No card-in-card.
   return (
-    <div className="fa-live-accent rounded-xl overflow-hidden h-full flex flex-col">
+    <div className="bg-fa-glass backdrop-blur-sm fa-live-accent rounded-xl overflow-hidden h-full flex flex-col">
       <div className="flex-1 min-h-0">
         <LiveBitcoinChart
           symbol={session.symbol}
@@ -437,9 +439,10 @@ function LiveSessionCard({ session }: { session: NormalizedSession }) {
           kind="candle"
           hidePaperPanel
           fill
+          bare
         />
       </div>
-      <div className="px-4 pb-4 -mt-1 shrink-0">
+      <div className="px-4 pb-4 shrink-0">
         <LiveNumbers
           session={session}
           stopping={stopping}

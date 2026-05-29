@@ -230,13 +230,20 @@ export default function LiveBitcoinChart({
   visibleCount = 15,
   limit = 500,
   hidePaperPanel = false,
-  fill = false
+  fill = false,
+  bare = false
 }: {
   symbol: string;
   interval: BinanceInterval;
   kind: ChartKind;
   visibleCount?: number;
   limit?: number;
+  /**
+   * Chromeless mode. When true the card drops its own `fa-card` shell (border / background /
+   * rounded corners) and renders just padded content, so it can sit seamlessly inside an outer
+   * container (e.g. the Live session card's single rounded shell) without nesting rounded boxes.
+   */
+  bare?: boolean;
   /**
    * Live-trading mode. When true the card skips its internal paper-trading strip (the Live page
    * renders its own real-money numbers strip alongside) AND hides the per-card ModelPicker (the
@@ -656,7 +663,7 @@ export default function LiveBitcoinChart({
   return (
     <div className={fullscreen
       ? "fixed inset-0 z-50 bg-fa-ink border border-fa-edge flex flex-col p-4"
-      : `fa-card p-4 flex flex-col${fill ? " h-full" : ""}`
+      : `${bare ? "" : "fa-card "}p-4 flex flex-col${fill ? " h-full" : ""}`
     }>
       {/* Header — two compact rows that hold regardless of card width (these cards live in a
           responsive grid, so a viewport-keyed breakpoint can't tell how wide the card actually is).
@@ -821,9 +828,8 @@ export default function LiveBitcoinChart({
                   only between resolved-bet candles (gaps for candles with no bet outcome). */}
               {balanceSeries.length > 0 && (
                 <Line yAxisId="balance" type="monotone" dataKey="balance"
-                  stroke="#A4D4F4" strokeWidth={2} dot={false} isAnimationActive={false}
-                  connectNulls={false} strokeOpacity={0.9}
-                  className="fa-balance-line"
+                  stroke="#A4D4F4" strokeWidth={1.5} dot={false} isAnimationActive={false}
+                  connectNulls={false} strokeOpacity={0.5} strokeDasharray="2 4" strokeLinecap="round"
                 />
               )}
               {resultDots.map((d) => (
@@ -895,9 +901,8 @@ export default function LiveBitcoinChart({
               />
               {balanceSeries.length > 0 && (
                 <Line yAxisId="balance" type="monotone" dataKey="balance"
-                  stroke="#A4D4F4" strokeWidth={2} dot={false} isAnimationActive={false}
-                  connectNulls={false} strokeOpacity={0.9}
-                  className="fa-balance-line"
+                  stroke="#A4D4F4" strokeWidth={1.5} dot={false} isAnimationActive={false}
+                  connectNulls={false} strokeOpacity={0.5} strokeDasharray="2 4" strokeLinecap="round"
                 />
               )}
               {resultDots.map((d) => (
@@ -956,9 +961,8 @@ export default function LiveBitcoinChart({
                   a paper session with at least one resolved bet exists. */}
               {balanceSeries.length > 0 && (
                 <Line yAxisId="balance" type="monotone" dataKey="balance"
-                  stroke="#A4D4F4" strokeWidth={2} dot={false} isAnimationActive={false}
-                  connectNulls={false} strokeOpacity={0.9}
-                  className="fa-balance-line"
+                  stroke="#A4D4F4" strokeWidth={1.5} dot={false} isAnimationActive={false}
+                  connectNulls={false} strokeOpacity={0.5} strokeDasharray="2 4" strokeLinecap="round"
                 />
               )}
               {resultDots.map((d) => (
@@ -1038,7 +1042,7 @@ function formatCountdown(ms: number): string {
 // The paper trader is downstream: it has no gate (Martingale needs continuous placement) and
 // will still bet inside the no-band on its own schedule. The capsule is the backtest-anchored
 // lens, not a mirror of the paper trader.
-function BetCapsule({ pUp }: { pUp: number }) {
+function BetCapsule({ pUp, full = false }: { pUp: number; full?: boolean }) {
   const call = betDecision(pUp);
   const pct = (pUp * 100).toFixed(1);
   const downPct = ((1 - pUp) * 100).toFixed(1);
@@ -1064,11 +1068,11 @@ function BetCapsule({ pUp }: { pUp: number }) {
     { id: "down", activeCls: "bg-rose-300/15 text-rose-300",       inactiveCls: "text-rose-300/25" },
   ];
   return (
-    <div className="flex gap-0.5 rounded-md border border-fa-edge p-0.5">
+    <div className={`flex gap-0.5 rounded-md border border-fa-edge p-0.5 ${full ? "w-full" : ""}`}>
       {opts.map((o) => (
         <span
           key={o.id}
-          className={`px-2.5 py-0.5 fa-caption tracking-wider rounded transition cursor-help ${o.id === call ? o.activeCls : o.inactiveCls}`}
+          className={`px-2.5 py-0.5 fa-caption tracking-wider rounded transition cursor-help ${full ? "flex-1 text-center" : ""} ${o.id === call ? o.activeCls : o.inactiveCls}`}
           title={explain(o.id)}
         >
           {o.id}
@@ -1143,25 +1147,23 @@ function NextCandleAction({
           translate-y keeps everything sharing the same visible baseline so "UP" and "54%" line up
           cleanly regardless of font size. items-baseline alone would pick the SVG's bottom edge
           on the larger span and shove the smaller percentage down. */}
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <div className="flex items-baseline gap-2">
+      {/* 2×2 layout: the big directional call fills the left half across both rows; the right half
+          stacks the edge/hit metrics (top) over the up / no-bet / down bar (bottom). */}
+      <div className="grid grid-cols-2 grid-rows-2 gap-x-4 gap-y-1.5 items-center">
+        {/* Left — big directional call, spanning both rows */}
+        <div className="row-span-2 flex items-baseline gap-2 min-w-0">
           {prediction ? (
             <>
-              <span className={`text-xl font-light leading-none ${dirColor}`}>
+              <span className={`text-3xl font-light leading-none ${dirColor}`}>
                 {up
-                  ? <ArrowUp className="inline h-5 w-5 -translate-y-[3px] mr-0.5" strokeWidth={2.25} />
-                  : <ArrowDown className="inline h-5 w-5 -translate-y-[3px] mr-0.5" strokeWidth={2.25} />
+                  ? <ArrowUp className="inline h-7 w-7 -translate-y-[3px] mr-0.5" strokeWidth={2.25} />
+                  : <ArrowDown className="inline h-7 w-7 -translate-y-[3px] mr-0.5" strokeWidth={2.25} />
                 }
                 {up ? "UP" : "DOWN"}
               </span>
-              {/* The model's up-side confidence in percentage form — the only headline number on
-                  the card now. Deterministic models don't produce a separate target-hit estimate
-                  (and the LLM's was rarely informative), so the previous `dir · hit` split was
-                  visual clutter that always showed twins for v6. The right-hand `edge` chip already
-                  derives from this same probability, so the card reads as one signal end-to-end. */}
               <UiTooltip content="Calibrated confidence in the called direction — P(up) for an UP call, the implied P(down) = 1−P(up) for a DOWN call. The bet side is decided on P(up); 50% = no edge, and distance from 50% is conviction either way.">
                 <span
-                  className={`text-base leading-none tabular-nums opacity-80 ${dirColor} cursor-help`}
+                  className={`text-xl leading-none tabular-nums opacity-80 ${dirColor} cursor-help`}
                   title={prediction.reasoning ?? undefined}
                 >
                   {sidePct.toFixed(0)}%
@@ -1177,42 +1179,44 @@ function NextCandleAction({
           )}
         </div>
 
-        {/* Supporting metrics on the same line — bet capsule (manual-trader call) + inline edge
-            and hit-rate text. items-center because the capsule has its own bordered box; baseline
-            alignment would push it visually below the text chips. */}
-        {(prediction || tradeSignal || accuracy) && (
-          <div className="flex items-center gap-x-2 fa-caption sm:text-xs tabular-nums whitespace-nowrap">
-            {prediction && <BetCapsule pUp={probUp} />}
-            {prediction && (tradeSignal || accuracy) && <span className="text-fa-frost-dim/50" aria-hidden>·</span>}
-            {tradeSignal && (
-              <span
-                className="text-fa-frost-dim"
-                title="Probability advantage over the fair-market reference. Side is already implied by the UP/DOWN call."
-              >
-                <span className={tradeSignal.edge >= 0 ? "text-emerald-300/90" : "text-fa-frost-dim"}>
-                  {tradeSignal.edge >= 0 ? "+" : ""}{(tradeSignal.edge * 100).toFixed(1)}%
-                </span>
-                <span className="opacity-70"> edge</span>
+        {/* Top-right — edge + hit-rate text */}
+        <div className="flex items-center gap-x-2 fa-caption sm:text-xs tabular-nums whitespace-nowrap min-w-0">
+          {tradeSignal && (
+            <span
+              className="text-fa-frost-dim"
+              title="Probability advantage over the fair-market reference. Side is already implied by the UP/DOWN call."
+            >
+              <span className={tradeSignal.edge >= 0 ? "text-emerald-300/90" : "text-fa-frost-dim"}>
+                {tradeSignal.edge >= 0 ? "+" : ""}{(tradeSignal.edge * 100).toFixed(1)}%
               </span>
-            )}
-            {tradeSignal && accuracy && <span className="text-fa-frost-dim/50" aria-hidden>·</span>}
-            {accuracy && (
-              <span
-                className="text-fa-frost-dim"
-                title={`${accuracy.count} resolved predictions visible · hit rate ${(accuracy.hitRate * 100).toFixed(0)}%`}
+              <span className="opacity-70"> edge</span>
+            </span>
+          )}
+          {tradeSignal && accuracy && <span className="text-fa-frost-dim/50" aria-hidden>·</span>}
+          {accuracy && (
+            <span
+              className="text-fa-frost-dim"
+              title={`${accuracy.count} resolved predictions visible · hit rate ${(accuracy.hitRate * 100).toFixed(0)}%`}
+            >
+              <ShimmerOnChange value={accuracy.count}>{accuracy.count}</ShimmerOnChange>
+              <span className="opacity-70"> hit </span>
+              <ShimmerOnChange
+                value={Math.round(accuracy.hitRate * 1000)}
+                className={accuracy.hitRate >= 0.5 ? "text-emerald-300" : "text-rose-300"}
               >
-                <ShimmerOnChange value={accuracy.count}>{accuracy.count}</ShimmerOnChange>
-                <span className="opacity-70"> hit </span>
-                <ShimmerOnChange
-                  value={Math.round(accuracy.hitRate * 1000)}
-                  className={accuracy.hitRate >= 0.5 ? "text-emerald-300" : "text-rose-300"}
-                >
-                  {(accuracy.hitRate * 100).toFixed(0)}%
-                </ShimmerOnChange>
-              </span>
-            )}
-          </div>
-        )}
+                {(accuracy.hitRate * 100).toFixed(0)}%
+              </ShimmerOnChange>
+            </span>
+          )}
+          {!tradeSignal && !accuracy && <span className="text-fa-frost-dim/40">—</span>}
+        </div>
+
+        {/* Bottom-right — up / no-bet / down bar (full width of the right column) */}
+        <div className="flex items-center min-w-0">
+          {prediction
+            ? <BetCapsule pUp={probUp} full />
+            : <span className="text-fa-frost-dim/40 fa-caption">—</span>}
+        </div>
       </div>
 
       {/* Recap strips: CURR (the bet on the currently-active, still-forming candle — outcome

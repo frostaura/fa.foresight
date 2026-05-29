@@ -78,6 +78,26 @@ export default function InfoTip({ content, children, width = 264 }: { content: R
     };
   }, [el, place]);
 
+  // Safety net for focus-opened tips: a focused trigger keeps the tip up until blur, but blur may
+  // never fire if the user reaches for the mouse and clicks elsewhere (or the trigger re-renders).
+  // While open, dismiss on any pointer-down outside the trigger and on Escape, so a tip can't strand
+  // itself on screen after the interaction has moved on.
+  useEffect(() => {
+    if (!el) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!el.contains(e.target as Node)) close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [el, close]);
+
   const child = Children.only(children);
   if (!isValidElement(child)) return <>{children}</>;
   const c = child as ReactElement<{
