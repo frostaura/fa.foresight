@@ -1,0 +1,445 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens — single source of truth. Tailwind theme mirrors these so any color referenced via
+   `fa-*` Tailwind class or `var(--fa-*)` resolves to the same value. Use these in raw CSS, inline
+   styles, or SVG attributes where Tailwind class names can't reach. */
+:root {
+  --fa-ink: #06121F;
+  --fa-ink-2: #0B1B30;
+  --fa-ink-3: #102744;
+  --fa-frost: #A4D4F4;
+  --fa-frost-bright: #D4ECFF;
+  --fa-frost-dim: #5C8AB4;
+  --fa-glass: rgba(164, 212, 244, 0.06);
+  --fa-glass-strong: rgba(164, 212, 244, 0.12);
+  --fa-edge: rgba(164, 212, 244, 0.18);
+  --fa-success: #7CE3B6;
+  --fa-warning: #F6C667;
+  --fa-danger: #F08484;
+
+  --fa-radius-sm: 4px;
+  --fa-radius: 8px;
+  --fa-radius-lg: 12px;
+
+  --fa-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --fa-duration-fast: 150ms;
+  --fa-duration: 250ms;
+  --fa-duration-slow: 400ms;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: #06121F;
+  background-image:
+    radial-gradient(1200px 600px at 30% 0%, rgba(164, 212, 244, 0.08), transparent 60%),
+    linear-gradient(180deg, #06121F 0%, #050D17 100%);
+  background-attachment: fixed;
+  color: #A4D4F4;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Inter", "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(164, 212, 244, 0.12); border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(164, 212, 244, 0.24); }
+
+@layer components {
+  .fa-card {
+    @apply bg-fa-glass border border-fa-edge rounded-xl shadow-fa-glass backdrop-blur-sm;
+  }
+  .fa-input {
+    @apply bg-fa-glass border border-fa-edge rounded-md px-3 py-2 text-fa-frost-bright placeholder:text-fa-frost-dim/60 focus:outline-none focus:border-fa-frost/40 transition;
+  }
+  .fa-button {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition border border-fa-edge bg-fa-glass-strong hover:bg-fa-glass hover:border-fa-frost/40 disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .fa-button-primary {
+    @apply fa-button bg-fa-frost/15 border-fa-frost/40 text-fa-frost-bright hover:bg-fa-frost/25;
+  }
+  .fa-button-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm transition text-fa-frost/80 hover:text-fa-frost-bright hover:bg-fa-glass;
+  }
+  .fa-link {
+    @apply text-fa-frost-bright hover:underline underline-offset-4;
+  }
+  .fa-stat-label {
+    @apply uppercase tracking-widest text-[10px] text-fa-frost-dim;
+  }
+  .fa-stat-value {
+    @apply text-2xl font-light text-fa-frost-bright;
+  }
+}
+
+/* On-brand range slider. The visible track is two layers: a dim base painted by the input itself
+   (background) and a frost-bright fill drawn via a CSS variable (--fa-range-fill) set inline as a
+   percentage on the element. The thumb is a frost-bright disc with a soft outer halo. */
+.fa-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 18px;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+}
+.fa-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background:
+    linear-gradient(to right,
+      var(--fa-frost-bright) 0%,
+      var(--fa-frost-bright) var(--fa-range-fill, 0%),
+      rgba(164, 212, 244, 0.15) var(--fa-range-fill, 0%),
+      rgba(164, 212, 244, 0.15) 100%);
+}
+.fa-range::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(164, 212, 244, 0.15);
+}
+.fa-range::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--fa-frost-bright);
+}
+.fa-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -6px; /* (thumb - track) / -2 to center */
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--fa-frost-bright);
+  border: 2px solid var(--fa-ink);
+  box-shadow:
+    0 0 0 1px var(--fa-frost-bright),
+    0 0 12px rgba(212, 236, 255, 0.55);
+  transition: transform var(--fa-duration-fast) var(--fa-ease);
+}
+.fa-range::-webkit-slider-thumb:hover { transform: scale(1.08); }
+.fa-range::-webkit-slider-thumb:active { transform: scale(1.15); }
+.fa-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--fa-frost-bright);
+  border: 2px solid var(--fa-ink);
+  box-shadow:
+    0 0 0 1px var(--fa-frost-bright),
+    0 0 12px rgba(212, 236, 255, 0.55);
+}
+.fa-range:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 1px var(--fa-frost-bright),
+    0 0 0 4px rgba(164, 212, 244, 0.25),
+    0 0 12px rgba(212, 236, 255, 0.7);
+}
+.fa-range:focus-visible::-moz-range-thumb {
+  box-shadow:
+    0 0 0 1px var(--fa-frost-bright),
+    0 0 0 4px rgba(164, 212, 244, 0.25),
+    0 0 12px rgba(212, 236, 255, 0.7);
+}
+
+/* On-brand native <select>. Strip the browser chevron; render our own with a Lucide icon
+   positioned absolutely. Padding-right reserves space for the chevron without it occluding text. */
+.fa-select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: none;
+}
+.fa-select::-ms-expand { display: none; }
+
+/* React Flow theme overrides */
+.react-flow__edge-path {
+  stroke: rgba(124, 227, 182, 0.85);
+  stroke-width: 2;
+}
+.react-flow__edge.animated .react-flow__edge-path {
+  stroke-dasharray: 6 4;
+  animation: fa-edge-flow 1.2s linear infinite;
+}
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #A4F0CA;
+  filter: drop-shadow(0 0 4px rgba(124, 227, 182, 0.6));
+}
+@keyframes fa-edge-flow {
+  from { stroke-dashoffset: 20; }
+  to   { stroke-dashoffset: 0; }
+}
+
+/* Row-level shimmer for in-flight backtests in the recent-runs table — a slow amber sweep so the
+ * eye picks out which row is currently running without having to read the status cell. */
+.fa-backtest-shimmer {
+  background: linear-gradient(90deg,
+    rgba(232, 194, 106, 0) 0%,
+    rgba(232, 194, 106, 0.08) 50%,
+    rgba(232, 194, 106, 0) 100%);
+  background-size: 200% 100%;
+  animation: fa-backtest-shimmer-sweep 2.4s ease-in-out infinite;
+}
+@keyframes fa-backtest-shimmer-sweep {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+.react-flow__node {
+  font-family: inherit;
+}
+.react-flow__controls {
+  background: rgba(11, 27, 48, 0.85) !important;
+  border: 1px solid rgba(164, 212, 244, 0.18) !important;
+  border-radius: 8px;
+}
+.react-flow__controls button {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(164, 212, 244, 0.12) !important;
+  color: #A4D4F4 !important;
+}
+.react-flow__background path {
+  stroke: rgba(164, 212, 244, 0.06);
+}
+.react-flow__handle {
+  border-radius: 50%;
+  cursor: crosshair;
+  transition: transform 0.15s ease;
+}
+.react-flow__handle:hover {
+  transform: scale(1.4);
+}
+
+@keyframes fa-fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Confirm dialog entry — overlay fades in while the card scales-up slightly. The two-layer
+   animation gives the modal a sense of "rising from the page" rather than abruptly appearing. */
+@keyframes fa-confirm-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes fa-confirm-card-in {
+  from { opacity: 0; transform: scale(0.96) translateY(4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.fa-confirm-enter { animation: fa-confirm-overlay-in 140ms ease-out; }
+.fa-confirm-enter > * { animation: fa-confirm-card-in 180ms cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* Batch grouping accent — a soft glowing stripe on the left edge of recent-runs rows.
+   Each batch gets one of five on-theme colours (no warm yellows — palette stays in the
+   frost / aurora family). The stripe is realised via inset box-shadow rather than a hard
+   border-left so it reads as a glowing strip with feathered edges. The feathered glow is
+   intentionally subtle so the status dot in the leading cell still reads as the primary
+   eye-catch — the stripe is supporting context, not headline information. */
+.fa-batch { box-shadow: inset 2px 0 0 0 var(--fa-batch-color), inset 8px 0 14px -10px color-mix(in srgb, var(--fa-batch-color) 32%, transparent); }
+.fa-batch-1 { --fa-batch-color: #67e8f9; }   /* cyan-300 */
+.fa-batch-2 { --fa-batch-color: #a5b4fc; }   /* indigo-300 */
+.fa-batch-3 { --fa-batch-color: #c4b5fd; }   /* violet-300 */
+.fa-batch-4 { --fa-batch-color: #6ee7b7; }   /* emerald-300 */
+.fa-batch-5 { --fa-batch-color: #fda4af; }   /* rose-300 */
+
+/* Slightly-bordered table treatment. Outer thin frame around the whole table plus very subtle
+   vertical separators between cells, creating a faint grid feel without going Excel-heavy.
+   Two-tier opacity: the outer frame is more visible (anchors the table as a unit), inner
+   verticals are nearly invisible (just enough to delineate columns at a glance). Horizontal
+   row separators stay where they are — they're already painted per-row via border-t. */
+.fa-table-bordered {
+  border: 1px solid rgba(164, 212, 244, 0.18);
+  border-radius: 8px;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+}
+.fa-table-bordered th + th,
+.fa-table-bordered td + td {
+  border-left: 1px solid rgba(164, 212, 244, 0.07);
+  /* Breathing room between the cell border and the content. Without this the leftmost glyph
+     of each cell touches the divider, which reads visually as "no padding" and crammed. */
+  padding-left: 0.875rem;
+}
+
+/* Bankruptcy status orb in the leading cell. Green = clean run, red = had at least one
+   effective-bankruptcy event. Pulsing soft glow so the eye picks it up while the row
+   is being read. */
+.fa-status-orb { width: 9px; height: 9px; border-radius: 999px; display: inline-block; }
+.fa-status-clean   { background: #34d399; box-shadow: 0 0 8px 1px rgba(52, 211, 153, 0.55); }
+.fa-status-bust    { background: #f43f5e; box-shadow: 0 0 8px 1px rgba(244, 63, 94, 0.55); animation: fa-bust-pulse 1.8s ease-in-out infinite; }
+.fa-status-running { background: #fb923c; box-shadow: 0 0 8px 1px rgba(251, 146, 60, 0.55); animation: fa-running-pulse 1.4s ease-in-out infinite; }
+@keyframes fa-bust-pulse {
+  0%, 100% { box-shadow: 0 0 8px 1px rgba(244, 63, 94, 0.55); }
+  50%      { box-shadow: 0 0 12px 2px rgba(244, 63, 94, 0.85); }
+}
+@keyframes fa-running-pulse {
+  0%, 100% { box-shadow: 0 0 8px 1px rgba(251, 146, 60, 0.55); }
+  50%      { box-shadow: 0 0 14px 3px rgba(251, 146, 60, 0.9); }
+}
+
+/* Pulsing ring on the live-edge chart dot — a new tick triggers a fresh ripple. */
+@keyframes fa-tick-ring {
+  0%   { transform: scale(1); opacity: 0.7; }
+  100% { transform: scale(3.5); opacity: 0; }
+}
+@keyframes fa-tick-core {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.35); }
+}
+
+/* Row flash for newly-arrived live candles. Strong tint on entry, then fades to transparent so
+   the table reads as quiet between events. Direction-colored — up = emerald, down = rose. */
+@keyframes fa-row-flash-up {
+  0%   { background-color: rgba(124, 227, 182, 0.28); }
+  100% { background-color: rgba(124, 227, 182, 0); }
+}
+@keyframes fa-row-flash-down {
+  0%   { background-color: rgba(240, 132, 132, 0.28); }
+  100% { background-color: rgba(240, 132, 132, 0); }
+}
+.fa-row-flash-up   { animation: fa-row-flash-up 1.6s ease-out; }
+.fa-row-flash-down { animation: fa-row-flash-down 1.6s ease-out; }
+
+/* Softer flash for in-place close updates on the still-forming top candle. */
+@keyframes fa-row-pulse-up {
+  0%   { background-color: rgba(124, 227, 182, 0.16); }
+  100% { background-color: rgba(124, 227, 182, 0); }
+}
+@keyframes fa-row-pulse-down {
+  0%   { background-color: rgba(240, 132, 132, 0.16); }
+  100% { background-color: rgba(240, 132, 132, 0); }
+}
+.fa-row-pulse-up   { animation: fa-row-pulse-up 0.6s ease-out; }
+.fa-row-pulse-down { animation: fa-row-pulse-down 0.6s ease-out; }
+
+/* Shimmer flash for numeric counters that just updated after a round closed. A bright stripe
+   sweeps across the text once via a gradient on background-clip:text — no layout shift, no
+   wrappers. The element is keyed on its value in React so the animation replays each tick. */
+@keyframes fa-shimmer-sweep {
+  0%   { background-position: -150% 0; }
+  100% { background-position:  250% 0; }
+}
+.fa-shimmer {
+  background-image: linear-gradient(
+    100deg,
+    currentColor 0%,
+    currentColor 35%,
+    rgba(255, 255, 255, 0.95) 50%,
+    currentColor 65%,
+    currentColor 100%
+  );
+  background-size: 250% 100%;
+  background-repeat: no-repeat;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: fa-shimmer-sweep 1.1s ease-out 1;
+}
+
+/* Sidebar active-tab shimmer — slow continuous sweep over the label text. Replaces the previous
+   bg-fa-glass-strong + border-fa-edge styling for active links: no border, no fill, just an
+   ambient "this is alive" glow on the text. Tuned slower (5.5s linear infinite) than the
+   counter-shimmer above so it reads as breathing background motion, not attention-grabbing. */
+@keyframes fa-nav-shimmer {
+  0%   { background-position:  220% 0; }
+  100% { background-position: -120% 0; }
+}
+.fa-nav-shimmer {
+  background-image: linear-gradient(
+    100deg,
+    rgba(178, 215, 255, 0.55) 0%,
+    rgba(178, 215, 255, 0.55) 40%,
+    rgba(245, 251, 255, 1.00) 50%,
+    rgba(178, 215, 255, 0.55) 60%,
+    rgba(178, 215, 255, 0.55) 100%
+  );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fa-nav-shimmer { animation: fa-nav-shimmer 5.5s linear infinite; }
+}
+
+/* Pending-badge shimmer — a translucent diagonal shine sweeps across the chip every ~2s so the
+   "in-progress" state has a visible heartbeat even when the underlying lean (amber/emerald/rose)
+   hasn't changed. Implemented as a ::after layer so the chip's own background/border stays put
+   and the shine simply rides on top. `overflow: hidden` on the host clips the sweep to the pill
+   shape. White at low opacity tints whatever colour sits behind, so all three lean variants
+   inherit the same animation without per-variant tuning. */
+@keyframes fa-pending-shimmer {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX( 220%); }
+}
+.fa-pending-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.fa-pending-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    100deg,
+    transparent 0%,
+    transparent 35%,
+    rgba(255, 255, 255, 0.22) 50%,
+    transparent 65%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fa-pending-shimmer::after { animation: fa-pending-shimmer 2s linear infinite; }
+}
+
+/* In-progress / still-forming candle marker. Orange dot that fades in and out so the user can
+   tell at a glance which datapoint hasn't closed yet. */
+@keyframes fa-live-dot {
+  0%, 100% { opacity: 0.15; r: 3.5; }
+  50%      { opacity: 0.95; r: 5; }
+}
+@keyframes fa-live-ring {
+  0%   { opacity: 0.5; r: 4; }
+  100% { opacity: 0;   r: 11; }
+}
+.fa-live-dot  { animation: fa-live-dot 1.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.fa-live-ring { animation: fa-live-ring 1.4s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+
+/* Active-candle PENDING glow. Used by PendingActiveDot above the still-forming candle. The inner
+   dot is held at high opacity (0.85 → 1.0) so the directional fill — emerald when winning, rose
+   when losing — reads as that pure colour throughout the cycle and never dims into a muddy hue
+   that blends with the dark background. The outer ring expands and fades to give the glow without
+   ever pulling the eye away from the centre dot's colour. */
+@keyframes fa-glow-dot {
+  0%, 100% { opacity: 0.85; r: 3.6; }
+  50%      { opacity: 1;    r: 4.4; }
+}
+@keyframes fa-glow-ring {
+  0%   { opacity: 0.45; r: 4; }
+  100% { opacity: 0;    r: 11; }
+}
+.fa-glow-dot  { animation: fa-glow-dot 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.fa-glow-ring { animation: fa-glow-ring 1.6s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+
+/* Active-paper-trading marker — same beat as the in-progress candle dot but in FrostAura's
+   signature frost blue. Applied to any element (typically a lucide icon) to softly pulse it as
+   long as a paper session is live. Uses opacity + scale so it works on stroke-based SVG icons
+   that don't expose `r` like the chart's circles do. */
+@keyframes fa-paper-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.12); }
+}
+.fa-paper-pulse {
+  animation: fa-paper-pulse 1.4s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+  color: #7CC0F0; /* FrostAura frost-blue; aligns with --fa-frost / live-pulse hue */
+  filter: drop-shadow(0 0 4px rgba(124, 192, 240, 0.55));
+}

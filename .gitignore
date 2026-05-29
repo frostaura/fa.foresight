@@ -1,0 +1,30 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+TestResults/
+coverage*.xml
+coverage*.json
+
+# Node / Vite
+node_modules/
+dist/
+coverage/
+.vite/
+*.log
+
+# IDE
+.vs/
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS
+Thumbs.db
