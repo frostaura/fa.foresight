@@ -46,3 +46,7 @@ wave-*.png
 shot-*.png
 .playwright-mcp/
 src/frontend/.playwright-mcp/
+
+# TS incremental build cache
+src/frontend/tsconfig.tsbuildinfo
+*.tsbuildinfo
