@@ -151,6 +151,18 @@ public static class DependencyInjection
         services.AddSingleton<IFlowNode, MajorityVoteNode>();
         services.AddSingleton<IFlowNode, FlatBaselineNode>();
         services.AddSingleton<IFlowNode, OutputPredictionNode>();
+        // Strategy-DAG nodes (pure) + the strategy terminal — strategies authored as flows.
+        services.AddSingleton<IFlowNode, OutputStakeNode>();
+        services.AddSingleton<IFlowNode, FlatStrategyNode>();
+        services.AddSingleton<IFlowNode, MartingaleStepNode>();
+        services.AddSingleton<IFlowNode, KellyStrategyNode>();
+        services.AddSingleton<IFlowNode, EdgeAwareKellyNode>();
+        services.AddSingleton<IFlowNode, ClampRoundNode>();
+        services.AddSingleton<IFlowNode, GateNode>();
+        // Executable code node — delegates to the Python sandbox sidecar. Scoped because it depends
+        // on the (typed-HttpClient) ISandboxExecutor; NodeRegistry is scoped too.
+        services.AddScoped<IFlowNode, CodePythonNode>();
+        services.AddHttpClient<ISandboxExecutor, SandboxExecutor>();
 
         // Historical-candle layer: Postgres-backed Binance cache for backtests. The scoped registration
         // gives the adapter its own DbContext per request — backtest runs hold their own scope.

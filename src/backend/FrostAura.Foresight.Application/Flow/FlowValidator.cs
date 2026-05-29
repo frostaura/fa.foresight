@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace FrostAura.Foresight.Application.Flow;
 
 /// <summary>
@@ -5,6 +7,16 @@ namespace FrostAura.Foresight.Application.Flow;
 /// flows from persisting) and on execute (defence in depth — a flow may have been migrated from
 /// an earlier schema or assembled by the AI assistant). Returns the first encountered error rather
 /// than an aggregate so the failing message is precise enough for the user / LLM to act on.
+///
+/// Terminal-node requirement is parameterised by <see cref="FlowDefinition.DefinitionKind"/>:
+///   "model"    → exactly one <c>output.prediction</c>
+///   "strategy" → exactly one <c>output.stake</c>
+/// Model validation is unchanged — the default DefinitionKind of "model" keeps every existing flow
+/// valid.
+///
+/// Nodes implementing <see cref="IDynamicSpecNode"/> have their <see cref="NodePortSpec"/> derived
+/// from per-instance params at validation time rather than using the static Spec property. All
+/// existing static nodes are unaffected.
 /// </summary>
 public sealed class FlowValidator
 {
@@ -22,14 +34,20 @@ public sealed class FlowValidator
             if (!_registry.TryGet(n.Type, out _)) return Err($"Unknown node type '{n.Type}' on node '{n.Id}'.");
         }
 
-        // 2. Exactly one terminal output node
-        var outputs = flow.Nodes.Where(n => n.Type == "output.prediction").ToList();
-        if (outputs.Count == 0) return Err("Flow must contain exactly one 'output.prediction' node.");
-        if (outputs.Count > 1)  return Err($"Flow must contain exactly one 'output.prediction' node; found {outputs.Count}.");
+        // 2. Exactly one terminal output node — kind determined by DefinitionKind.
+        var terminalType = ResolveTerminalType(flow.DefinitionKind);
+        var outputs = flow.Nodes.Where(n => n.Type == terminalType).ToList();
+        if (outputs.Count == 0) return Err($"Flow must contain exactly one '{terminalType}' node.");
+        if (outputs.Count > 1)  return Err($"Flow must contain exactly one '{terminalType}' node; found {outputs.Count}.");
 
-        // 3. Edges resolve to known ports with compatible type tags
+        // 3. Edges resolve to known ports with compatible type tags.
+        // For nodes implementing IDynamicSpecNode, derive spec from the instance params.
         var nodesByType = new Dictionary<string, NodePortSpec>(StringComparer.Ordinal);
-        foreach (var n in flow.Nodes) nodesByType[n.Id] = _registry.Get(n.Type).Spec;
+        foreach (var n in flow.Nodes)
+        {
+            var node = _registry.Get(n.Type);
+            nodesByType[n.Id] = ResolveNodeSpec(node, n);
+        }
 
         foreach (var e in flow.Edges)
         {
@@ -101,6 +119,48 @@ public sealed class FlowValidator
         }
 
         return ValidationResult.Ok();
+    }
+
+    // ---------------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------------
+
+    private static string ResolveTerminalType(string definitionKind) => definitionKind switch
+    {
+        "strategy" => "output.stake",
+        _          => "output.prediction",  // default: "model" and legacy null/empty
+    };
+
+    /// <summary>
+    /// Returns the effective <see cref="NodePortSpec"/> for a node-definition. For nodes that
+    /// implement <see cref="IDynamicSpecNode"/>, the spec is derived from the per-instance params
+    /// by materialising the JsonElement into a plain string→object? dict; otherwise the static
+    /// <see cref="IFlowNode.Spec"/> is returned unchanged.
+    /// </summary>
+    private static NodePortSpec ResolveNodeSpec(IFlowNode node, NodeDefinition def)
+    {
+        if (node is not IDynamicSpecNode dynamic) return node.Spec;
+
+        // Materialise the JsonElement params dict into a plain Dictionary<string,object?> so
+        // the IDynamicSpecNode implementation can read values without depending on System.Text.Json.
+        var dict = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (def.Params.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in def.Params.EnumerateObject())
+            {
+                dict[prop.Name] = prop.Value.ValueKind switch
+                {
+                    JsonValueKind.String  => (object?)prop.Value.GetString(),
+                    JsonValueKind.Number  => prop.Value.TryGetInt64(out var l) ? l : prop.Value.GetDouble(),
+                    JsonValueKind.True    => true,
+                    JsonValueKind.False   => false,
+                    JsonValueKind.Null    => null,
+                    // Objects/arrays fall back to the raw JSON string — dynamic nodes parse them if needed.
+                    _                     => prop.Value.GetRawText(),
+                };
+            }
+        }
+        return dynamic.ResolveSpec(dict);
     }
 
     private static bool TypeTagsCompatible(string upstream, string downstream)

@@ -12,6 +12,12 @@ public sealed record FlowDefinition
 {
     [JsonPropertyName("schemaVersion")] public int SchemaVersion { get; init; } = 1;
     [JsonPropertyName("modelKind")]     public string ModelKind { get; init; } = "deterministic";
+    /// <summary>
+    /// Determines which terminal node type the validator requires. Defaults to "model" (requires
+    /// exactly one <c>output.prediction</c> node). Use "strategy" for strategy DAGs (requires
+    /// exactly one <c>output.stake</c> node).
+    /// </summary>
+    [JsonPropertyName("definitionKind")] public string DefinitionKind { get; init; } = "model";
     [JsonPropertyName("supportsBacktesting")] public bool SupportsBacktesting { get; init; }
     /// <summary>The maximum lookback any node in the flow needs. The backtester extends its fetch
     /// window left by this many candles so indicator warmup is satisfied before the first

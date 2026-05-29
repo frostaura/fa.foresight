@@ -56,6 +56,7 @@ app.MapLiveEndpoints();
 app.MapPaperEndpoints();
 app.MapModelsEndpoints();
 app.MapBacktestsEndpoints();
+app.MapFlowsEndpoints();
 
 app.Run();
 

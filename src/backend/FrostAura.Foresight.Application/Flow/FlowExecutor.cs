@@ -89,8 +89,9 @@ public sealed class FlowExecutor : IFlowExecutor
         if (executed.Count != flow.Nodes.Count)
             throw new InvalidOperationException($"Executor walked {executed.Count} of {flow.Nodes.Count} nodes — DAG topology mismatch (should have been caught by validator).");
 
-        // Pull the terminal output.prediction node's outputs out as the headline result.
-        var outputNode = flow.Nodes.Single(n => n.Type == "output.prediction");
+        // Pull the terminal output node's outputs out as the headline result.
+        // Support both "output.prediction" (model flows) and "output.stake" (strategy flows).
+        var outputNode = flow.Nodes.Single(n => n.Type is "output.prediction" or "output.stake");
         var outputPrediction = outputs
             .Where(kv => kv.Key.nodeId == outputNode.Id)
             .ToDictionary(kv => kv.Key.port, kv => kv.Value, StringComparer.Ordinal);
