@@ -478,11 +478,11 @@ public sealed class BacktestRunner
     private static long IntervalMs(string interval) => PublicIntervalMs(interval);
 
     /// <summary>
-    /// Public passthrough so the in-file slice provider can convert an interval to its millisecond
-    /// duration. Kept on this class (vs lifting into a shared util) because the slice provider is
-    /// also defined in this file; cross-cutting use can hoist later if needed.
+    /// Converts an interval string to its duration in milliseconds. Shared across the application
+    /// layer and infrastructure: the slice provider, the chaos precompute path, and anywhere else
+    /// that needs a deterministic interval→ms mapping without pulling in the Binance client.
     /// </summary>
-    internal static long PublicIntervalMs(string interval) => interval switch
+    public static long PublicIntervalMs(string interval) => interval switch
     {
         "1m"  => 60_000L,
         "5m"  => 300_000L,
@@ -497,8 +497,9 @@ public sealed class BacktestRunner
     /// <c>candles.Take(i+1).ToList()</c> + full-list <c>Where</c> scan that made backtest/training
     /// O(n²) over large candle counts (catastrophic at 30-day 1m ≈ 43k candles). The pre-fetched
     /// lists are already OpenTime-sorted (the adapter returns them ordered), so the search is valid.
+    /// Public so the chaos precompute path can share the same binary-range logic without duplicating it.
     /// </summary>
-    internal static List<HistoricalCandle> SortedRange(
+    public static List<HistoricalCandle> SortedRange(
         IReadOnlyList<HistoricalCandle> sorted, string symbol, long loInclusive, long hiInclusive)
     {
         var res = new List<HistoricalCandle>();

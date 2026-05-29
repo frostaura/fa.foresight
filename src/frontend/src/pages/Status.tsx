@@ -1,9 +1,8 @@
 /**
  * Trading → Status
  *
- * Overview of all trading sessions — overlaid balance curves, hit/miss totals, split into a Live
- * block and a Paper block. The unified sessions + chaos APIs are NOT yet built on the backend; the
- * page calls them optimistically and degrades gracefully on empty / 404.
+ * Overview of all trading sessions — balance totals, hit/miss rates, and chaos sweep results.
+ * Split into Live and Paper blocks. Degrades gracefully to empty states when no sessions exist.
  */
 import { Activity, FlaskConical, TrendingUp } from "lucide-react";
 import PageHeader from "../components/PageHeader";
@@ -95,7 +94,7 @@ function SessionBlock({
       </CardHeader>
 
       {!error && sessions.length > 0 && (
-        <div className="px-5 pb-4 grid grid-cols-3 gap-3">
+        <div className="px-5 pb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
           <StatTile label="Net P&L" value={`${netPnl >= 0 ? "+" : ""}$${netPnl.toFixed(2)}`} />
           <StatTile label="Hit rate" value={totalBets > 0 ? `${((totalWon / totalBets) * 100).toFixed(1)}%` : "—"} hint={`${totalWon}/${totalBets} bets`} />
           <StatTile label="Sessions" value={String(sessions.length)} />
@@ -108,7 +107,7 @@ function SessionBlock({
         )}
         {error && (
           <div className="px-5 py-6 text-sm text-fa-frost-dim">
-            Unable to load sessions — check backend connectivity.
+            Sessions could not be loaded. Verify the backend is running and try again.
           </div>
         )}
         {!isLoading && !error && sessions.length === 0 && (
@@ -158,7 +157,7 @@ export default function Status() {
         />
       </div>
 
-      <div className="p-8 space-y-6">
+      <div className="p-4 sm:p-8 space-y-6">
         {/* Chaos sweep summary */}
         <Card>
           <CardHeader className="flex-row items-center gap-3 pb-3">
@@ -169,7 +168,7 @@ export default function Status() {
             {chaosLoading && <p className="text-sm text-fa-frost-dim">Loading…</p>}
             {chaosError && (
               <p className="text-sm text-fa-frost-dim">
-                Unable to load chaos runs — check backend connectivity.
+                Chaos run history could not be loaded. Verify the backend is running and try again.
               </p>
             )}
             {!chaosLoading && !chaosError && !latestChaos && (

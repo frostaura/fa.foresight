@@ -62,7 +62,8 @@ export default {
         sm: "calc(var(--radius) - 4px)",
       },
       fontFamily: {
-        display: ["ui-sans-serif", "system-ui", "-apple-system", "Inter", "sans-serif"],
+        sans: ["Figtree", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
+        display: ["Figtree", "ui-sans-serif", "system-ui", "-apple-system", "sans-serif"],
         mono: ["ui-monospace", "SF Mono", "Menlo", "monospace"],
       },
       backgroundImage: {

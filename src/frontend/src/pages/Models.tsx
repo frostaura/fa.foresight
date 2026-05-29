@@ -6,6 +6,7 @@ import CreateModelDialog from "../components/CreateModelDialog";
 import FlowDesigner from "../components/FlowDesigner";
 import InfoTip, { TipBody } from "../components/InfoTip";
 import PageHeader from "../components/PageHeader";
+import Ticker, { type TickerItem } from "../components/Ticker";
 import { cn } from "../lib/cn";
 import { fmtRunDate, fmtRunTime } from "../lib/format";
 import { pnlClass } from "../lib/pnl";
@@ -37,12 +38,8 @@ type SubTab = "definitions" | "backtesting";
  * sticky page header followed by a sticky sub-tab band, with the active sub-tab persisted in the
  * `?view=` URL query param.
  *
- * iter-4 ships this page as a list-only view with the Definitions / Backtesting tab structure in
- * place. The full drag-drop flow designer canvas + AI assistant chat panel + backtest UI surface
- * land in follow-up tasks #70 and #71 — until then those panels render an empty-state inviting the
- * user to use the API. Critically: the navigation entry + sub-tab pattern + model card layout +
- * RTK Query wiring are all in place so the designer can be slotted in without further routing or
- * data-fetch plumbing.
+ * Definitions tab: sortable model card grid + dual-view flow designer (design ↔ code round-trip).
+ * Backtesting tab: A/B backtest runner, risk preview, and live-streaming run history.
  */
 export default function Models() {
   const [search, setSearch] = useSearchParams();
@@ -82,7 +79,7 @@ export default function Models() {
           title="Models"
           subtitle="Define and switch between prediction engines for live forecasts and paper trading."
         />
-        <div className="bg-fa-ink/95 backdrop-blur border-b border-fa-edge px-8 pt-3">
+        <div className="bg-fa-ink/95 backdrop-blur border-b border-fa-edge px-4 sm:px-8 pt-3">
           <div className="flex items-center gap-1">
             {(
               [
@@ -107,7 +104,7 @@ export default function Models() {
         </div>
       </div>
 
-      <div className="px-8 py-6 flex-1 min-h-0 overflow-y-auto flex flex-col">
+      <div className="px-4 sm:px-8 py-4 sm:py-6 flex-1 min-h-0 overflow-y-auto flex flex-col">
         {subTab === "definitions" ? (
           <DefinitionsTab models={ordered} isLoading={isLoading} />
         ) : (
@@ -162,13 +159,8 @@ function DefinitionsTab({ models, isLoading }: { models: Model[]; isLoading: boo
   };
   return (
     <div className="space-y-4">
-      {/* Leaderboard gets its own row, centred — it's a distinct visual element with weight, not
-          a third item in a toolbar. The toolbar underneath stays a simple two-item flex (count
-          left, action button right). Stacking removes the 3-column grid imbalance where the
-          leaderboard dwarfed the surrounding text. */}
-      <div className="flex justify-center">
-        <BestPerIntervalTable models={models} />
-      </div>
+      {/* Leaderboard as a single-line auto-scrolling ticker — replaces the boxed table. */}
+      <TopPerformersTicker models={models} />
       <div className="flex items-center justify-between gap-3">
         <div className="text-fa-frost-dim text-sm">
           {isLoading ? "Loading…" : `${models.length} model${models.length === 1 ? "" : "s"}`}
@@ -293,82 +285,113 @@ function parseIntervalWfStats(trainedState: string | null | undefined): Record<s
   return out;
 }
 
-function BestPerIntervalTable({ models }: { models: Model[] }) {
-  // For each supported interval, pick the best-performing model. Score source preference:
-  //   1. Most-recent completed backtest hit-rate (out-of-sample, more honest) — from API's
-  //      scoresByInterval, expressed as 0-100 percent.
-  //   2. Training walk-forward accuracy (in-sample) — parsed from model.trainedState, returns
-  //      0-1 fraction. Multiplied by 100 to align with the backtest scale.
-  // The fallback means a freshly-trained model surfaces on the leaderboard immediately, and gets
-  // upgraded to the (more honest) backtest score once the user runs one. Ties broken by name.
+/**
+ * TopPerformersTicker — replaces the boxed leaderboard table.
+ *
+ * Renders a single-line auto-scrolling tape with per-interval leaders and all model scores.
+ * Only includes entries that have real data (scored models/intervals). If nothing has data yet,
+ * shows a single subtle "Run a backtest to populate" item instead of a row of dashes.
+ */
+function TopPerformersTicker({ models }: { models: Model[] }) {
   const intervals = ["1m", "5m", "15m"] as const;
-  const leaders = useMemo(() => intervals.map((iv) => {
-    const ranked = models
-      .map((m) => {
-        const backtestScore = m.scoresByInterval?.[iv];
-        const wfScore = backtestScore == null ? parseIntervalWfAccs(m.trainedState)[iv] * 100 : undefined;
-        const score = backtestScore ?? wfScore;
-        const source: "backtest" | "wf" | null = backtestScore != null ? "backtest" : (wfScore != null && !Number.isNaN(wfScore) ? "wf" : null);
-        return { m, score, source };
-      })
-      .filter((x): x is { m: Model; score: number; source: "backtest" | "wf" } => x.score != null && !Number.isNaN(x.score) && x.source != null)
-      .sort((a, b) => b.score - a.score || a.m.name.localeCompare(b.m.name));
-    return { interval: iv, leader: ranked[0] ?? null };
-  }), [models]);
-  const anyData = leaders.some((l) => l.leader != null);
-  type LeaderKey = "interval" | "name" | "hitRate";
-  const { sortedRows, headerProps } = useSort<typeof leaders[number], LeaderKey>(leaders, {
-    interval: (r) => r.interval,
-    name: (r) => r.leader?.m.name ?? null,
-    hitRate: (r) => r.leader?.score ?? null,
-  });
+
+  const items = useMemo<TickerItem[]>(() => {
+    const out: TickerItem[] = [];
+
+    // Per-interval leader block — only emit an item if at least one model has a real score
+    for (const iv of intervals) {
+      const ranked = models
+        .map((m) => {
+          const backtestScore = m.scoresByInterval?.[iv];
+          const wfScore =
+            backtestScore == null
+              ? parseIntervalWfAccs(m.trainedState)[iv] * 100
+              : undefined;
+          const score = backtestScore ?? wfScore;
+          const source: "backtest" | "wf" | null =
+            backtestScore != null
+              ? "backtest"
+              : wfScore != null && !Number.isNaN(wfScore)
+                ? "wf"
+                : null;
+          return { m, score, source };
+        })
+        .filter(
+          (x): x is { m: Model; score: number; source: "backtest" | "wf" } =>
+            x.score != null && !Number.isNaN(x.score) && x.source != null
+        )
+        .sort((a, b) => b.score - a.score || a.m.name.localeCompare(b.m.name));
+
+      // Skip this interval entirely if no model has real data for it
+      if (ranked.length === 0) continue;
+
+      const leader = ranked[0];
+      const hitPct =
+        leader.score.toFixed(1) + "%" + (leader.source === "wf" ? "~" : "");
+      const hueClass =
+        leader.score >= 50.5
+          ? "text-emerald-300"
+          : leader.score < 49.5
+            ? "text-rose-300"
+            : "text-fa-frost";
+      out.push({
+        key: `leader-${iv}`,
+        content: (
+          <span className="inline-flex items-baseline gap-2 text-[12px]">
+            <span className="font-mono text-fa-frost-dim text-[10px] uppercase tracking-widest">
+              {iv}
+            </span>
+            <span className="text-fa-frost-bright">{leader.m.name}</span>
+            <span className={cn("tabular-nums font-medium", hueClass)}>{hitPct}</span>
+          </span>
+        ),
+      });
+    }
+
+    // Per-model score strip — only include models that have a real computed score
+    for (const m of models) {
+      const score = computeModelScore(m);
+      if (score == null) continue; // skip untrained / no-data models
+      const scoreStr = score.toFixed(1) + "%";
+      const hueClass = pnlClass(score - 50);
+      out.push({
+        key: `model-${m.id}`,
+        content: (
+          <span className="inline-flex items-baseline gap-1.5 text-[12px]">
+            <span className="text-fa-frost/80 truncate max-w-[140px]">{m.name}</span>
+            <span className={cn("tabular-nums text-[11px]", hueClass)}>{scoreStr}</span>
+          </span>
+        ),
+      });
+    }
+
+    // If nothing has real data yet, show a single hint item (no empty/dashes ticker)
+    if (out.length === 0) {
+      out.push({
+        key: "no-data-hint",
+        content: (
+          <span className="text-[11px] text-fa-frost-dim/70 italic">
+            Run a backtest to populate the leaderboard
+          </span>
+        ),
+      });
+    }
+
+    return out;
+  }, [models]);
+
   return (
     <div
-      className={cn(
-        "w-fit rounded-lg border border-fa-edge/40 bg-fa-ink-2/60 px-5 py-3",
-        !anyData && "opacity-60",
-      )}
-      title="Best-performing model per interval. Hit-rate source: most-recent completed backtest on BTCUSDT, with fallback to training walk-forward accuracy when no backtest exists."
+      className="rounded-lg border border-fa-edge/40 bg-fa-ink-2/60 px-4 py-0 flex items-center gap-3"
+      style={{ height: "2.25rem" }}
+      title="Top performers — best model per interval (hit rate) and all scored models. ~ = walk-forward estimate; plain % = backtest out-of-sample."
     >
-      <div className="text-[10px] uppercase tracking-[0.12em] text-fa-frost-dim mb-2 text-center">
+      <span className="text-[9px] uppercase tracking-[0.14em] text-fa-frost-dim shrink-0 select-none">
         Top performers
+      </span>
+      <div className="flex-1 min-w-0 overflow-hidden">
+        <Ticker items={items} heightClass="h-full" />
       </div>
-      <table className="text-[11px] border-separate border-spacing-0">
-        <thead>
-          <tr className="text-fa-frost-dim">
-            <th className="pr-8 pb-2 text-left font-normal uppercase tracking-wider border-b border-fa-edge/30">
-              <SortHeader<LeaderKey> {...headerProps("interval")}>Interval</SortHeader>
-            </th>
-            <th className="pr-8 pb-2 text-left font-normal uppercase tracking-wider border-b border-fa-edge/30">
-              <SortHeader<LeaderKey> {...headerProps("name")}>Leader</SortHeader>
-            </th>
-            <th className="pb-2 text-right font-normal uppercase tracking-wider border-b border-fa-edge/30">
-              <SortHeader<LeaderKey> {...headerProps("hitRate")} align="right">Hit rate</SortHeader>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {sortedRows.map(({ interval, leader }) => (
-            <tr key={interval}>
-              <td className="pr-8 py-1.5 font-mono text-fa-frost">{interval}</td>
-              <td className="pr-8 py-1.5 text-fa-frost-bright truncate max-w-[200px]">
-                {leader ? leader.m.name : <span className="text-fa-frost-dim">—</span>}
-              </td>
-              {/* Hit-rate cell: % digits right-aligned, a fixed-width slot reserved AFTER for
-                  the optional "~" fallback marker. Without the slot, rows with ~ pushed the
-                  % digits leftward and they no longer vertically aligned across rows. */}
-              <td className={cn("py-1.5 text-right tabular-nums", leader ? pnlClass(leader.score - 50) : "text-fa-frost-dim")}>
-                {leader ? (
-                  <span className="inline-flex items-baseline justify-end" title={leader.source === "backtest" ? "From the most-recent completed backtest." : "From training walk-forward validation. Run a backtest to see an out-of-sample number here."}>
-                    <span>{`${leader.score.toFixed(1)}%`}</span>
-                    <span className="inline-block w-3 text-left text-fa-frost-dim/60">{leader.source === "wf" ? "~" : ""}</span>
-                  </span>
-                ) : "—"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

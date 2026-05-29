@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react";
 
 export default function PageHeader({ title, subtitle, action, leading, backTo }: { title: string; subtitle?: string; action?: ReactNode; leading?: ReactNode; backTo?: string }) {
   return (
-    <div className="px-8 py-6 border-b border-fa-edge flex items-center justify-between gap-6">
+    <div className="px-4 sm:px-8 py-4 sm:py-6 border-b border-fa-edge flex items-center justify-between gap-4 sm:gap-6">
       <div className="flex items-center gap-4 min-w-0">
         {backTo && (
           <Link

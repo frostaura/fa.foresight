@@ -80,7 +80,7 @@ body {
     linear-gradient(180deg, #06121F 0%, #050D17 100%);
   background-attachment: fixed;
   color: #A4D4F4;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Inter", "Segoe UI", Roboto, sans-serif;
+  font-family: "Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -233,14 +233,31 @@ body {
   font-family: inherit;
 }
 .react-flow__controls {
-  background: rgba(11, 27, 48, 0.85) !important;
-  border: 1px solid rgba(164, 212, 244, 0.18) !important;
+  background: rgba(11, 27, 48, 0.95) !important;
+  border: 1px solid rgba(164, 212, 244, 0.32) !important;
   border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5) !important;
 }
-.react-flow__controls button {
-  background: transparent !important;
-  border-bottom: 1px solid rgba(164, 212, 244, 0.12) !important;
+.react-flow__controls-button {
+  background: rgba(16, 39, 68, 0.90) !important;
+  border-bottom: 1px solid rgba(164, 212, 244, 0.18) !important;
   color: #A4D4F4 !important;
+  fill: #A4D4F4 !important;
+  transition: background 150ms ease, fill 150ms ease;
+}
+.react-flow__controls-button:hover {
+  background: rgba(164, 212, 244, 0.14) !important;
+  fill: #D4ECFF !important;
+  color: #D4ECFF !important;
+}
+.react-flow__controls-button svg {
+  fill: #A4D4F4;
+}
+.react-flow__controls-button:hover svg {
+  fill: #D4ECFF;
+}
+.react-flow__controls-button:last-child {
+  border-bottom: none !important;
 }
 .react-flow__background path {
   stroke: rgba(164, 212, 244, 0.06);
@@ -482,4 +499,26 @@ body {
   transform-origin: center;
   color: #7CC0F0; /* FrostAura frost-blue; aligns with --fa-frost / live-pulse hue */
   filter: drop-shadow(0 0 4px rgba(124, 192, 240, 0.55));
+}
+
+/* ── Ticker / marquee ──────────────────────────────────────────────────────────────────────────
+   Seamless horizontal scroll: the inner track holds all items duplicated twice (A A), so
+   translating -50% brings the first copy to where the second started — creating a seamless loop.
+   Duration ~35s gives a leisurely Wall-St tape pace. Pauses on hover (animation-play-state).
+   prefers-reduced-motion: keeps the items in place, overflow scrollable for keyboard/pointer. */
+@keyframes fa-ticker {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.fa-ticker-track {
+  display: flex;
+  width: max-content;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fa-ticker-track {
+    animation: fa-ticker 35s linear infinite;
+  }
+  .fa-ticker-track:hover {
+    animation-play-state: paused;
+  }
 }

@@ -115,9 +115,10 @@ public static class DependencyInjection
         services.AddScoped<ILivePredictionService, LivePredictionService>();
         services.AddScoped<ICalibrationRescaler, CalibrationRescaler>();
         // Continuously fills horizon=1 prediction coverage independent of whether any UI is open,
-        // so the (prediction, outcome) dataset stays unbiased for offline analysis. See the class
-        // doc for the rationale + per-tick contract.
-        services.AddHostedService<LivePredictionGapFillerService>();
+        // so the (prediction, outcome) dataset stays unbiased for offline analysis. Opt-out via
+        // Background:GapFiller=false (e.g. dev) so it doesn't continuously page Binance in the background.
+        if (config.GetValue("Background:GapFiller", true))
+            services.AddHostedService<LivePredictionGapFillerService>();
 
         // Server-side paper trading. The processor BackgroundService is what lets sessions keep
         // trading while the browser is closed — clients are now thin views over server state.
@@ -185,7 +186,9 @@ public static class DependencyInjection
         services.AddHostedService<Live.MicrostructureFollowerService>();
         // Proactively hydrates the cache for every supported (symbol, interval) on startup so the
         // first 365-day backtest finds its data already in Postgres instead of paging Binance live.
-        services.AddHostedService<Live.HistoricalCacheWarmerService>();
+        // Opt-out via Background:CacheWarmer=false (e.g. dev) to avoid a startup Binance backfill storm.
+        if (config.GetValue("Background:CacheWarmer", true))
+            services.AddHostedService<Live.HistoricalCacheWarmerService>();
 
         // Active-model resolver — 30s in-memory cache for the per-(tenant, symbol, interval) →
         // ModelId mapping. Singleton so cached values survive across DI scopes; the resolver opens

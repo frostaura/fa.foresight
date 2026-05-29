@@ -6,11 +6,13 @@ using FrostAura.Foresight.Application.Markets;
 using FrostAura.Foresight.Application.Tenancy;
 using FrostAura.Foresight.Domain.Chaos;
 using FrostAura.Foresight.Domain.MarketData;
+using FrostAura.Foresight.Domain.Ports;
 using FrostAura.Foresight.Domain.Trading;
 using FrostAura.Foresight.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace FrostAura.Foresight.Infrastructure.Chaos;
 
@@ -135,7 +137,7 @@ public sealed class ChaosService : IChaosService
     {
         await using var scope = _scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<ForesightDbContext>();
-        var runner = scope.ServiceProvider.GetRequiredService<BacktestRunner>();
+        var executor = scope.ServiceProvider.GetRequiredService<IFlowExecutor>();
         var venuePriceStore = scope.ServiceProvider.GetRequiredService<IVenuePriceStore>();
         var hub = scope.ServiceProvider.GetRequiredService<IChaosEventHub>();
         var ct = CancellationToken.None;
@@ -162,7 +164,7 @@ public sealed class ChaosService : IChaosService
                 {
                     _logger.LogInformation("Chaos batch {BatchId}: precomputing candidates for model {ModelId}", batchId, row.ModelId);
                     var (cands, synFrac) = await PrecomputeCandidatesAsync(
-                        db, runner, venuePriceStore, tenantId, row.ModelId,
+                        db, executor, venuePriceStore, tenantId, row.ModelId,
                         row.Symbol, row.Interval, req, ct);
                     cached = (cands, synFrac);
                     candidateCache[row.ModelId] = cached;
@@ -273,9 +275,9 @@ public sealed class ChaosService : IChaosService
     // ──────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Precomputes the BetCandidate array for a model by reusing the BacktestRunner's per-candle
-    /// prediction replay (<c>ReplayCandidatesAsync</c>). The candidate array is built ONCE per model
-    /// and reused across all (strategy × windowLen) combos in the matrix.
+    /// Precomputes the BetCandidate array for a model by replaying the model over the cached candle
+    /// range. The candidate array is built ONCE per model and reused across all (strategy × windowLen)
+    /// combos in the matrix.
     ///
     /// Each candidate contains: pUp from the model, anti-look-ahead venue prices from
     /// <see cref="IVenuePriceStore.EnsureEntryAsync"/>, and the realised direction
@@ -283,10 +285,18 @@ public sealed class ChaosService : IChaosService
     ///
     /// Candidates where pUp == 0.5m (model abstained) are dropped — they carry no information and
     /// would silently be skipped by ReplayWindow anyway.
+    ///
+    /// PERFORMANCE: candles for ALL intervals are loaded from the DB in a single query per interval
+    /// and served via an in-memory <see cref="CacheOnlyCandleProvider"/>. A temporary
+    /// <see cref="BacktestRunner"/> is constructed with this provider so the replay is entirely
+    /// in-memory — zero Binance network calls. The Binance-backed provider (injected into the scoped
+    /// <c>BacktestRunner</c>) re-fetches the live edge on every call; using it here would page Binance
+    /// hundreds of times for uncached off-tf candles over the full historical range, causing the chaos
+    /// run to never complete.
     /// </summary>
     private static async Task<(BetCandidate[] Candidates, double SyntheticFraction)> PrecomputeCandidatesAsync(
         ForesightDbContext db,
-        BacktestRunner runner,
+        IFlowExecutor executor,
         IVenuePriceStore venuePriceStore,
         Guid tenantId,
         Guid modelId,
@@ -314,20 +324,83 @@ public sealed class ChaosService : IChaosService
 
         var trainedStateJson = model.TrainedState ?? "{}";
 
-        // We don't have a wall-clock reference here — and we CANNOT use DateTime.UtcNow (banned in
-        // the engine). Instead we pass 0..FarFutureMs; ReplayDirectionsAsync will internally fetch
-        // whatever candles are stored (start=0 = "from the beginning of stored data").
-        // Using long.MaxValue risks overflow inside the warmup arithmetic, so we cap at a safe
-        // 100-year horizon from the Unix epoch (≈ year 2070 in ms from epoch).
-        const long FarFutureMs = 100L * 365 * 86_400_000L;
+        // Bound the candidate window to the ALREADY-CACHED candle range for this (symbol, interval).
+        // Passing 0..far-future makes the candle adapter backfill the ENTIRE Binance history (years
+        // of candles) on a cache miss — an unbounded fetch that hangs the sweep. The chaos pool is
+        // exactly the candles already stored (warmed by training / backtests / the cache warmer):
+        // deterministic and bounded, with no wall-clock (banned in the engine). To widen the pool,
+        // run a backtest / warm more candles for the interval first.
+        var range = await db.HistoricalCandles
+            .Where(c => c.Symbol == symbol && c.Interval == interval)
+            .GroupBy(_ => 1)
+            .Select(g => new { Min = g.Min(c => c.OpenTime), Max = g.Max(c => c.OpenTime) })
+            .FirstOrDefaultAsync(ct);
+        if (range is null)
+            return (Array.Empty<BetCandidate>(), 0.0); // no candles cached yet — nothing to sample
 
-        // ReplayDirectionsAsync is the pure leakage-free per-candle prediction replay already
-        // present on BacktestRunner — reuse it so candidate precompute stays in sync with the
-        // backtest path. We request the full stored range (0..FarFutureMs) so the candidate
-        // pool is as wide as possible.
+        // Load ALL cached candles for every supported interval from DB into memory, then replay
+        // fully in-memory via a DB-only provider. This is the O(1)-network fix: the Binance-backed
+        // adapter would re-fetch the live edge + any uncached off-tf range on every GetRangeAsync
+        // call, producing hundreds of Binance pages for large historical windows.
+        //
+        // We include a warmup buffer on the left (flow.WarmupCandles intervals) so the slice
+        // provider can satisfy indicator warmup for the first bettable candle, exactly mirroring
+        // what BacktestRunner.ReplayDirectionsAsync does when it calls _candles.GetRangeAsync with
+        // startMs - warmupMs. Because the warmup data lives in the DB cache already (it was fetched
+        // when the cache was first warmed), no Binance call is needed.
+        var intervalMs = BacktestRunner.PublicIntervalMs(interval);
+        var warmupBuffer = (long)flow.WarmupCandles * intervalMs;
+        // Cap the candidate pool to the most RECENT N candles. After training, the candle cache can
+        // hold MONTHS of candles; replaying the model flow per-candle over the whole range
+        // (~tens of ms/candle) would take many minutes. A bounded recent pool keeps the precompute to
+        // seconds while giving ample random-start variety. Deterministic (derived from the cached
+        // range, no wall-clock); auto-widened if a sweep's window/sample count needs more.
+        const int MaxCandidatePool = 2000;
+        var sweepMax = req.LengthSweep is { Length: > 0 } ? req.LengthSweep.Max() : req.WindowLengthCandles;
+        var neededForSweep = sweepMax + req.SampleCount + flow.WarmupCandles;
+        var poolCandles = Math.Max(MaxCandidatePool, neededForSweep);
+        var effStart = Math.Max(range.Min, range.Max - (long)poolCandles * intervalMs);
+        // Earliest candle we need: the warmup window before the first candidate start.
+        var fetchStart = effStart - warmupBuffer;
+
+        // Load target-interval candles (includes the warmup buffer before range.Min).
+        var targetCandles = await db.HistoricalCandles
+            .AsNoTracking()
+            .Where(c => c.Symbol == symbol && c.Interval == interval &&
+                        c.OpenTime >= fetchStart && c.OpenTime <= range.Max)
+            .OrderBy(c => c.OpenTime)
+            .ToListAsync(ct);
+
+        // Load off-tf candles. Each off-tf needs its own warmup window (≥ 60 off-tf bars) so
+        // the regime/sub-bar feature packs have enough context at the first candidate candle.
+        var offTfCandles = new Dictionary<string, IReadOnlyList<HistoricalCandle>>();
+        foreach (var otherTf in SupportedSymbols.Intervals)
+        {
+            if (otherTf == interval) continue;
+            var offIntervalMs = BacktestRunner.PublicIntervalMs(otherTf);
+            var offWarmupMs = Math.Max(warmupBuffer, 60L * offIntervalMs);
+            var offFetchStart = range.Min - offWarmupMs;
+
+            var offCandles = await db.HistoricalCandles
+                .AsNoTracking()
+                .Where(c => c.Symbol == symbol && c.Interval == otherTf &&
+                            c.OpenTime >= offFetchStart && c.OpenTime <= range.Max)
+                .OrderBy(c => c.OpenTime)
+                .ToListAsync(ct);
+            offTfCandles[otherTf] = offCandles;
+        }
+
+        // Build a DB-only in-memory provider and a temporary BacktestRunner that uses it.
+        // This runner produces identical replay results to the scoped one but makes zero network
+        // calls — all data is served from the pre-loaded lists above.
+        var dbOnlyProvider = new CacheOnlyCandleProvider(symbol, interval, targetCandles, offTfCandles);
+        var runner = new BacktestRunner(executor, dbOnlyProvider, NullLogger<BacktestRunner>.Instance);
+
+        // ReplayDirectionsAsync is the pure leakage-free per-candle prediction replay — reuse it
+        // so candidate precompute stays in sync with the backtest path.
         var replayPoints = await runner.ReplayDirectionsAsync(
             flow, trainedStateJson, tenantId, modelId,
-            symbol, interval, startMs: 0L, endMs: FarFutureMs,
+            symbol, interval, startMs: range.Min, endMs: range.Max,
             ct: ct, horizonSteps: 2);
 
         if (replayPoints.Count == 0)
@@ -411,5 +484,54 @@ public sealed class ChaosService : IChaosService
             .OrderBy(s => s.StartMs)
             .Take(take)
             .ToListAsync(ct);
+    }
+}
+
+/// <summary>
+/// Pure in-memory <see cref="IHistoricalCandleProvider"/> for the chaos precompute path.
+/// All candles are pre-loaded from the DB cache before construction; every <see cref="GetRangeAsync"/>
+/// call is a binary-range scan over sorted in-memory lists — zero network calls.
+///
+/// This replaces the Binance-backed adapter in the chaos replay path. The Binance adapter has a
+/// freshness re-fetch on the live edge and will backfill any uncached off-tf range from Binance,
+/// producing hundreds of REST pages when the chaos window spans the full cached history. The
+/// DB-only provider deliberately omits any network fallback: the chaos pool is defined as "what is
+/// already cached" so backfilling is both incorrect (non-deterministic — data arrives mid-run) and
+/// catastrophically slow.
+/// </summary>
+internal sealed class CacheOnlyCandleProvider : IHistoricalCandleProvider
+{
+    private readonly string _targetInterval;
+    private readonly IReadOnlyList<HistoricalCandle> _targetCandles;
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<HistoricalCandle>> _offTfCandles;
+
+    public CacheOnlyCandleProvider(
+        string symbol,
+        string interval,
+        IReadOnlyList<HistoricalCandle> targetCandles,
+        IReadOnlyDictionary<string, IReadOnlyList<HistoricalCandle>> offTfCandles)
+    {
+        _ = symbol; // validated by caller; symbol filtering happens in SortedRange via the passed parameter
+        _targetInterval = interval;
+        _targetCandles  = targetCandles;
+        _offTfCandles   = offTfCandles;
+    }
+
+    public Task<IReadOnlyList<HistoricalCandle>> GetRangeAsync(
+        string symbol, string interval, long startMs, long endMs, CancellationToken ct = default)
+    {
+        IReadOnlyList<HistoricalCandle> pool;
+        if (interval == _targetInterval)
+        {
+            pool = _targetCandles;
+        }
+        else if (!_offTfCandles.TryGetValue(interval, out pool!))
+        {
+            return Task.FromResult<IReadOnlyList<HistoricalCandle>>(Array.Empty<HistoricalCandle>());
+        }
+
+        // Binary-range scan identical to BacktestRunner.SortedRange — O(log n + window).
+        var result = BacktestRunner.SortedRange(pool, symbol, startMs, endMs);
+        return Task.FromResult<IReadOnlyList<HistoricalCandle>>(result);
     }
 }

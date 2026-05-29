@@ -496,13 +496,170 @@ function RunInspectPanel({
 
 // ── Flow ↔ ReactFlow translation ────────────────────────────────────────────────────────────
 
+/**
+ * Estimate the rendered height (in pixels) of a single FlowNodeComponent.
+ *
+ * The custom node renders as:
+ *   ┌─────────────────────────┐  ← category header   py-1.5 ≈ 26px
+ *   │ type label              │  ← label row          py-2   ≈ 30px  (+ 1px border-b)
+ *   ├─────────────────────────┤
+ *   │  input col │ output col │  ← port grid          py-2 wrapper (16px) + rows
+ *   └─────────────────────────┘
+ *
+ * Each port row is a flex item with py-0.5 (4px top+bottom) and a 10px handle + text-[10px]:
+ * effective row height ≈ 22px.
+ *
+ * The grid has two columns so the number of rows = max(inputs, outputs).
+ * For matrix_builder with 13 dynamic inputs + fixed inputs the estimate is generous enough
+ * that the node's column consumes the vertical room it truly needs.
+ *
+ * Constants (all in px):
+ *   HEADER_H  = 26   – category badge (py-1.5 × 2 + ~10px text line)
+ *   LABEL_H   = 31   – type label row (py-2 × 2 + ~11px text + 1px border)
+ *   GRID_PAD  = 16   – py-2 on the port grid wrapper (8px top + 8px bottom)
+ *   PORT_ROW  = 22   – each port row (py-0.5 × 2 + ~10px text/handle)
+ *   MIN_H     = 80   – floor so zero-port nodes still have a visible box
+ */
+const NODE_HEADER_H = 26;
+const NODE_LABEL_H  = 31;
+const NODE_GRID_PAD = 16;
+const NODE_PORT_ROW = 22;
+const NODE_MIN_H    = 80;
+const NODE_WIDTH    = 220; // generous estimate; minWidth in CSS is 210
+
+function estimateNodeHeight(spec: NodeCatalogueEntry, dynamicInputCount: number): number {
+  const portRows = Math.max(spec.inputs.length + dynamicInputCount, spec.outputs.length);
+  const raw = NODE_HEADER_H + NODE_LABEL_H + NODE_GRID_PAD + portRows * NODE_PORT_ROW;
+  return Math.max(NODE_MIN_H, raw);
+}
+
+/**
+ * Height-aware left→right layered auto-layout.
+ *
+ * Returns a map of node id → {x, y} position.
+ *
+ * Algorithm:
+ *   1. Assign each node a depth = longest path from any source (node with no in-edges).
+ *      Sources get depth 0. BFS propagates max depth to successors.
+ *   2. Group nodes by depth into columns (layers).
+ *   3. x = depth * COL_GAP + PADDING_X   (COL_GAP = NODE_WIDTH + horizontal breathing room)
+ *   4. Within each layer, stack nodes top→down using each node's ESTIMATED height + a gap:
+ *        y[i] = PADDING_Y + sum(heights[0..i-1]) + i * ROW_GAP
+ *      The tallest layer sets the total canvas height; shorter layers are centred vertically.
+ *
+ * This means a tall node (e.g. matrix_builder with 13 ports, ~358px estimated height) pushes
+ * the next node in its column down by 358px + ROW_GAP, while a compact node with 2 ports
+ * (~116px) only needs ~156px of vertical space — so no two nodes in the same column ever
+ * collide, regardless of port count.
+ *
+ * v6 walk-through (Foresight v6 flow, 9 nodes):
+ *   depth 0: source.binance.klines           (~116px) → col x=60
+ *   depth 1: 5 × indicator.*                 (~116px each) → col x=360, stacked with 40px gap
+ *              total column height ≈ 5×116 + 4×40 = 740px
+ *   depth 2: feature.matrix_builder          (~358px) → col x=660, centred at 370px
+ *   depth 3: model.logistic_regression       (~116px) → col x=960
+ *   depth 4: output.prediction               (~116px) → col x=1260
+ *
+ *   The indicator column (depth 1) is the tallest at ~740px; matrix_builder (one node, 358px)
+ *   is centred within that 740px band → its box occupies [191, 549], well clear of any other node.
+ */
+function autoLayout(
+  nodeIds: string[],
+  edges: Array<{ from: string; to: string }>,
+  nodeHeights: Record<string, number>,
+  COL_GAP    = 300,   // horizontal distance between column left edges (NODE_WIDTH + 80px breathing)
+  ROW_GAP    = 40,    // vertical gap inserted between every pair of adjacent nodes in a column
+  PADDING_X  = 60,
+  PADDING_Y  = 60,
+): Record<string, { x: number; y: number }> {
+  // Build adjacency: srcId → Set<dstId>, and in-degree map
+  const successors = new Map<string, Set<string>>();
+  const inDegree = new Map<string, number>();
+  for (const id of nodeIds) { successors.set(id, new Set()); inDegree.set(id, 0); }
+  for (const e of edges) {
+    const src = e.from.split(".")[0];
+    const dst = e.to.split(".")[0];
+    if (!nodeIds.includes(src) || !nodeIds.includes(dst)) continue;
+    successors.get(src)?.add(dst);
+    inDegree.set(dst, (inDegree.get(dst) ?? 0) + 1);
+  }
+  // Longest-path depth via relaxation (topological BFS from sources)
+  const depth = new Map<string, number>(nodeIds.map((id) => [id, 0]));
+  const queue: string[] = nodeIds.filter((id) => (inDegree.get(id) ?? 0) === 0);
+  const visited = new Set<string>();
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    if (visited.has(cur)) continue;
+    visited.add(cur);
+    const d = depth.get(cur) ?? 0;
+    for (const next of successors.get(cur) ?? []) {
+      const nd = depth.get(next) ?? 0;
+      if (d + 1 > nd) depth.set(next, d + 1);
+      queue.push(next);
+    }
+  }
+  // Nodes not reached (cycles / islands) get depth = max+1 so they still appear
+  const maxDepth = Math.max(0, ...depth.values());
+  for (const id of nodeIds) {
+    if (!visited.has(id)) depth.set(id, maxDepth + 1);
+  }
+  // Group by depth → layers; sort for determinism
+  const layers = new Map<number, string[]>();
+  for (const [id, d] of depth.entries()) {
+    if (!layers.has(d)) layers.set(d, []);
+    layers.get(d)!.push(id);
+  }
+  for (const arr of layers.values()) arr.sort();
+
+  // Compute each layer's total height (sum of node heights + gaps between them)
+  function layerTotalHeight(ids: string[]): number {
+    const sum = ids.reduce((acc, id) => acc + (nodeHeights[id] ?? NODE_MIN_H), 0);
+    return sum + Math.max(0, ids.length - 1) * ROW_GAP;
+  }
+  const maxLayerH = Math.max(0, ...[...layers.values()].map(layerTotalHeight));
+
+  const positions: Record<string, { x: number; y: number }> = {};
+  for (const [d, ids] of layers.entries()) {
+    const lh = layerTotalHeight(ids);
+    // Centre this layer vertically within the tallest layer's band
+    let y = PADDING_Y + (maxLayerH - lh) / 2;
+    ids.forEach((id) => {
+      positions[id] = { x: PADDING_X + d * COL_GAP, y };
+      y += (nodeHeights[id] ?? NODE_MIN_H) + ROW_GAP;
+    });
+  }
+  return positions;
+}
+
+/**
+ * Check whether any two nodes overlap given per-node estimated bounding boxes.
+ * Uses the same height estimates as autoLayout so the overlap check is consistent
+ * with the layout that will be applied when overlap is detected.
+ */
+function hasOverlapEstimated(
+  nodes: Array<{ id: string; position: { x: number; y: number } }>,
+  nodeHeights: Record<string, number>,
+  nodeWidth = NODE_WIDTH,
+): boolean {
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j];
+      const ah = nodeHeights[a.id] ?? NODE_MIN_H;
+      const bh = nodeHeights[b.id] ?? NODE_MIN_H;
+      const overlapX = a.position.x < b.position.x + nodeWidth  && b.position.x < a.position.x + nodeWidth;
+      const overlapY = a.position.y < b.position.y + bh         && b.position.y < a.position.y + ah;
+      if (overlapX && overlapY) return true;
+    }
+  }
+  return false;
+}
+
 function definitionToRfNodes(def: FlowDefinition | null, catalogue: Record<string, NodeCatalogueEntry> | undefined): RFNode<FaNodeData>[] {
   if (!def || !catalogue) return [];
-  return def.nodes.map((n) => {
+
+  // Pre-compute per-node specs and dynamic inputs so we can estimate heights before layout.
+  const nodeSpecs = def.nodes.map((n) => {
     const spec = catalogue[n.type] ?? emptySpec();
-    // Collect the dynamic input ports actually wired into this node: target-port names of incoming
-    // edges that aren't one of the spec's fixed inputs. Only meaningful for acceptsAdditionalInputs
-    // nodes (matrix_builder), where each upstream feature column connects to its own column port.
     const fixed = new Set(spec.inputs.map((p) => p.name));
     const dynamicInputs = spec.acceptsAdditionalInputs
       ? [...new Set(
@@ -512,10 +669,39 @@ function definitionToRfNodes(def: FlowDefinition | null, catalogue: Record<strin
             .map(([, port]) => port)
         )]
       : [];
+    return { n, spec, dynamicInputs };
+  });
+
+  // Build per-node height estimates (used for both overlap-check and layout).
+  const nodeHeights: Record<string, number> = {};
+  for (const { n, spec, dynamicInputs } of nodeSpecs) {
+    nodeHeights[n.id] = estimateNodeHeight(spec, dynamicInputs.length);
+  }
+
+  // Decide whether auto-layout is needed:
+  //   • Any node is missing a position, OR
+  //   • Any two nodes overlap given their estimated bounding boxes.
+  const hasMissingPos = def.nodes.some((n) => !n.position);
+  const savedPositions = def.nodes.map((n) => ({ id: n.id, position: n.position ?? { x: 0, y: 0 } }));
+  const needsLayout = hasMissingPos || hasOverlapEstimated(savedPositions, nodeHeights);
+
+  let layoutPositions: Record<string, { x: number; y: number }> = {};
+  if (needsLayout) {
+    layoutPositions = autoLayout(
+      def.nodes.map((n) => n.id),
+      def.edges,
+      nodeHeights,
+    );
+  }
+
+  return nodeSpecs.map(({ n, spec, dynamicInputs }) => {
+    const position = needsLayout
+      ? (layoutPositions[n.id] ?? { x: 0, y: 0 })
+      : (n.position ?? { x: 0, y: 0 });
     return {
       id: n.id,
       type: "fa-node",
-      position: n.position ?? { x: 0, y: 0 },
+      position,
       data: { typeId: n.type, params: n.params, spec, dynamicInputs }
     };
   });

@@ -1,9 +1,8 @@
 /**
  * Trading → Live
  *
- * Live session list + create form scaffold. Wired to /api/sessions optimistically; gracefully
- * handles 404 / backend-not-yet-available until WS D lands. Live actions are intentionally
- * inert (buttons visible, operations fire optimistically but don't crash on backend absence).
+ * Live session list + create form. Wired to /api/sessions; degrades gracefully when no
+ * sessions exist yet. Live actions fire against the backend and surface errors inline.
  */
 import { useState } from "react";
 import { Activity, Plus, AlertTriangle } from "lucide-react";
@@ -263,7 +262,7 @@ export default function Live() {
         />
       </div>
 
-      <div className="p-8 space-y-6">
+      <div className="p-4 sm:p-8 space-y-6">
         {/* Warning banner — always shown */}
         <div className="p-3 rounded-md border border-fa-warning/30 bg-fa-warning/5 flex items-start gap-2 text-sm text-fa-warning">
           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -286,14 +285,14 @@ export default function Live() {
           )}
           {isError && (
             <p className="text-sm text-fa-frost-dim">
-              Unable to load sessions — check backend connectivity.
+              Sessions could not be loaded. Verify the backend is running and try again.
             </p>
           )}
           {!isLoading && !isError && liveSessions.length === 0 && (
             <div className="fa-card px-6 py-8 text-center">
-              <p className="text-fa-frost-dim text-sm">No live sessions yet.</p>
+              <p className="text-fa-frost-dim text-sm">No active live sessions.</p>
               <p className="text-fa-frost-dim/60 text-xs mt-1">
-                Fill in the form above to create one after the backend gate is enabled.
+                Use the form above to create one once the arm flow is complete.
               </p>
             </div>
           )}
