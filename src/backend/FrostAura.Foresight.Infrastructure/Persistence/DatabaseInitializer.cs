@@ -389,6 +389,54 @@ public static class DatabaseInitializer
             ALTER TABLE paper_bets ADD COLUMN IF NOT EXISTS ""Shares"" numeric(18,6) NULL;
             ALTER TABLE paper_bets ADD COLUMN IF NOT EXISTS ""Synthetic"" boolean NOT NULL DEFAULT false;
             ALTER TABLE paper_bets ADD COLUMN IF NOT EXISTS ""MarketExternalId"" varchar(200) NULL;
+
+            -- Workstream D: chaos/bust test engine tables.
+            CREATE TABLE IF NOT EXISTS chaos_runs (
+                ""Id"" uuid PRIMARY KEY,
+                ""TenantId"" uuid NOT NULL,
+                ""BatchId"" uuid NOT NULL,
+                ""ModelId"" uuid NOT NULL REFERENCES models(""Id""),
+                ""StrategyId"" varchar(32) NOT NULL,
+                ""Symbol"" varchar(20) NOT NULL,
+                ""Interval"" varchar(10) NOT NULL,
+                ""WindowLength"" int NOT NULL,
+                ""SampleCount"" int NOT NULL,
+                ""AllowBorrow"" boolean NOT NULL DEFAULT true,
+                ""Seed"" bigint NOT NULL DEFAULT 0,
+                ""Status"" varchar(20) NOT NULL DEFAULT 'running',
+                ""BustRate"" numeric(8,6) NULL,
+                ""ProfitP5"" numeric(20,4) NULL,
+                ""ProfitP50"" numeric(20,4) NULL,
+                ""ProfitP95"" numeric(20,4) NULL,
+                ""WorstDrawdown"" numeric(20,4) NULL,
+                ""MeanZeroCrossings"" double precision NULL,
+                ""SyntheticBetFraction"" numeric(6,5) NULL,
+                ""Pass"" boolean NOT NULL DEFAULT false,
+                ""StartedAt"" timestamptz NOT NULL,
+                ""CompletedAt"" timestamptz NULL,
+                ""Error"" varchar(2000) NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_chaos_runs_tenant_batch
+                ON chaos_runs (""TenantId"", ""BatchId"");
+
+            CREATE TABLE IF NOT EXISTS chaos_samples (
+                ""Id"" uuid PRIMARY KEY,
+                ""ChaosRunId"" uuid NOT NULL REFERENCES chaos_runs(""Id"") ON DELETE CASCADE,
+                ""StartMs"" bigint NOT NULL,
+                ""Survived"" boolean NOT NULL,
+                ""FinalBalance"" numeric(20,4) NOT NULL,
+                ""MaxDrawdown"" numeric(20,4) NOT NULL,
+                ""ZeroCrossings"" int NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS ix_chaos_samples_run
+                ON chaos_samples (""ChaosRunId"");
+
+            -- Zombie cleanup for chaos runs (same pattern as backtests).
+            UPDATE chaos_runs
+            SET ""Status"" = 'failed',
+                ""CompletedAt"" = NOW(),
+                ""Error"" = COALESCE(NULLIF(""Error"", ''), 'Interrupted by backend restart')
+            WHERE ""Status"" = 'running';
         ", ct);
 
         // Seed default tenant if none exists.

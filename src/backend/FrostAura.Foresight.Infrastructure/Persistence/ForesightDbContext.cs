@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FrostAura.Foresight.Domain.Backtesting;
 using FrostAura.Foresight.Domain.Bankroll;
+using FrostAura.Foresight.Domain.Chaos;
 using FrostAura.Foresight.Domain.Live;
 using FrostAura.Foresight.Domain.MarketData;
 using FrostAura.Foresight.Domain.Markets;
@@ -33,6 +34,8 @@ public sealed class ForesightDbContext : DbContext
     public DbSet<Backtest> Backtests => Set<Backtest>();
     public DbSet<BacktestBet> BacktestBets => Set<BacktestBet>();
     public DbSet<VenueMarketPrice> VenueMarketPrices => Set<VenueMarketPrice>();
+    public DbSet<ChaosRun> ChaosRuns => Set<ChaosRun>();
+    public DbSet<ChaosSample> ChaosSamples => Set<ChaosSample>();
 
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -291,6 +294,37 @@ public sealed class ForesightDbContext : DbContext
             b.HasIndex(x => new { x.TenantId, x.Venue, x.Symbol, x.Interval, x.TargetOpenTime, x.ObservedAt, x.MarketExternalId }).IsUnique();
             // Lookup index for the anti-look-ahead query.
             b.HasIndex(x => new { x.Venue, x.Symbol, x.Interval, x.TargetOpenTime });
+        });
+
+        mb.Entity<ChaosRun>(b =>
+        {
+            b.ToTable("chaos_runs");
+            b.HasKey(r => r.Id);
+            b.Property(r => r.StrategyId).HasMaxLength(32).IsRequired();
+            b.Property(r => r.Symbol).HasMaxLength(20).IsRequired();
+            b.Property(r => r.Interval).HasMaxLength(10).IsRequired();
+            b.Property(r => r.Status).HasMaxLength(20).IsRequired();
+            b.Property(r => r.BustRate).HasColumnType("numeric(8,6)");
+            b.Property(r => r.ProfitP5).HasColumnType("numeric(20,4)");
+            b.Property(r => r.ProfitP50).HasColumnType("numeric(20,4)");
+            b.Property(r => r.ProfitP95).HasColumnType("numeric(20,4)");
+            b.Property(r => r.WorstDrawdown).HasColumnType("numeric(20,4)");
+            b.Property(r => r.SyntheticBetFraction).HasColumnType("numeric(6,5)");
+            b.Property(r => r.Error).HasMaxLength(2000);
+            b.HasIndex(r => new { r.TenantId, r.BatchId });
+            b.HasMany(r => r.Samples)
+                .WithOne()
+                .HasForeignKey(s => s.ChaosRunId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<ChaosSample>(b =>
+        {
+            b.ToTable("chaos_samples");
+            b.HasKey(s => s.Id);
+            b.Property(s => s.FinalBalance).HasColumnType("numeric(20,4)");
+            b.Property(s => s.MaxDrawdown).HasColumnType("numeric(20,4)");
+            b.HasIndex(s => s.ChaosRunId);
         });
     }
 }

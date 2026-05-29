@@ -1,4 +1,5 @@
 using FrostAura.Foresight.Application.Backtesting;
+using FrostAura.Foresight.Application.Chaos;
 using FrostAura.Foresight.Application.Flow;
 using FrostAura.Foresight.Application.Flow.Nodes;
 using FrostAura.Foresight.Application.Markets;
@@ -203,6 +204,10 @@ public static class DependencyInjection
         services.AddSingleton<Live.IBacktestEventHub, Live.BacktestEventHub>();
         services.AddScoped<IModelTrainingService, Live.ModelTrainingService>();
         services.AddScoped<IWalkForwardService, Live.WalkForwardService>();
+
+        // Workstream D: chaos/bust test engine.
+        services.AddScoped<IChaosService, Infrastructure.Chaos.ChaosService>();
+        services.AddSingleton<Infrastructure.Chaos.IChaosEventHub, Infrastructure.Chaos.ChaosEventHub>();
 
         return services;
     }
