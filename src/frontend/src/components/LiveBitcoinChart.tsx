@@ -617,13 +617,21 @@ export default function LiveBitcoinChart({
     return points;
   }, [paperSession, interval]);
 
-  // Balance Y-domain: spans from 0 to 120% of the maximum balance so the line reads as an upward
-  // trend without rescaling the candle axis. We use a hidden secondary YAxis with this domain.
+  // Balance Y-domain (hidden secondary YAxis). The balance line reads as a mini-chart sitting on the
+  // SAME bottom baseline as the price candles: recharts maps domain[0] → the plot's bottom edge, so
+  // we anchor domain[0] just below the lowest balance (trough hugs the bottom border) and stretch
+  // the domain top so the peak only reaches ~45% of the height — keeping the whole balance trend in
+  // the lower portion, overlaid on the big chart with their bottoms matching.
   const balanceYDomain = useMemo<[number, number]>(() => {
     if (balanceSeries.length === 0) return [0, 1];
-    const maxBal = Math.max(...balanceSeries.map((p) => p.balance));
-    const minBal = Math.min(0, Math.min(...balanceSeries.map((p) => p.balance)));
-    return [minBal, maxBal * 1.2];
+    const vals = balanceSeries.map((p) => p.balance);
+    const maxBal = Math.max(...vals);
+    const minBal = Math.min(...vals);
+    // Floor the span for a flat/single-point series so the line doesn't blow up to full height.
+    const span = Math.max(maxBal - minBal, Math.max(maxBal * 0.02, 1));
+    const lo = minBal - span * 0.05;  // trough ~flush with the bottom border
+    const hi = lo + span / 0.45;      // peak reaches ~45% up → bottom-anchored mini-chart
+    return [lo, hi];
   }, [balanceSeries]);
 
   // Merge balance points into the chart row data so recharts can render them on the same x-axis.
