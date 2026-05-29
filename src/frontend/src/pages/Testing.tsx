@@ -26,14 +26,16 @@ import { modelNeedsTraining, useModelTrainGate } from "../components/ModelTrainG
 import {
   useClearBacktestsMutation,
   useGetBacktestBatchQuery,
+  useGetChaosSamplesQuery,
   useGetStakingStrategiesQuery,
   useGetSymbolsQuery,
   useListBacktestsQuery,
   useListChaosRunsQuery,
   useListModelsQuery,
   useRunBacktestMutation,
-  useRunBustTestMutation,
+  useRunChaosMutation,
   type Backtest,
+  type ChaosRequest,
   type ChaosRunNormalized,
   type Model,
 } from "../store/api";
@@ -70,7 +72,7 @@ export default function Testing() {
             <TabsTrigger value="backtest">Backtest</TabsTrigger>
             <TabsTrigger value="chaos">
               <FlaskConical className="h-3.5 w-3.5 mr-1.5" />
-              Chaos Test (Bust testing)
+              Chaos Test
             </TabsTrigger>
           </TabsList>
 
@@ -204,6 +206,16 @@ function optimalLookbackDays(interval: string): number {
   }
 }
 
+/**
+ * Converts a sampled-window length (in candles) to whole days for the given interval.
+ * days = windowLength × intervalMs ÷ 1 day. Rounds to the nearest day, with a 1-day floor so a
+ * sub-day window never renders as "0d".
+ */
+function windowCandlesToDays(windowLength: number, interval: string): number {
+  const days = (windowLength * intervalToMs(interval)) / 86_400_000;
+  return Math.max(1, Math.round(days));
+}
+
 // ── Shared form components ────────────────────────────────────────────────────────────────────
 
 function Field({ label, info, children }: { label: string; info?: { title: string; body: React.ReactNode }; children: React.ReactNode }) {
@@ -224,7 +236,11 @@ function Field({ label, info, children }: { label: string; info?: { title: strin
   );
 }
 
-function Metric({
+/**
+ * One label-over-value group on the borderless Risk-preview rail. No box — groups are separated
+ * by a thin left divider (applied by the parent via `border-l`). The first item carries no divider.
+ */
+function RailMetric({
   label, value, sub, tooltip, tone, accent,
 }: {
   label: string;
@@ -240,7 +256,7 @@ function Metric({
     : accent ? "text-fa-frost-bright"
     : "text-fa-frost-bright";
   return (
-    <div className="rounded-md border border-fa-edge/40 bg-fa-ink-2/40 px-3 py-2" title={tooltip}>
+    <div className="min-w-0" title={tooltip}>
       <div className="text-[10px] uppercase tracking-wider text-fa-frost-dim">{label}</div>
       <div className={cn("text-lg tabular-nums leading-tight mt-0.5", toneColor)}>{value}</div>
       {sub && <div className="text-[10px] text-fa-frost-dim/70 mt-0.5 tabular-nums">{sub}</div>}
@@ -300,7 +316,7 @@ function RiskPreview({
   const betVsOptimal = optimalBet != null && optimalBet > 0 ? bet / optimalBet : null;
 
   return (
-    <div className="fa-card px-6 py-5">
+    <div className="fa-card px-5 py-4">
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
@@ -336,64 +352,70 @@ function RiskPreview({
         </span>
       </button>
 
-      {!expanded && (
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Metric
-            label="Optimal bet"
-            value={optimalBet != null ? `$${optimalBet.toFixed(2)}` : "—"}
-            sub="half-Kelly · best risk/reward"
-            tooltip="The half-Kelly bet size — half the growth-maximising fraction. Canonical 'fastest safe' bet."
-            accent
-          />
-          <Metric
-            label="Your bet"
-            value={`$${bet.toLocaleString()}`}
-            sub={`${metrics.lives} lives · ${
-              metrics.p <= 0.5 ? "no edge"
-              : metrics.pRuin >= 0.001 ? `${(metrics.pRuin * 100).toFixed(metrics.pRuin < 0.01 ? 3 : 2)}% bust`
-              : `${(metrics.pRuin * 100).toFixed(4)}% bust`
-            }`}
-            tone={metrics.verdict.tone}
-            tooltip="Your current bet size, plus how many losses your bankroll can absorb and the resulting gambler's-ruin probability."
-          />
-          <Metric
-            label="Risk:reward"
-            value={
-              betVsOptimal == null ? "—"
-              : betVsOptimal >= 1.01 ? `${betVsOptimal.toFixed(1)}× over`
-              : betVsOptimal <= 0.99 ? `${(1 / betVsOptimal).toFixed(1)}× under`
-              : "Optimal"
-            }
-            sub={
-              betVsOptimal == null ? "no edge available"
-              : betVsOptimal >= 1.01 ? `reduce bet → $${optimalBet!.toFixed(2)} for max growth/risk`
-              : betVsOptimal <= 0.99 ? "safer than half-Kelly · giving up growth"
-              : "matched to your edge"
-            }
-            tone={
-              betVsOptimal == null ? "danger"
-              : betVsOptimal >= 2 ? "danger"
-              : betVsOptimal >= 1.25 ? "warn"
-              : "safe"
-            }
-            tooltip="Ratio of your bet to the half-Kelly optimum."
-          />
-        </div>
-      )}
-
       {expanded && (
         <div className="mt-4 space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Metric label="Lives" value={metrics.lives.toString()} sub={`$${bankroll.toLocaleString()} ÷ $${bet.toLocaleString()}`} tooltip="Number of losses absorbable from starting bankroll." />
-            <Metric
-              label="P(bust)"
-              value={metrics.p <= 0.5 ? "100%" : (metrics.pRuin >= 0.001 ? `${(metrics.pRuin * 100).toFixed(metrics.pRuin < 0.01 ? 3 : 2)}%` : `${(metrics.pRuin * 100).toFixed(4)}%`)}
-              sub={metrics.p <= 0.5 ? "no edge" : "(q÷p)^lives"}
-              tone={metrics.verdict.tone}
-              tooltip="Gambler's ruin probability. Below ~1% is the practical 'safe' threshold."
+          {/* Borderless metric rail — label-over-value groups separated by thin vertical dividers,
+              no boxes around each metric. Wraps gracefully on narrow viewports. */}
+          <div className="flex flex-wrap gap-x-6 gap-y-4">
+            <RailMetric
+              label="Optimal bet"
+              value={optimalBet != null ? `$${optimalBet.toFixed(2)}` : "—"}
+              sub="half-Kelly · best risk/reward"
+              tooltip="The half-Kelly bet size — half the growth-maximising fraction. Canonical 'fastest safe' bet."
+              accent
             />
-            <Metric label="Half-Kelly bet" value={metrics.halfKellyBet > 0 ? `$${metrics.halfKellyBet.toFixed(2)}` : "—"} sub={`(2p − 1) ÷ 2 = ${(metrics.kellyFraction * 50).toFixed(2)}%`} tooltip="Half the Kelly fraction. The conventional 'fastest safe' bet size." accent />
-            <Metric label="Full Kelly bet" value={metrics.kellyBet > 0 ? `$${metrics.kellyBet.toFixed(2)}` : "—"} sub={`2p − 1 = ${(metrics.kellyFraction * 100).toFixed(2)}%`} tooltip="The growth-maximising bet fraction. Has severe drawdowns in practice." />
+            <div className="pl-6 border-l border-fa-edge/40">
+              <RailMetric
+                label="Your bet"
+                value={`$${bet.toLocaleString()}`}
+                sub={`${metrics.lives} lives · ${
+                  metrics.p <= 0.5 ? "no edge"
+                  : metrics.pRuin >= 0.001 ? `${(metrics.pRuin * 100).toFixed(metrics.pRuin < 0.01 ? 3 : 2)}% bust`
+                  : `${(metrics.pRuin * 100).toFixed(4)}% bust`
+                }`}
+                tone={metrics.verdict.tone}
+                tooltip="Your current bet size, plus how many losses your bankroll can absorb and the resulting gambler's-ruin probability."
+              />
+            </div>
+            <div className="pl-6 border-l border-fa-edge/40">
+              <RailMetric
+                label="Risk:reward"
+                value={
+                  betVsOptimal == null ? "—"
+                  : betVsOptimal >= 1.01 ? `${betVsOptimal.toFixed(1)}× over`
+                  : betVsOptimal <= 0.99 ? `${(1 / betVsOptimal).toFixed(1)}× under`
+                  : "Optimal"
+                }
+                sub={
+                  betVsOptimal == null ? "no edge available"
+                  : betVsOptimal >= 1.01 ? `reduce → $${optimalBet!.toFixed(2)}`
+                  : betVsOptimal <= 0.99 ? "safer than half-Kelly"
+                  : "matched to your edge"
+                }
+                tone={
+                  betVsOptimal == null ? "danger"
+                  : betVsOptimal >= 2 ? "danger"
+                  : betVsOptimal >= 1.25 ? "warn"
+                  : "safe"
+                }
+                tooltip="Ratio of your bet to the half-Kelly optimum."
+              />
+            </div>
+            <div className="pl-6 border-l border-fa-edge/40">
+              <RailMetric label="Lives" value={metrics.lives.toString()} sub={`$${bankroll.toLocaleString()} ÷ $${bet.toLocaleString()}`} tooltip="Number of losses absorbable from starting bankroll." />
+            </div>
+            <div className="pl-6 border-l border-fa-edge/40">
+              <RailMetric
+                label="P(bust)"
+                value={metrics.p <= 0.5 ? "100%" : (metrics.pRuin >= 0.001 ? `${(metrics.pRuin * 100).toFixed(metrics.pRuin < 0.01 ? 3 : 2)}%` : `${(metrics.pRuin * 100).toFixed(4)}%`)}
+                sub={metrics.p <= 0.5 ? "no edge" : "(q÷p)^lives"}
+                tone={metrics.verdict.tone}
+                tooltip="Gambler's ruin probability. Below ~1% is the practical 'safe' threshold."
+              />
+            </div>
+            <div className="pl-6 border-l border-fa-edge/40">
+              <RailMetric label="Full Kelly" value={metrics.kellyBet > 0 ? `$${metrics.kellyBet.toFixed(2)}` : "—"} sub={`2p − 1 = ${(metrics.kellyFraction * 100).toFixed(2)}%`} tooltip="The growth-maximising bet fraction. Has severe drawdowns in practice." />
+            </div>
           </div>
 
           <div className="space-y-1.5 text-[11px]">
@@ -624,7 +646,7 @@ function BacktestHistory({ rows, models, runningProgress }:
   };
   if (rows.length === 0) return null;
   return (
-    <div className="fa-card px-6 py-5 flex-1 min-h-0 flex flex-col">
+    <div className="fa-card px-5 py-4 flex-1 min-h-0 flex flex-col">
       <div className="flex items-center justify-between mb-3 shrink-0">
         <div className="text-fa-frost-bright text-sm font-medium">Recent runs</div>
         <button onClick={onClear} disabled={isClearing}
@@ -893,10 +915,17 @@ function BacktestTab({ models, eligible }: { models: Model[]; eligible: Model[] 
   }
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-6">
-      <div className="fa-card px-6 py-5 shrink-0">
+    <div className="flex-1 min-h-0 flex flex-col gap-4">
+      <div className="fa-card px-5 py-4 shrink-0">
         <div className="flex items-center justify-between mb-4">
-          <div className="text-fa-frost-bright text-sm font-medium">Run a new backtest</div>
+          <div className="text-fa-frost-bright text-sm font-medium inline-flex items-center gap-1.5">
+            Run a new backtest
+            <InfoTip width={320} content={<TipBody title="Backtest">Backtest replays the selected staking strategy against historical candles. With Allow borrow on, balance can dip negative; with strict-bust on, the run halts the moment the next sized bet would exceed the bankroll. A/B mode posts one run per model × strategy in parallel, grouped by batch id.</TipBody>}>
+              <button type="button" aria-label="About backtests" className="text-fa-frost-dim/70 hover:text-fa-frost-bright transition leading-none">
+                <Info className="h-3.5 w-3.5" />
+              </button>
+            </InfoTip>
+          </div>
           {isABMode && (
             <span className="text-[10px] uppercase tracking-wider text-amber-300 bg-amber-300/10 border border-amber-300/30 rounded-full px-2 py-0.5">
               A/B · {fanout.length} runs · {modelIds.length}m × {strategyIds.length}s
@@ -1007,10 +1036,11 @@ function BacktestTab({ models, eligible }: { models: Model[]; eligible: Model[] 
             </button>
           </div>
         </div>
-        <p className="text-fa-frost-dim/70 text-[11px] mt-3">
-          Backtest replays the selected staking strategy against historical candles. {allowBorrow ? "With Allow borrow on, balance can dip negative." : "With strict-bust on, the run halts the moment the next sized bet would exceed the bankroll."}
-          {isABMode && ` A/B mode posts ${fanout.length} runs in parallel (${modelIds.length} model${modelIds.length > 1 ? "s" : ""} × ${strategyIds.length} strateg${strategyIds.length > 1 ? "ies" : "y"}), grouped by batch id.`}
-        </p>
+        {isABMode && (
+          <p className="text-fa-frost-dim/70 text-[11px] mt-3">
+            A/B mode posts {fanout.length} runs in parallel ({modelIds.length} model{modelIds.length > 1 ? "s" : ""} × {strategyIds.length} strateg{strategyIds.length > 1 ? "ies" : "y"}), grouped by batch id.
+          </p>
+        )}
       </div>
 
       <RiskPreview
@@ -1035,6 +1065,86 @@ function BacktestTab({ models, eligible }: { models: Model[]; eligible: Model[] 
   );
 }
 
+// ── ChaosSamplesDrawer ────────────────────────────────────────────────────────────────────────
+
+/**
+ * Per-window drill-in for a completed chaos run. Fetches GET /api/chaos/{id}/samples and shows
+ * each random window's outcome (start time, survived flag, final balance, drawdown). Reuses the
+ * SideDrawer chrome from BustTestBatchModal for visual consistency.
+ */
+function ChaosSamplesDrawer({ run, modelName, onClose }:
+    { run: ChaosRunNormalized; modelName: string; onClose: () => void }) {
+  const { data: samples, isFetching } = useGetChaosSamplesQuery(run.id);
+  const ordered = useMemo(
+    () => [...(samples ?? [])].sort((a, b) => a.finalBalance - b.finalBalance),
+    [samples],
+  );
+  const bustedCount = ordered.filter((s) => !s.survived).length;
+  const windowDays = windowCandlesToDays(run.windowLength, run.interval);
+  return (
+    <SideDrawer open onClose={onClose} widthClass="w-full md:w-[760px]">
+      <div className="flex flex-col h-full">
+        <div className="px-5 py-4 border-b border-fa-edge flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-fa-frost-bright text-sm font-medium truncate">Chaos windows · {modelName}</div>
+            <div className="text-fa-frost-dim text-xs">
+              {ordered.length} window{ordered.length === 1 ? "" : "s"} · {windowDays}d each ·{" "}
+              {bustedCount === 0
+                ? <span className="text-emerald-300">survived every window</span>
+                : <span className="text-rose-300">{bustedCount} busted</span>}
+              {" · "}<span className="capitalize">{run.strategyId}</span>
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="Close" title="Close (Esc)"
+            className="h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-md border border-fa-edge bg-fa-glass text-fa-frost-dim hover:text-fa-frost-bright hover:border-fa-frost/30 transition">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {isFetching && ordered.length === 0 ? (
+            <div className="text-fa-frost-dim text-sm py-8 text-center">Loading…</div>
+          ) : ordered.length === 0 ? (
+            <div className="text-fa-frost-dim text-sm py-8 text-center">No per-window samples recorded for this run.</div>
+          ) : (
+            <table className="fa-table-bordered w-full text-xs">
+              <thead className="text-fa-frost-dim">
+                <tr className="text-left">
+                  <th className="font-normal py-1 px-2 text-center">Status</th>
+                  <th className="font-normal py-1 px-2 text-left">Window start</th>
+                  <th className="font-normal py-1 px-2 text-right">Final balance</th>
+                  <th className="font-normal py-1 px-2 text-right">Max DD</th>
+                  <th className="font-normal py-1 px-2 text-right" title="Times the balance crossed zero">0-cross</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ordered.map((s) => (
+                  <tr key={s.id} className="border-t border-fa-edge/40">
+                    <td className="py-1 px-2 text-center">
+                      <span className={cn("fa-status-orb", s.survived ? "fa-status-clean" : "fa-status-bust")} title={s.survived ? "Survived the window." : "Busted in this window."} />
+                    </td>
+                    <td className="py-1 px-2 text-fa-frost-dim tabular-nums" title={new Date(s.startMs).toLocaleString()}>
+                      {fmtRunDate(s.startMs)} {fmtRunTime(new Date(s.startMs).toISOString())}
+                    </td>
+                    <td className={cn("py-1 px-2 text-right tabular-nums", s.survived ? "text-fa-frost-bright" : "text-rose-300")}>
+                      ${s.finalBalance.toFixed(2)}
+                    </td>
+                    <td className={cn("py-1 px-2 text-right tabular-nums", s.maxDrawdown > 0 ? "text-rose-300" : "text-fa-frost-dim")}>
+                      {s.maxDrawdown === 0 ? "$0.00" : `-$${s.maxDrawdown.toFixed(2)}`}
+                    </td>
+                    <td className={cn("py-1 px-2 text-right tabular-nums", s.zeroCrossings > 0 ? "text-amber-300" : "text-fa-frost-dim")}>
+                      {s.zeroCrossings}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </SideDrawer>
+  );
+}
+
 // ── ChaosTab ──────────────────────────────────────────────────────────────────────────────────
 
 function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) {
@@ -1047,18 +1157,17 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
   const [modelIds, setModelIds] = useLocalStorageState<string[]>("fa.chaos.modelIds", () => { const m = firstUsableModel(eligible); return m ? [m.id] : []; });
   const [strategyId, setStrategyId] = useLocalStorageState<string>("fa.chaos.strategyId", "flat");
   const [symbol, setSymbol] = useLocalStorageState<string>("fa.chaos.symbol", supportedSymbols[0] ?? "BTCUSDT");
-  const [interval] = useLocalStorageState<string>("fa.chaos.interval", "5m");
+  const interval = "5m";
   const [initialBalance, setInitialBalance] = useLocalStorageState<number>("fa.chaos.initialBalance", 1000);
   const [initialBetSize, setInitialBetSize] = useLocalStorageState<number>("fa.chaos.initialBetSize", 10);
-  const [maxLookbackDays, setMaxLookbackDays] = useLocalStorageState<number>("fa.chaos.maxLookbackDays", 14);
+  const [windowDays, setWindowDays] = useLocalStorageState<number>("fa.chaos.windowDays", 14);
+  const [sampleCount, setSampleCount] = useLocalStorageState<number>("fa.chaos.sampleCount", 200);
   const [allowBorrow, setAllowBorrow] = useLocalStorageState<boolean>("fa.chaos.allowBorrow", false);
   const [error, setError] = useState<string | null>(null);
+  const [openSamplesRun, setOpenSamplesRun] = useState<ChaosRunNormalized | null>(null);
 
-  const [runBustTest, { isLoading: bustLoading }] = useRunBustTestMutation();
-  const { data: history, refetch } = useListBacktestsQuery({});
-  const { data: chaosRuns } = useListChaosRunsQuery({});
-  const [progress, setProgress] = useState<Record<string, { placed: number; total: number; kind: string }>>({});
-  const subscriptions = useRef<Map<string, EventSource>>(new Map());
+  const [runChaos, { isLoading: chaosLoading }] = useRunChaosMutation();
+  const { data: chaosRuns, refetch: refetchChaos } = useListChaosRunsQuery({});
 
   useEffect(() => {
     setModelIds((prev) => sanitizeModelSelection(prev, eligible));
@@ -1081,72 +1190,55 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
     if (!validIds.has(strategyId)) setStrategyId(strategiesResp.default ?? "flat");
   }, [strategiesResp, strategyId, setStrategyId]);
 
-  const subscribeToRun = useCallback((id: string) => {
-    if (subscriptions.current.has(id)) return;
-    const es = new EventSource(`/api/backtests/${id}/stream`);
-    subscriptions.current.set(id, es);
-    const cleanup = () => {
-      es.close();
-      subscriptions.current.delete(id);
-      setProgress((p) => { const next = { ...p }; delete next[id]; return next; });
-      refetch();
-    };
-    es.onmessage = (msg) => {
-      try {
-        const evt = JSON.parse(msg.data);
-        setProgress((p) => ({ ...p, [id]: { placed: evt.candlesProcessed ?? 0, total: evt.totalCandles ?? 0, kind: evt.kind } }));
-        if (evt.kind === "completed" || evt.kind === "failed") {
-          if (evt.kind === "failed" && evt.error) setError(evt.error);
-          cleanup();
-        }
-      } catch { /* malformed */ }
-    };
-    es.onerror = cleanup;
-  }, [refetch]);
-
+  // Poll the chaos list while any run is in-flight so rows go running → complete live.
   useEffect(() => {
-    if (!history) return;
-    for (const row of history) {
-      if (row.status === "running" && row.batchKind === "bust-test" && !subscriptions.current.has(row.id)) {
-        setProgress((p) => p[row.id] ? p : ({ ...p, [row.id]: { placed: 0, total: 0, kind: "started" } }));
-        subscribeToRun(row.id);
-      }
-    }
-  }, [history, subscribeToRun]);
-
-  useEffect(() => {
-    const subs = subscriptions.current;
-    return () => { for (const es of subs.values()) es.close(); subs.clear(); };
-  }, []);
-
-  // Poll while bust-test rungs are running
-  useEffect(() => {
-    if (!history) return;
-    const pending = history.some((r) => r.batchKind === "bust-test" && (r.status === "running" || r.status === "queued"));
+    const pending = (chaosRuns ?? []).some((cr) => cr.status === "running");
     if (!pending) return;
-    const id = window.setInterval(() => refetch(), 2000);
+    const id = window.setInterval(() => { refetchChaos(); }, 2000);
     return () => window.clearInterval(id);
-  }, [history, refetch]);
+  }, [chaosRuns, refetchChaos]);
 
-  const isRunning = bustLoading || Object.keys(progress).length > 0;
+  // days → candles for the chaos window length. candlesPerDay = 1 day ÷ intervalMs.
+  const candlesPerDay = 86_400_000 / intervalToMs(interval);
+  const windowLengthCandles = Math.round(windowDays * candlesPerDay);
+
+  const isRunning = chaosLoading || (chaosRuns ?? []).some((cr) => cr.status === "running");
 
   const onRun = async () => {
     setError(null);
-    if (modelIds.length === 0) { setError("Pick at least one model."); return; }
+    if (modelIds.length === 0) { setError("Pick at least one trained model."); return; }
+    const req: ChaosRequest = {
+      modelIds,
+      strategyIds: [strategyId],
+      symbol,
+      interval,
+      windowLengthCandles,
+      lengthSweep: null,
+      sampleCount,
+      initialBalance,
+      initialBetSize,
+      allowBorrow,
+      seed: null,
+    };
     try {
-      for (const mId of modelIds) {
-        await runBustTest({
-          modelId: mId, symbol, interval,
-          initialBalance, initialBetSize,
-          maxLookbackDays, allowBorrow, strategyId,
-        }).unwrap();
-      }
-      refetch();
+      // Chaos fans out over all selected models internally — one call per launch.
+      await runChaos(req).unwrap();
+      refetchChaos();
     } catch (e: unknown) {
       const err = e as { data?: { error?: string } };
-      setError(err.data?.error ?? "Bust test failed");
+      setError(err.data?.error ?? "Chaos test failed");
     }
   };
+
+  const modelNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const x of models) m.set(x.id, x.name);
+    return m;
+  }, [models]);
+  const sortedChaos = useMemo(
+    () => [...(chaosRuns ?? [])].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()),
+    [chaosRuns],
+  );
 
   if (eligible.length === 0) {
     return (
@@ -1154,26 +1246,27 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
         <AlertTriangle className="h-6 w-6 text-amber-300 mx-auto" />
         <p className="text-fa-frost-bright">No backtestable models</p>
         <p className="text-fa-frost-dim text-sm max-w-md mx-auto">
-          Build a deterministic model in Models to enable chaos/bust testing.
+          Build a deterministic model in Models to enable chaos testing.
         </p>
       </div>
     );
   }
 
-  // Bust-test rows from the standard backtest history
-  const bustRows = (history ?? []).filter((r) => r.batchKind === "bust-test");
-
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-6">
+    <div className="flex-1 min-h-0 flex flex-col gap-4">
       {/* Launch form */}
-      <div className="fa-card px-6 py-5 shrink-0">
-        <div className="text-fa-frost-bright text-sm font-medium mb-4">Run a bust-test sweep</div>
-        <p className="text-fa-frost-dim/70 text-[11px] mb-4">
-          A bust-test sweeps one backtest per day from 1…max days. For each window it asks: "would this model + strategy have survived the last k days?" — answering the survival question across a range of starting points rather than a single fixed window.
-        </p>
+      <div className="fa-card px-5 py-4 shrink-0">
+        <div className="text-fa-frost-bright text-sm font-medium mb-4 inline-flex items-center gap-1.5">
+          Run a chaos test
+          <InfoTip width={360} content={<TipBody title="Chaos test">A chaos test draws many random windows from history and replays each one for the selected model + strategy. It reports how often the strategy busts (bust rate), the spread of profit outcomes (P5/P50/P95), the worst drawdown seen, and a Pass verdict (bust rate 0 AND median profit &gt; 0). It answers "does this survive random starting points?" rather than a single fixed window.</TipBody>}>
+            <button type="button" aria-label="About chaos tests" className="text-fa-frost-dim/70 hover:text-fa-frost-bright transition leading-none">
+              <Info className="h-3.5 w-3.5" />
+            </button>
+          </InfoTip>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <Field label={`Models${modelIds.length > 1 ? ` (${modelIds.length})` : ""}`}
-            info={{ title: "Models", body: "Pick one or more deterministic models. Each selected model gets its own bust-test batch (N rungs in series)." }}>
+            info={{ title: "Models", body: "Pick one or more trained deterministic models. The chaos engine fans out one result row per model × strategy × window length." }}>
             <RichMultiSelect
               options={buildModelOptions(eligible)}
               value={modelIds}
@@ -1183,7 +1276,7 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
             />
           </Field>
           <Field label="Staking strategy"
-            info={{ title: "Staking strategy", body: "The staking method for all rungs of the sweep. The chaos test answers 'does this model + strategy survive?' — single strategy keeps the comparison clean." }}>
+            info={{ title: "Staking strategy", body: "The staking method applied across every sampled window. A single strategy keeps the survival comparison clean." }}>
             <RichMultiSelect
               options={availableStrategies.map((s): RichMultiSelectOption => ({
                 value: s.id,
@@ -1197,14 +1290,20 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
             />
           </Field>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <Field label="Symbol">
             <SymbolPicker symbols={supportedSymbols} value={symbol} onChange={setSymbol} size="sm" />
           </Field>
-          <Field label="Max lookback (days)"
-            info={{ title: "Bust test sweep", body: "Runs one backtest per day from 1…max. The output is a survival curve across windows — survive day 1, then 2, then 3 …, until a window kills it." }}>
-            <input type="number" min={1} max={365} value={maxLookbackDays}
-              onChange={(e) => setMaxLookbackDays(Math.min(365, Math.max(1, Number(e.target.value))))}
+          <Field label="Window length (days)"
+            info={{ title: "Window length", body: "How long each tested window is. Each of the N samples replays a random window of this many days. Converted to candles internally for the 5m interval." }}>
+            <input type="number" min={1} max={365} value={windowDays}
+              onChange={(e) => setWindowDays(Math.min(365, Math.max(1, Number(e.target.value))))}
+              className="fa-input w-full bg-fa-glass border border-fa-edge rounded-md px-2 py-1.5 text-fa-frost-bright text-sm" />
+          </Field>
+          <Field label="Samples"
+            info={{ title: "Samples", body: "How many random windows to draw and replay. More samples = a more reliable bust-rate estimate but a longer run. 200 is a sensible default." }}>
+            <input type="number" min={10} max={1000} value={sampleCount}
+              onChange={(e) => setSampleCount(Math.min(1000, Math.max(10, Number(e.target.value))))}
               className="fa-input w-full bg-fa-glass border border-fa-edge rounded-md px-2 py-1.5 text-fa-frost-bright text-sm" />
           </Field>
           <Field label="Bankroll ($)">
@@ -1228,7 +1327,7 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
           </div>
           <div className="flex items-center gap-3 flex-wrap ml-auto">
             <label className="inline-flex items-center gap-2 cursor-pointer select-none"
-              title={allowBorrow ? "Run continues even when a staking step exceeds the bankroll." : "Run halts when the next bet would exceed bankroll — strict bust."}>
+              title={allowBorrow ? "Window continues even when a staking step exceeds the bankroll." : "Window halts the moment the next bet would exceed bankroll — strict bust."}>
               <span className="relative inline-block w-9 h-5">
                 <input type="checkbox" checked={allowBorrow} onChange={(e) => setAllowBorrow(e.target.checked)} className="peer sr-only" />
                 <span className={cn("absolute inset-0 rounded-full transition-colors", allowBorrow ? "bg-fa-frost-bright/40" : "bg-fa-edge")} />
@@ -1241,57 +1340,75 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
             <button onClick={onRun} disabled={isRunning || modelIds.length === 0}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-fa-frost-bright/20 hover:bg-fa-frost-bright/30 text-fa-frost-bright text-sm border border-fa-frost-bright/30 disabled:opacity-50 disabled:cursor-not-allowed transition">
               {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FlaskConical className="h-4 w-4" />}
-              {bustLoading || isRunning
-                ? "Bust test running…"
-                : `Run bust test${modelIds.length > 1 ? ` · ${modelIds.length}×${maxLookbackDays}` : ` · ${maxLookbackDays} rungs`}`}
+              {isRunning
+                ? "Chaos test running…"
+                : `Run chaos test · ${sampleCount} windows × ${windowDays}d`}
             </button>
           </div>
         </div>
       </div>
 
-      {/* Chaos run summary from /api/chaos */}
-      {chaosRuns && chaosRuns.length > 0 && (
-        <div className="fa-card px-6 py-5 shrink-0">
-          <div className="text-fa-frost-bright text-sm font-medium mb-3">Chaos run history</div>
-          <div className="overflow-auto">
+      {/* Chaos run summary from /api/chaos — the single source of truth for this tab, produced by
+          the Run chaos test button above. Each row drills into its per-window samples. */}
+      {sortedChaos.length > 0 ? (
+        <div className="fa-card px-5 py-4 flex-1 min-h-0 flex flex-col">
+          <div className="text-fa-frost-bright text-sm font-medium mb-3 shrink-0">Chaos run history</div>
+          <div className="flex-1 min-h-0 overflow-auto">
             <table className="fa-table-bordered min-w-full text-xs [&_th]:whitespace-nowrap [&_td]:whitespace-nowrap">
               <thead className="text-fa-frost-dim sticky top-0 z-10 bg-fa-ink/95 backdrop-blur">
                 <tr>
-                  <th className="font-normal pb-2 px-2 w-8 text-center" aria-label="Status"></th>
-                  <th className="font-normal pb-2 pr-4 text-left">Model</th>
-                  <th className="font-normal pb-2 pr-4 text-left">Strategy</th>
-                  <th className="font-normal pb-2 pr-4 text-center">Symbol</th>
-                  <th className="font-normal pb-2 pr-4 text-right">Bust rate</th>
-                  <th className="font-normal pb-2 pr-4 text-right">P50 profit</th>
-                  <th className="font-normal pb-2 pr-4 text-center">Pass</th>
-                  <th className="font-normal pb-2 pr-4 text-right">Started</th>
+                  <th className="font-normal px-2 w-8 text-center" aria-label="Status"></th>
+                  <th className="font-normal pr-4 text-left">Model</th>
+                  <th className="font-normal pr-4 text-left">Strategy</th>
+                  <th className="font-normal pr-4 text-center">Symbol</th>
+                  <th className="font-normal pr-4 text-center">Interval</th>
+                  <th className="font-normal pr-4 text-right">Window</th>
+                  <th className="font-normal pr-4 text-right">Samples</th>
+                  <th className="font-normal pr-4 text-right">Bust rate</th>
+                  <th className="font-normal pr-4 text-right">P50 profit</th>
+                  <th className="font-normal pr-4 text-right">Worst DD</th>
+                  <th className="font-normal pr-4 text-center">Pass</th>
+                  <th className="font-normal pr-4 text-right">Started</th>
                 </tr>
               </thead>
               <tbody>
-                {[...chaosRuns].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()).map((cr: ChaosRunNormalized) => {
+                {sortedChaos.map((cr: ChaosRunNormalized, idx) => {
                   const model = models.find((m) => m.id === cr.modelId);
                   const isRunningCr = cr.status === "running";
                   const orbClass = isRunningCr ? "fa-status-running" : cr.pass ? "fa-status-clean" : "fa-status-bust";
                   const bustPct = cr.bustRate == null ? "—" : `${(cr.bustRate * 100).toFixed(1)}%`;
                   const bustClass = cr.bustRate == null ? "text-fa-frost-dim" : cr.bustRate > 0.1 ? "text-rose-300" : cr.bustRate > 0.02 ? "text-amber-300" : "text-emerald-300";
+                  const wDays = windowCandlesToDays(cr.windowLength, cr.interval);
+                  const stripe = idx % 2 === 1 ? "bg-fa-frost/[0.018]" : "";
+                  const clickable = cr.status === "complete";
                   return (
-                    <tr key={cr.id} className="border-t border-fa-edge/40">
-                      <td className="py-1.5 px-2 text-center"><span className={cn("fa-status-orb", orbClass)} /></td>
-                      <td className="py-1.5 pr-4 text-fa-frost-bright">{model?.name ?? cr.modelId.slice(0, 8)}</td>
-                      <td className="py-1.5 pr-4 text-fa-frost-dim capitalize">{cr.strategyId}</td>
-                      <td className="py-1.5 pr-4 text-center"><SymbolIcon symbol={cr.symbol} className="h-5 w-5" /></td>
-                      <td className={cn("py-1.5 pr-4 text-right tabular-nums", bustClass)}>{bustPct}</td>
-                      <td className={cn("py-1.5 pr-4 text-right tabular-nums", cr.profitP50 == null ? "text-fa-frost-dim" : cr.profitP50 > 0 ? "text-emerald-300" : "text-rose-300")}>
+                    <tr key={cr.id} onClick={clickable ? () => setOpenSamplesRun(cr) : undefined}
+                      className={cn("border-t border-fa-edge/40 transition-colors", isRunningCr && "fa-backtest-shimmer", stripe,
+                        clickable ? "cursor-pointer hover:bg-fa-frost/[0.04]" : "")}
+                      title={clickable ? "Open the per-window samples for this run" : isRunningCr ? "Running — samples available once complete" : undefined}>
+                      <td className="px-2 text-center"><span className={cn("fa-status-orb", orbClass)} /></td>
+                      <td className="pr-4 text-fa-frost-bright">{model?.name ?? cr.modelId.slice(0, 8)}</td>
+                      <td className="pr-4 text-fa-frost-dim capitalize">{cr.strategyId}</td>
+                      <td className="pr-4 text-center"><SymbolIcon symbol={cr.symbol} className="h-5 w-5" /></td>
+                      <td className="pr-4 text-center text-fa-frost-bright">{cr.interval}</td>
+                      <td className="pr-4 text-right tabular-nums text-fa-frost-bright" title={`${cr.windowLength.toLocaleString()} candles per sampled window`}>{wDays}d</td>
+                      <td className="pr-4 text-right tabular-nums text-fa-frost-dim" title="Random windows tested">{cr.sampleCount.toLocaleString()}</td>
+                      <td className={cn("pr-4 text-right tabular-nums", bustClass)}>{bustPct}</td>
+                      <td className={cn("pr-4 text-right tabular-nums", cr.profitP50 == null ? "text-fa-frost-dim" : cr.profitP50 > 0 ? "text-emerald-300" : "text-rose-300")}>
                         {cr.profitP50 == null ? "—" : `$${cr.profitP50.toFixed(2)}`}
                       </td>
-                      <td className="py-1.5 pr-4 text-center">
+                      <td className={cn("pr-4 text-right tabular-nums", cr.worstDrawdown == null || cr.worstDrawdown === 0 ? "text-fa-frost-dim" : "text-rose-300")}
+                        title="Worst peak-to-trough balance drop across all sampled windows">
+                        {cr.worstDrawdown == null ? "—" : cr.worstDrawdown === 0 ? "$0.00" : `-$${cr.worstDrawdown.toFixed(2)}`}
+                      </td>
+                      <td className="pr-4 text-center">
                         <span className={cn("text-[9px] uppercase tracking-wider rounded-full px-1.5 py-0.5 border",
                           isRunningCr ? "text-cyan-300 bg-cyan-300/10 border-cyan-300/30" :
                           cr.pass ? "text-emerald-300 bg-emerald-300/10 border-emerald-300/30" : "text-rose-300 bg-rose-300/10 border-rose-300/30")}>
                           {isRunningCr ? "running" : cr.pass ? "pass" : "fail"}
                         </span>
                       </td>
-                      <td className="py-1.5 pr-4 text-right text-fa-frost-dim">{fmtRunTime(cr.startedAt)}</td>
+                      <td className="pr-4 text-right text-fa-frost-dim" title={new Date(cr.startedAt).toLocaleString()}>{fmtRunTime(cr.startedAt)}</td>
                     </tr>
                   );
                 })}
@@ -1299,15 +1416,18 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
             </table>
           </div>
         </div>
+      ) : (
+        <div className="fa-card px-6 py-12 text-center">
+          <p className="text-fa-frost-dim text-sm">No chaos runs yet. Run a chaos test above to see results here.</p>
+        </div>
       )}
 
-      {/* Bust-test rows from backtest history */}
-      <BacktestHistory rows={bustRows} models={models} runningProgress={progress} />
-
-      {bustRows.length === 0 && (!chaosRuns || chaosRuns.length === 0) && (
-        <div className="fa-card px-6 py-12 text-center">
-          <p className="text-fa-frost-dim text-sm">No chaos runs yet. Run a bust test above to see results here.</p>
-        </div>
+      {openSamplesRun && (
+        <ChaosSamplesDrawer
+          run={openSamplesRun}
+          modelName={modelNameById.get(openSamplesRun.modelId) ?? openSamplesRun.modelId.slice(0, 8)}
+          onClose={() => setOpenSamplesRun(null)}
+        />
       )}
     </div>
   );

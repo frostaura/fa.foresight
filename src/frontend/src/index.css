@@ -327,6 +327,24 @@ body {
   padding-left: 0.875rem;
 }
 
+/* Monday.com-like table typography. Unlayered (sits after @layer components) so it overrides
+   Tailwind utility classes for vertical padding/sizing on header and body cells. Headers get
+   even top/bottom rhythm — the rounded `overflow:hidden` frame above used to clip header text
+   against the top border because the cells only carried bottom padding. Headers read quieter
+   and smaller than body text; cells get comfortable, even vertical rhythm. */
+.fa-table-bordered th {
+  padding-top: 0.625rem;
+  padding-bottom: 0.625rem;
+  font-size: 0.6875rem;   /* 11px — quieter, smaller than body */
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.fa-table-bordered td {
+  font-size: 0.75rem;     /* 12px */
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
 /* Bankruptcy status orb in the leading cell. Green = clean run, red = had at least one
    effective-bankruptcy event. Pulsing soft glow so the eye picks it up while the row
    is being read. */

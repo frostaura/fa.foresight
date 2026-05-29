@@ -86,6 +86,17 @@ export const api = createApi({
       query: (params) => ({ url: "chaos", params }),
       providesTags: ["Chaos"],
     }),
+    // Start a chaos run. Body = ChaosRequest. Fans out over ModelIds × StrategyIds × window
+    // lengths internally; returns the shared batchId. Invalidates Chaos so the list re-fetches.
+    runChaos: b.mutation<{ batchId: string }, ChaosRequest>({
+      query: (body) => ({ url: "chaos", method: "POST", body }),
+      invalidatesTags: ["Chaos"],
+    }),
+    // Per-window sample rows for one chaos run (capped server-side). Drives the drill-in drawer.
+    getChaosSamples: b.query<ChaosSample[], string>({
+      query: (id) => ({ url: `chaos/${id}/samples` }),
+      providesTags: ["Chaos"],
+    }),
 
     // ── Flow sandbox execution ───────────────────────────────────────────────
     runFlowNode: b.mutation<RunNodeResult, RunNodeRequest>({
@@ -355,6 +366,8 @@ export const {
   useCreateSessionMutation,
   useStopSessionMutation,
   useListChaosRunsQuery,
+  useRunChaosMutation,
+  useGetChaosSamplesQuery,
   useRunFlowNodeMutation,
   useListStrategiesQuery,
   useGetStrategiesQuery,
@@ -425,6 +438,39 @@ export interface ChaosRunNormalized {
   startedAt: string;
   completedAt?: string | null;
   error?: string | null;
+}
+
+/**
+ * Body for POST /api/chaos. Matches the backend `ChaosRequest` record (ASP.NET deserialises
+ * camelCase by default). The chaos engine fans out one run row per (model × strategy × window
+ * length) and replays SampleCount random windows of WindowLengthCandles each.
+ */
+export interface ChaosRequest {
+  modelIds: string[];
+  strategyIds: string[];
+  symbol: string;
+  interval: string;
+  windowLengthCandles: number;
+  /** Optional extra window lengths to sweep alongside the primary. null = primary only. */
+  lengthSweep: number[] | null;
+  sampleCount: number;
+  initialBalance: number;
+  initialBetSize: number;
+  allowBorrow: boolean;
+  /** Reproducibility seed; null lets the server pick a fixed default (0). */
+  seed: number | null;
+}
+
+/** One random-window outcome within a chaos run. From GET /api/chaos/{id}/samples. */
+export interface ChaosSample {
+  id: string;
+  chaosRunId: string;
+  /** OpenTime (ms) of the first candidate in this window. */
+  startMs: number;
+  survived: boolean;
+  finalBalance: number;
+  maxDrawdown: number;
+  zeroCrossings: number;
 }
 
 /** @deprecated Use ChaosRunNormalized instead. */
