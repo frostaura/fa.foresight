@@ -14,7 +14,7 @@ import ReactFlow, {
   useReactFlow
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { AlertTriangle, Code2, Layout, Loader2, Play, Save, Terminal, X } from "lucide-react";
+import { AlertTriangle, Code2, Layout, Loader2, Play, Save, Terminal, Trash2, X } from "lucide-react";
 import { cn } from "../lib/cn";
 import {
   useRunFlowNodeMutation,
@@ -232,6 +232,16 @@ function DesignerInner({
     setNodes((nds) => nds.map((n) => (n.id === selectedNode.id ? { ...n, data: { ...n.data, params: nextParams } } : n)));
   };
 
+  // ── Node deletion ─────────────────────────────────────────────────────────────────────────────
+  // Removes a node and every edge touching it. Used by the inspector button; the canvas also
+  // supports Delete/Backspace via ReactFlow's deleteKeyCode (which routes through onNodesChange).
+  const deleteNode = useCallback((id: string) => {
+    if (isBuiltIn) return;
+    setNodes((nds) => nds.filter((n) => n.id !== id));
+    setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
+    setSelectedNodeId((cur) => (cur === id ? null : cur));
+  }, [isBuiltIn, setNodes, setEdges]);
+
   // ── Run node (model-only) ─────────────────────────────────────────────────────────────────────
 
   const onRunNode = async () => {
@@ -347,6 +357,10 @@ function DesignerInner({
                 onConnect={onConnect}
                 onNodeClick={(_e, n) => setSelectedNodeId(n.id)}
                 onPaneClick={() => setSelectedNodeId(null)}
+                onNodesDelete={(deleted) => {
+                  if (deleted.some((n) => n.id === selectedNodeId)) setSelectedNodeId(null);
+                }}
+                deleteKeyCode={isBuiltIn ? null : ["Delete", "Backspace"]}
                 nodeTypes={nodeTypes}
                 fitView
                 fitViewOptions={{ padding: 0.15, includeHiddenNodes: false, minZoom: 0.4, maxZoom: 1.2 }}
@@ -419,6 +433,7 @@ function DesignerInner({
               node={selectedNode}
               catalogue={catalogue ?? {}}
               onChange={updateSelectedParams}
+              onDelete={() => deleteNode(selectedNode.id)}
               disabled={isBuiltIn}
             />
           ) : (
@@ -560,12 +575,32 @@ function FlowNodeComponent({ data, selected }: { data: FaNodeData; selected: boo
 
 // ── Inspector (param editor) ────────────────────────────────────────────────────────────────
 
-function NodeInspector({ node, catalogue, onChange, disabled }:
-    { node: RFNode<FaNodeData>; catalogue: Record<string, NodeCatalogueEntry>; onChange: (p: Record<string, unknown>) => void; disabled: boolean }) {
+function NodeInspector({ node, catalogue, onChange, onDelete, disabled }:
+    { node: RFNode<FaNodeData>; catalogue: Record<string, NodeCatalogueEntry>; onChange: (p: Record<string, unknown>) => void; onDelete: () => void; disabled: boolean }) {
   const typeId = node.data.typeId;
   const spec = catalogue[typeId];
   const params = node.data.params;
-  if (!spec) return <div className="p-4 text-fa-frost-dim text-xs">Unknown node type.</div>;
+
+  // The delete affordance must be reachable even when the node's type isn't in the catalogue
+  // (e.g. a stale/unknown node the user wants to remove), so render it before the unknown-type guard.
+  const deleteButton = !disabled && (
+    <button
+      type="button"
+      onClick={onDelete}
+      title="Delete this node (or press Delete / Backspace)"
+      className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md border border-rose-300/30 bg-rose-300/5 text-rose-300 hover:bg-rose-300/15 text-xs transition"
+    >
+      <Trash2 className="h-3.5 w-3.5" />
+      Delete node
+    </button>
+  );
+
+  if (!spec) return (
+    <div className="p-4 space-y-3">
+      <div className="text-fa-frost-dim text-xs">Unknown node type.</div>
+      {deleteButton}
+    </div>
+  );
 
   return (
     <div className="p-4 space-y-3">
@@ -595,6 +630,7 @@ function NodeInspector({ node, catalogue, onChange, disabled }:
           {def.description && <div className="text-fa-frost-dim/70 text-[10px] mt-0.5">{def.description}</div>}
         </label>
       ))}
+      {deleteButton && <div className="pt-1 border-t border-fa-edge">{deleteButton}</div>}
     </div>
   );
 }
