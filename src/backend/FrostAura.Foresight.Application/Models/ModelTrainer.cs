@@ -76,19 +76,20 @@ public sealed class ModelTrainer
         // also serves off-tf candles from the pre-fetched dict (clamped to the current boundary).
         var X = new List<double[]>();
         var yClose = new List<double>();    // for LR — predict the target candle (i+2) close
-        var yDir   = new List<int>();       // for LogReg — direction of candle i+2 vs close(i)
-        var refCloses = new List<double>(); // close(i) per row — the previous-closed-candle reference
+        var yDir   = new List<int>();       // for LogReg — direction = target candle's own body (close > open)
+        var refOpens = new List<double>();  // open(i+horizon) per row — the target candle's OPEN reference
         var columns = new List<string>();
 
         // Horizon-ahead canon, identical to BacktestRunner and live inference: at the decision moment
         // we only have data through the last CLOSED candle (index i = "previous candle"). The target
-        // is candle i+horizonSteps, graded close(i+horizonSteps) vs close(i). The default horizon of 2
-        // skips candle i+1 — the candle "forming" while we decide under a slow (LLM) decision path, so
-        // it is never an input or reference. horizon=1 predicts the very next candle (i+1) directly,
-        // viable now that the decision is an instant deterministic compute at candle close.
-        // Whatever the horizon, candle i+1 (and beyond) is NEVER a feature input: features see
-        // candles[0..i] only; off-tf is gated to the decision moment (open of i+1) by close-time so a
-        // still-open higher-tf bar can never leak.
+        // is candle i+horizonSteps, graded by ITS OWN BODY — close(i+horizonSteps) vs open(i+horizonSteps)
+        // — which is exactly how Polymarket settles its BTC up/down market (a period is UP iff that
+        // target candle closes above where it opened). The default horizon of 2 skips candle i+1 — the
+        // candle "forming" while we decide under a slow (LLM) decision path, so it is never an input.
+        // horizon=1 predicts the very next candle (i+1) directly, viable now that the decision is an
+        // instant deterministic compute at candle close. Whatever the horizon, candle i+1 (and beyond)
+        // is NEVER a feature input: features see candles[0..i] only; off-tf is gated to the decision
+        // moment (open of i+1) by close-time so a still-open higher-tf bar can never leak.
         for (var i = flow.WarmupCandles; i < candles.Count - horizonSteps; i++)
         {
             var boundaryMs = candles[i].OpenTime + intervalMs;
@@ -112,8 +113,12 @@ public sealed class ModelTrainer
             for (var c = 0; c < matrix.ColumnCount; c++) row[c] = matrix.Rows[0, c];
             X.Add(row);
             yClose.Add((double)candles[i + horizonSteps].Close);
-            yDir.Add((double)candles[i + horizonSteps].Close > (double)candles[i].Close ? 1 : 0);
-            refCloses.Add((double)candles[i].Close);
+            // Polymarket canon: the period is UP iff the target candle's own body is green
+            // (close > open). NOT close(i+horizon) vs close(i) — that graded a 2-candle move and
+            // mismatched how the venue settles. For continuous 24/7 BTC open[T] == close[T-1], so on
+            // horizon=1 this also equals close-vs-prevClose (the chart's grading).
+            yDir.Add((double)candles[i + horizonSteps].Close > (double)candles[i + horizonSteps].Open ? 1 : 0);
+            refOpens.Add((double)candles[i + horizonSteps].Open);
         }
 
         if (X.Count < 60)
@@ -141,9 +146,10 @@ public sealed class ModelTrainer
         var lrFoldAccs   = new List<double>(actualFolds);
         var logrFoldAccs = new List<double>(actualFolds);
         var gbtFoldAccs  = new List<double>(actualFolds);
-        // LR direction is graded vs the previous closed candle (close(i)) — the same reference the
-        // LogReg label uses — so the two estimators' fold accuracies stay comparable.
-        var allClosesForLrAnchor = refCloses.ToArray();
+        // LR predicts the target candle's CLOSE; its direction is derived by comparing that predicted
+        // close against the target candle's OPEN — the same Polymarket close-vs-open reference the
+        // LogReg/GBT label uses — so the two estimators' fold accuracies stay comparable.
+        var allOpensForLrAnchor = refOpens.ToArray();
 
         // Engine dispatch: if the flow carries a model.gbt node, gradient-boosted trees is the
         // estimator and its walk-forward accuracy is the headline; otherwise it's logistic
@@ -160,7 +166,7 @@ public sealed class ModelTrainer
             var yCloseTrainFold = yClose.Take(trainEnd).ToArray();
             var yDirTrainFold   = yDir.Take(trainEnd).ToArray();
             var yDirValFold     = yDir.Skip(trainEnd).Take(valEnd - trainEnd).ToArray();
-            var anchorValFold   = allClosesForLrAnchor.Skip(trainEnd).Take(valEnd - trainEnd).ToArray();
+            var openValFold     = allOpensForLrAnchor.Skip(trainEnd).Take(valEnd - trainEnd).ToArray();
 
             var lrFold   = FitLinearRegression(XtrainFold, yCloseTrainFold);
             var logrFold = FitLogisticRegression(XtrainFold, yDirTrainFold);
@@ -172,7 +178,7 @@ public sealed class ModelTrainer
                 var row = XvalFold[v];
                 var lrPred = lrFold.Intercept;
                 for (var c = 0; c < lrFold.Weights.Length; c++) lrPred += lrFold.Weights[c] * row[c];
-                if ((lrPred >= anchorValFold[v] ? 1 : 0) == yDirValFold[v]) lrHitsK++;
+                if ((lrPred >= openValFold[v] ? 1 : 0) == yDirValFold[v]) lrHitsK++;
 
                 var z = logrFold.Intercept;
                 for (var c = 0; c < logrFold.Weights.Length; c++) z += logrFold.Weights[c] * row[c];

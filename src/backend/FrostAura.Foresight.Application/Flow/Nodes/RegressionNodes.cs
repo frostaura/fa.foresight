@@ -7,8 +7,16 @@ namespace FrostAura.Foresight.Application.Flow.Nodes;
 /// <summary>
 /// Inference-time linear regression. Coefficients come from <see cref="FlowContext.TrainedState"/>
 /// keyed by node id; if no trained state is present this node returns null (the flow can't predict
-/// until trained). Used to predict the next-candle close — direction = sign(predicted - anchor),
+/// until trained). Used to predict the target-candle close — direction = sign(predicted - anchor),
 /// confidence proxied by magnitude scaled to [0,1].
+///
+/// CANON NOTE: under the Polymarket close-vs-open settlement canon, the <c>anchor</c> input must be
+/// wired to the TARGET candle's OPEN so the LR-derived direction (predicted close vs anchor) matches
+/// how the venue settles (and how the classifier label <c>yDir</c> is trained in
+/// <see cref="Models.ModelTrainer"/>). No built-in/active flow currently uses this node as its
+/// prediction engine (v2/v6 use <c>model.logistic_regression</c> / <c>model.gbt</c>, which predict
+/// direction directly and are fully canon-correct after retraining). Any future flow wiring this
+/// node must bind <c>anchor</c> to the target candle's open, NOT the previous closed candle's close.
 /// </summary>
 public sealed class LinearRegressionNode : IFlowNode
 {
@@ -21,7 +29,7 @@ public sealed class LinearRegressionNode : IFlowNode
             new PortDef("matrix", "Matrix"),
             new PortDef("ready",  "bool", Required: false),
             new PortDef("anchor", "decimal", Required: false,
-                Description: "Reference close to compare predicted close against. Defaults to last candle's close."),
+                Description: "Reference price to compare predicted close against for direction. Canon: wire to the TARGET candle's OPEN (Polymarket close-vs-open settlement). When unbound, no direction is emitted."),
         },
         Outputs: new[]
         {

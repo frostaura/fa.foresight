@@ -231,10 +231,12 @@ public sealed class PaperTradingService : IPaperTradingService
                     var actualClose = candle.Close;
                     var balanceBeforeSettle = tracked.CurrentBalance;
                     // Settlement goes through the shared StakingEngine with odds-based payoff.
-                    // entryPrice was set at placement time (bet.EntryPrice); outcomeUp is the
-                    // pure-candle direction (close > anchorClose). Side was decided at placement.
+                    // entryPrice was set at placement time (bet.EntryPrice); outcomeUp is the target
+                    // candle's OWN-BODY direction (close > open), matching how Polymarket settles its
+                    // BTC up/down market. AnchorClose stays for display (change%/band) only. Side was
+                    // decided at placement.
                     var entryPrice = openBet.EntryPrice ?? (openBet.Side == "UP" ? 0.5m : 0.5m);
-                    var outcomeUp = actualClose > openBet.AnchorClose;
+                    var outcomeUp = candle.Close > candle.Open;
                     var step = StakingEngine.Settle(
                         side: openBet.Side,
                         entryPrice: entryPrice,

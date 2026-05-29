@@ -214,8 +214,9 @@ public sealed class BacktestRunner
                 entry = new Domain.Markets.EntryQuote(synYes, 1m - synYes, true, null);
             }
 
-            // 2. Determine outcome (pure-candle backtest: close(target) vs close(anchor)).
-            var outcomeUp = target.Close > anchor.Close;
+            // 2. Determine outcome — Polymarket canon: the target candle's own body (close > open).
+            //    AnchorClose is display-only; grading is the candle's close-vs-open, not vs anchor.
+            var outcomeUp = target.Close > target.Open;
 
             // 3. Size the bet via the strategy using this candle's edge inputs.
             var entryInputs = new StakingInputs(pUpRaw, entry.YesPrice, entry.NoPrice);
@@ -353,8 +354,10 @@ public sealed class BacktestRunner
     /// so a backfilled point is exactly the prediction the live path would have persisted.
     ///
     /// Mirrors the live <c>PredictViaFlowAsync</c> contract: horizonSteps=2 ⇒ target = anchor + 2
-    /// intervals, decision at close(anchor), direction graded close(target) vs close(anchor) — the
-    /// 2-step canon. Candles that error out or that the flow can't ready are skipped (no point).
+    /// intervals, decision at close(anchor), direction graded by the target candle's OWN BODY
+    /// (close(target) vs open(target)) — the Polymarket close-vs-open canon. Each ReplayPoint carries
+    /// the target's open (<c>TargetOpen</c>) so consumers (chaos, backfill) grade identically.
+    /// Candles that error out or that the flow can't ready are skipped (no point).
     /// </summary>
     public async Task<IReadOnlyList<ReplayPoint>> ReplayDirectionsAsync(
         FlowDefinition flow,
@@ -417,7 +420,7 @@ public sealed class BacktestRunner
                 var confidence = (result.OutputPrediction.GetValueOrDefault("confidence") as decimal?) ?? 0.5m;
                 var predicted = result.OutputPrediction.GetValueOrDefault("predicted") as decimal?
                     ?? result.OutputPrediction.GetValueOrDefault("p50") as decimal?;
-                points.Add(new ReplayPoint(target.OpenTime, anchor.Close, pUp, confidence, predicted, target.Close));
+                points.Add(new ReplayPoint(target.OpenTime, anchor.Close, pUp, confidence, predicted, target.Close, target.Open));
             }
             catch (Exception ex)
             {
@@ -549,7 +552,10 @@ public sealed record ReplayPoint(
     decimal PUp,
     decimal Confidence,
     decimal? Predicted,
-    decimal ActualClose);
+    decimal ActualClose,
+    // The target candle's OPEN — the Polymarket close-vs-open grading reference. AnchorClose
+    // (the previous closed candle's close) is kept for display (change%/band) only.
+    decimal TargetOpen);
 
 internal sealed class BacktestSliceProvider : IHistoricalCandleProvider
 {

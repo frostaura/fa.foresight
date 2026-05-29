@@ -101,19 +101,67 @@ public sealed class Foresight5mV1PipelineTests
     }
 
     /// <summary>
-    /// Pins the 2-step canon end-to-end. The 5m series is a sawtooth where close(i+2) > close(i) for
-    /// EVERY i (net +5 over two candles), while close(i+1) vs close(i) alternates up/down. So:
-    ///   • if the system trains/grades target i+2 vs close(i) (the canon) → label is always UP, the
-    ///     model bets UP and wins ~everything (hit-rate → 1.0);
-    ///   • if it regressed to next-candle (i+1), or graded against the moving/forming candle
-    ///     close(i+1), the alternating step would drag the hit-rate to ~50%.
-    /// A hit-rate well above 50% therefore proves target = i+2 AND reference = close(i).
+    /// Pins the Polymarket close-vs-open canon at the replay/grading layer. The series is built so
+    /// that for the bettable (gapped) target candles the OLD close-vs-anchor grading and the NEW
+    /// close-vs-open grading DISAGREE: each gapped candle opens with a big up-gap (so its close sits
+    /// ABOVE the previous closed candle's close → old canon says UP) but then closes BELOW its own
+    /// open (a red body → new canon says DOWN). ReplayDirectionsAsync now carries TargetOpen, and the
+    /// realised direction the rest of the system grades on (chaos/backtest/backfill) is
+    /// ActualClose &gt; TargetOpen. We assert that, for those candles, close-vs-open says DOWN while
+    /// close-vs-anchor says UP — i.e. the canon is the candle's own body, NOT the 2-candle move.
     /// </summary>
     [Fact]
-    public async Task TwoStep_canon_targets_i_plus_2_graded_vs_previous_close()
+    public async Task Polymarket_canon_grades_target_candle_body_not_close_vs_anchor()
     {
         var (executor, _, flow) = BuildHarness();
-        var provider = SawtoothProvider();
+        var provider = GapDownBodyProvider();
+        var start = provider.MinOpen(Symbol, "5m");
+        var end = provider.MaxOpen(Symbol, "5m");
+
+        // A trained model is needed so the logistic node emits a (non-null) pUp for each candle —
+        // otherwise every replay point is skipped. The grading we assert is independent of WHAT the
+        // model predicts; we only need points to exist so we can inspect AnchorClose/TargetOpen/Close.
+        var trainer = new ModelTrainer(executor, provider);
+        var trained = await trainer.TrainAsync(flow, Guid.NewGuid(), Guid.NewGuid(), Symbol, "5m", start, end, default);
+
+        var runner = new BacktestRunner(executor, provider, NullLogger<BacktestRunner>.Instance);
+        var points = await runner.ReplayDirectionsAsync(
+            flow, trained.TrainedStateJson, Guid.NewGuid(), Guid.NewGuid(), Symbol, "5m", start, end, default);
+
+        points.Should().NotBeEmpty("the replay must produce gradable points across the window");
+
+        // Find points whose old vs new canon DISAGREE — these are the engineered red-body-after-up-gap
+        // candles. There must be at least one, and on every such point the canon used downstream
+        // (close-vs-open) must say DOWN while the old close-vs-anchor would have said UP.
+        var disagreements = points
+            .Where(p => (p.ActualClose > p.TargetOpen) != (p.ActualClose > p.AnchorClose))
+            .ToList();
+
+        disagreements.Should().NotBeEmpty(
+            "the series is constructed so close-vs-open and close-vs-anchor diverge on the gapped candles");
+        foreach (var p in disagreements)
+        {
+            (p.ActualClose > p.TargetOpen).Should().BeFalse(
+                "a candle that closes below its own open is a RED body → Polymarket canon grades it DOWN");
+            (p.ActualClose > p.AnchorClose).Should().BeTrue(
+                "the same candle closed above the previous candle's close → the OLD canon would wrongly grade it UP");
+        }
+    }
+
+    /// <summary>
+    /// Pins the trainer's label to the Polymarket close-vs-open canon. The GapDownBody series has a
+    /// RED body on every candle (close &lt; open) yet a rising close (close &gt; previousClose). So:
+    ///   • new canon (yDir = close(target) &gt; open(target)) → every label is DOWN. The model learns
+    ///     "always DOWN", bets DOWN, and — graded close-vs-open (also DOWN) — wins ~everything.
+    ///   • old canon (yDir = close(target) &gt; close(decision)) → every label is UP, the model bets
+    ///     UP, and is graded WRONG on every candle (hit-rate → 0).
+    /// A hit-rate well above 50% therefore proves the label is the candle's own body.
+    /// </summary>
+    [Fact]
+    public async Task Trainer_labels_yDir_as_target_candle_body_close_vs_open()
+    {
+        var (executor, _, flow) = BuildHarness();
+        var provider = GapDownBodyProvider();
         var start = provider.MinOpen(Symbol, "5m");
         var end = provider.MaxOpen(Symbol, "5m");
 
@@ -128,7 +176,7 @@ public sealed class Foresight5mV1PipelineTests
         outcome.BetsPlaced.Should().BeGreaterThan(50);
         outcome.HitRate.Should().NotBeNull();
         outcome.HitRate!.Value.Should().BeGreaterThan(0.85m,
-            "close(i+2) > close(i) always holds in the sawtooth — only the correct 2-step canon scores this high");
+            "every candle is a red body — only a close-vs-open label makes the model bet DOWN and win");
     }
 
     /// <summary>
@@ -338,37 +386,46 @@ public sealed class Foresight5mV1PipelineTests
         return new InMemoryCandleProvider(data);
     }
 
-    /// <summary>5m sawtooth (close(i+2) > close(i) always; close(i+1) alternates) + random off-tf for readiness.</summary>
-    private static InMemoryCandleProvider SawtoothProvider()
+    /// <summary>
+    /// 5m series where EVERY candle opens with a big up-gap from the previous close, then closes with
+    /// a red body that still lands above that previous close. So for every candle:
+    ///   • close &gt; previousClose  → the OLD close-vs-anchor canon says UP
+    ///   • close &lt; open           → the NEW Polymarket close-vs-open canon says DOWN
+    /// The two canons therefore DISAGREE on every gradable candle. Off-tf series are random walks so
+    /// the v1 matrix readies.
+    /// </summary>
+    private static InMemoryCandleProvider GapDownBodyProvider()
     {
         var baseMs = (1_700_000_000_000L / 900_000L) * 900_000L;
         var rng = new Random(5);
         var data = new Dictionary<string, List<HistoricalCandle>>
         {
             ["1m"]  = Walk("1m", 3_200, baseMs, rng),
-            ["5m"]  = Sawtooth("5m", 600, baseMs),
+            ["5m"]  = GapDownBody("5m", 600, baseMs),
             ["15m"] = Walk("15m", 260, baseMs, rng),
         };
         return new InMemoryCandleProvider(data);
     }
 
-    private static List<HistoricalCandle> Sawtooth(string tf, int count, long baseMs)
+    private static List<HistoricalCandle> GapDownBody(string tf, int count, long baseMs)
     {
         var ms = Ms(tf);
         var candles = new List<HistoricalCandle>(count);
-        var close = 100m;
+        var prevClose = 100m;
         for (var k = 0; k < count; k++)
         {
-            var open = close;
-            // +10 on even→odd, -5 on odd→even: net +5 every two candles, so close(k+2) > close(k)
-            // always, while close(k+1) vs close(k) alternates up/down.
-            if (k > 0) close = open + (k % 2 == 1 ? 10m : -5m);
+            // Gap UP off the previous close (+20), then a RED body that gives back only part of the gap
+            // (-12), so this candle closes at prevClose + 8 (above the previous close) while still
+            // closing below its own open. close > prevClose (old=UP); close < open (new=DOWN).
+            var open = k == 0 ? prevClose : prevClose + 20m;
+            var close = k == 0 ? prevClose : open - 12m;
             candles.Add(new HistoricalCandle
             {
                 Symbol = Symbol, Interval = tf, OpenTime = baseMs + (long)k * ms,
                 Open = open, High = Math.Max(open, close) + 1m, Low = Math.Min(open, close) - 1m,
                 Close = close, Volume = 10m,
             });
+            prevClose = close;
         }
         return candles;
     }

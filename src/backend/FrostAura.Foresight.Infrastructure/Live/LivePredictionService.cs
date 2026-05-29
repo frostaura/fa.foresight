@@ -101,12 +101,12 @@ public sealed class LivePredictionService : ILivePredictionService
             ?? throw new InvalidOperationException($"Active model {modelId} not found.");
 
         // Anchor on the last CLOSED candle — NEVER the currently-forming bar. Binance returns the
-        // in-progress candle as the last element, and its close is still moving. The model is
-        // trained to predict direction relative to the last *closed* candle's close
-        // (ModelTrainer: yDir = close[i+1] > close[i]), and the feature packs read the
-        // close-capped historical adapter, so the anchor used for change%/band/direction-grading
-        // must be that same last-closed close. Using the forming bar's moving price mis-grades
-        // correct calls whenever price has already drifted intra-bar in the predicted direction.
+        // in-progress candle as the last element, and its close is still moving. The model predicts
+        // the target candle's own-body direction (ModelTrainer: yDir = close(target) > open(target),
+        // the Polymarket close-vs-open canon), and the feature packs read the close-capped historical
+        // adapter. AnchorClose (this last-closed close) is stored for DISPLAY only — change%/band/
+        // expected-move — NOT for win/loss grading, which uses the target candle's open vs close at
+        // resolution. Using the forming bar's moving price for display would mis-render the change%.
         var primary = await _binance.GetKlinesAsync(symbol, interval, 60, ct);
         if (primary.Count < 20) throw new InvalidOperationException("Not enough candles to forecast.");
         var intervalMs = BinanceMarketDataClient.IntervalMs(interval);
@@ -282,9 +282,10 @@ public sealed class LivePredictionService : ILivePredictionService
             var predictedClose = pt.Predicted is > 0m ? pt.Predicted!.Value
                 : anchorClose * (1m + (pt.PUp >= 0.5m ? 0.001m : -0.001m));
             var pUp = Math.Clamp(pt.PUp, 0m, 1m);
-            // Mirror ResolveMaturedAsync: direction graded close(target) vs the stored anchor close
-            // (close(a) under the 2-step canon). Exactly-0.5 is honest abstention → DirectionHit null.
-            bool? directionHit = pUp == 0.5m ? null : (pt.ActualClose >= anchorClose) == (pUp > 0.5m);
+            // Mirror ResolveMaturedAsync: direction graded by the TARGET candle's own body
+            // (close > open), matching how Polymarket settles. AnchorClose is display-only.
+            // Exactly-0.5 is honest abstention → DirectionHit null.
+            bool? directionHit = pUp == 0.5m ? null : (pt.ActualClose > pt.TargetOpen) == (pUp > 0.5m);
             return new LivePrediction
             {
                 Id = Guid.NewGuid(),
@@ -379,12 +380,11 @@ public sealed class LivePredictionService : ILivePredictionService
             // so accuracy stats don't penalise the model for honest uncertainty. Tradable signals
             // are those strictly above or strictly below 0.50.
             //
-            // 2-step canon: direction is the target's close vs the PREVIOUS closed candle's close —
-            // exactly the AnchorClose we stored at prediction time (the last closed candle, index a).
-            // The non-closed candle (a+1) is excluded entirely — its price was still moving at
-            // decision time, so it can be neither a feature nor the reference. Matches the training
-            // label yDir = close(a+2) > close(a).
-            var actualUp = actual >= p.AnchorClose;
+            // Polymarket canon: the period is UP iff the target candle's OWN BODY is green
+            // (close > open). We read the target candle's open from the fetched candle `c`; AnchorClose
+            // stays for display (change%/error%) only. Matches the training label
+            // yDir = close(target) > open(target).
+            var actualUp = c.Close > c.Open;
             if (p.DirectionUpProbability == 0.5m)
             {
                 p.DirectionHit = null;

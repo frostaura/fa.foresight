@@ -63,6 +63,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
     private readonly IAccountLedger     _ledger;
     private readonly ICalibrationRescaler _calibration;
     private readonly IVenuePriceStore   _venuePrices;
+    private readonly BinanceMarketDataClient _binance;
     private readonly TradingGuardrailOptions _guardrails;
     private readonly TradingNotifier    _notifier;
     private readonly ILogger<LiveSessionEngine> _logger;
@@ -75,6 +76,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
         IAccountLedger ledger,
         ICalibrationRescaler calibration,
         IVenuePriceStore venuePrices,
+        BinanceMarketDataClient binance,
         IOptions<TradingGuardrailOptions> guardrails,
         TradingNotifier notifier,
         ILogger<LiveSessionEngine> logger)
@@ -86,6 +88,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
         _ledger      = ledger;
         _calibration = calibration;
         _venuePrices = venuePrices;
+        _binance     = binance;
         _guardrails  = guardrails.Value;
         _notifier    = notifier;
         _logger      = logger;
@@ -283,9 +286,34 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                     }
 
                     var entryPrice = openBet.EntryPrice ?? 0.5m;
-                    // For live: marketOutcomeUp is guaranteed non-null here (guarded above).
-                    // For paper/backtest: use the candle-direction proxy (bet side "UP" means model predicted UP).
-                    var outcomeUp = marketOutcomeUp ?? (openBet.Side == "UP"); // live: real outcome; paper: proxy
+                    // For live: marketOutcomeUp is guaranteed non-null here (guarded above) — real
+                    // Polymarket resolution is always the primary. For the non-real-resolution proxy
+                    // path (paper-style sessions, or live before LiveTrading is armed), grade against
+                    // the TARGET candle's OWN BODY (close > open) — the Polymarket close-vs-open canon —
+                    // NOT the old `openBet.Side == "UP"` fallback, which made the proxy ALWAYS win.
+                    bool proxyOutcomeUp;
+                    if (marketOutcomeUp.HasValue)
+                    {
+                        proxyOutcomeUp = marketOutcomeUp.Value;
+                    }
+                    else
+                    {
+                        var candles = await _binance.GetKlinesAsync(tracked.Symbol, tracked.Interval, 5, ct);
+                        var candle = candles.FirstOrDefault(c => c.OpenTime == openBet.TargetOpenTime);
+                        // If the candle isn't available yet, fall back to the previous behaviour of
+                        // assuming the model's side — but log it, as it should be rare (candle closed).
+                        if (candle is null)
+                        {
+                            _logger.LogWarning("Live session {SessionId}: target candle {Open} unavailable for proxy grading; assuming model side",
+                                tracked.Id, openBet.TargetOpenTime);
+                            proxyOutcomeUp = openBet.Side == "UP";
+                        }
+                        else
+                        {
+                            proxyOutcomeUp = candle.Close > candle.Open;
+                        }
+                    }
+                    var outcomeUp = proxyOutcomeUp; // live: real outcome; proxy: candle close-vs-open
                     var step = StakingEngine.Settle(
                         side: openBet.Side,
                         entryPrice: entryPrice,

@@ -332,7 +332,7 @@ public sealed class ChaosService : IChaosService
     ///
     /// Each candidate contains: pUp from the model, anti-look-ahead venue prices from
     /// <see cref="IVenuePriceStore.EnsureEntryAsync"/>, and the realised direction
-    /// (outcomeUp = target.Close &gt; anchor.Close).
+    /// (outcomeUp = target.Close &gt; target.Open — the Polymarket close-vs-open canon).
     ///
     /// Candidates where pUp == 0.5m (model abstained) are dropped — they carry no information and
     /// would silently be skipped by ReplayWindow anyway.
@@ -482,7 +482,9 @@ public sealed class ChaosService : IChaosService
 
             if (entry.Synthetic) syntheticCount++;
 
-            var outcomeUp = rp.ActualClose > rp.AnchorClose;
+            // Polymarket canon: the target candle's own body (close > open). TargetOpen is carried on
+            // each ReplayPoint; AnchorClose is display-only.
+            var outcomeUp = rp.ActualClose > rp.TargetOpen;
 
             candidates.Add(new BetCandidate(
                 TargetOpenTime: rp.TargetOpenTime,
