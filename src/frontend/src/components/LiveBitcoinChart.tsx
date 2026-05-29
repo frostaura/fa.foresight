@@ -630,18 +630,32 @@ export default function LiveBitcoinChart({
     return points;
   }, [paperSession, interval]);
 
-  // Balance Y-domain (hidden secondary YAxis). The axis ALWAYS includes 0 so the dotted zero-balance
-  // baseline is on-domain, and `0` maps just above the plot's bottom edge. The top is stretched so
-  // the balance line sits around the lower half — the translucent area under it reads as the balance
-  // "cushion" above zero, like a line-mode area chart anchored to the bottom.
+  // Balance Y-domain (hidden secondary YAxis). AUTOSCALED to the balance's own min/max (with padding)
+  // so the up/down movement actually reads — anchoring to 0 flattened the line into a near-straight
+  // trace because the swings are tiny next to the absolute balance. The dotted reference line is the
+  // session's STARTING balance (break-even): above it = profit, below = loss, so the curve oscillates
+  // around it like a P&L trace.
   const balanceYDomain = useMemo<[number, number]>(() => {
     if (balanceSeries.length === 0) return [0, 1];
     const vals = balanceSeries.map((p) => p.balance);
-    const maxBal = Math.max(...vals, 1);
-    const minBal = Math.min(...vals, 0);          // always fold 0 in
-    const lo = minBal - maxBal * 0.04;            // a hair below 0 so the zero line clears the edge
-    const hi = lo + (maxBal - lo) / 0.5;          // balance peak ~50% up → area fills the lower half
-    return [lo, hi];
+    const maxBal = Math.max(...vals);
+    const minBal = Math.min(...vals);
+    const range = Math.max(maxBal - minBal, Math.max(maxBal * 0.001, 1)); // floor for flat series
+    const pad = range * 0.28; // breathing room top/bottom so the line isn't glued to an edge
+    return [minBal - pad, maxBal + pad];
+  }, [balanceSeries]);
+
+  // Break-even reference (the session's starting balance) for the dotted baseline.
+  const balanceBaseline = balanceSeries.length > 0 ? balanceSeries[0].balance : 0;
+
+  // openTime → { balance, delta-from-previous-point } for the hover tooltip.
+  const balanceByTime = useMemo(() => {
+    const m = new Map<number, { balance: number; delta: number | null }>();
+    balanceSeries.forEach((p, i) => {
+      const prev = i > 0 ? balanceSeries[i - 1].balance : null;
+      m.set(p.openTime, { balance: p.balance, delta: prev == null ? null : p.balance - prev });
+    });
+    return m;
   }, [balanceSeries]);
 
   // Merge balance points into the chart row data so recharts can render them on the same x-axis.
@@ -812,7 +826,7 @@ export default function LiveBitcoinChart({
               )}
               <Tooltip
                 cursor={{ stroke: "rgb(148 163 184 / 0.4)", strokeDasharray: "2 2" }}
-                content={renderTooltip(rows, last?.openTime, nextPrediction)}
+                content={renderTooltip(rows, last?.openTime, nextPrediction, balanceByTime)}
               />
               {dividerTimes.map((t) => (
                 <ReferenceLine key={t} yAxisId="price" x={t} stroke={NEUTRAL} strokeOpacity={0.12} strokeWidth={1} />
@@ -823,14 +837,14 @@ export default function LiveBitcoinChart({
                   so it composites on top of the price series. connectNulls=false lets the line draw
                   only between resolved-bet candles (gaps for candles with no bet outcome). */}
               {balanceSeries.length > 0 && (
-                <Area yAxisId="balance" type="monotone" dataKey="balance"
+                <Area yAxisId="balance" type="linear" dataKey="balance"
                   stroke="#A4D4F4" strokeWidth={2} strokeOpacity={0.9} dot={false}
                   isAnimationActive={false} connectNulls={false}
                   fill="#FFFFFF" fillOpacity={0.08}
                 />
               )}
               {balanceSeries.length > 0 && (
-                <ReferenceLine yAxisId="balance" y={0} stroke="#A4D4F4" strokeOpacity={0.35}
+                <ReferenceLine yAxisId="balance" y={balanceBaseline} stroke="#A4D4F4" strokeOpacity={0.3}
                   strokeWidth={1} strokeDasharray="3 3" />
               )}
               {resultDots.map((d) => (
@@ -872,7 +886,7 @@ export default function LiveBitcoinChart({
               )}
               <Tooltip
                 cursor={{ fill: "rgb(148 163 184 / 0.08)" }}
-                content={renderTooltip(rows, last?.openTime, nextPrediction)}
+                content={renderTooltip(rows, last?.openTime, nextPrediction, balanceByTime)}
               />
               {dividerTimes.map((t) => (
                 <ReferenceLine key={t} yAxisId="price" x={t} stroke={NEUTRAL} strokeOpacity={0.12} strokeWidth={1} />
@@ -901,14 +915,14 @@ export default function LiveBitcoinChart({
                 }}
               />
               {balanceSeries.length > 0 && (
-                <Area yAxisId="balance" type="monotone" dataKey="balance"
+                <Area yAxisId="balance" type="linear" dataKey="balance"
                   stroke="#A4D4F4" strokeWidth={2} strokeOpacity={0.9} dot={false}
                   isAnimationActive={false} connectNulls={false}
                   fill="#FFFFFF" fillOpacity={0.08}
                 />
               )}
               {balanceSeries.length > 0 && (
-                <ReferenceLine yAxisId="balance" y={0} stroke="#A4D4F4" strokeOpacity={0.35}
+                <ReferenceLine yAxisId="balance" y={balanceBaseline} stroke="#A4D4F4" strokeOpacity={0.3}
                   strokeWidth={1} strokeDasharray="3 3" />
               )}
               {resultDots.map((d) => (
@@ -953,7 +967,7 @@ export default function LiveBitcoinChart({
               )}
               <Tooltip
                 cursor={{ fill: "rgb(148 163 184 / 0.08)" }}
-                content={renderTooltip(rows, last?.openTime, nextPrediction)}
+                content={renderTooltip(rows, last?.openTime, nextPrediction, balanceByTime)}
               />
               {dividerTimes.map((t) => (
                 <ReferenceLine key={t} yAxisId="price" x={t} stroke={NEUTRAL} strokeOpacity={0.12} strokeWidth={1} />
@@ -966,14 +980,14 @@ export default function LiveBitcoinChart({
                   Y-axis so the balance scale is independent of the BTC price scale. Only shown when
                   a paper session with at least one resolved bet exists. */}
               {balanceSeries.length > 0 && (
-                <Area yAxisId="balance" type="monotone" dataKey="balance"
+                <Area yAxisId="balance" type="linear" dataKey="balance"
                   stroke="#A4D4F4" strokeWidth={2} strokeOpacity={0.9} dot={false}
                   isAnimationActive={false} connectNulls={false}
                   fill="#FFFFFF" fillOpacity={0.08}
                 />
               )}
               {balanceSeries.length > 0 && (
-                <ReferenceLine yAxisId="balance" y={0} stroke="#A4D4F4" strokeOpacity={0.35}
+                <ReferenceLine yAxisId="balance" y={balanceBaseline} stroke="#A4D4F4" strokeOpacity={0.3}
                   strokeWidth={1} strokeDasharray="3 3" />
               )}
               {resultDots.map((d) => (
@@ -1190,8 +1204,8 @@ function NextCandleAction({
           )}
         </div>
 
-        {/* Top-right — edge + hit-rate text */}
-        <div className="flex items-center gap-x-2 fa-caption sm:text-xs tabular-nums whitespace-nowrap min-w-0">
+        {/* Top-right — edge + hit-rate text, right-aligned above the bar */}
+        <div className="flex items-center justify-end gap-x-2 fa-caption sm:text-xs tabular-nums whitespace-nowrap min-w-0">
           {tradeSignal && (
             <span
               className="text-fa-frost-dim"
@@ -1604,7 +1618,8 @@ function CandleTable({ rows, nextPrediction, nextTargetTime, predictions }: {
 function renderTooltip(
   rows: Row[],
   currentOpenTime: number | undefined,
-  nextPrediction: LivePrediction | undefined
+  nextPrediction: LivePrediction | undefined,
+  balanceByTime?: Map<number, { balance: number; delta: number | null }>
 ) {
   return ({ active, payload, label }: { active?: boolean; payload?: Array<{ payload?: Row }>; label?: number | string }) => {
     if (!active || !payload?.length) return null;
@@ -1644,6 +1659,27 @@ function renderTooltip(
               </span>
             </>
           )}
+          {(() => {
+            // Bank balance at this candle (a resolved-bet ledger point) + its change from the prior
+            // balance point — so hovering a candle shows the running balance and the step it took.
+            const bal = balanceByTime?.get(row.openTime);
+            if (!bal) return null;
+            return (
+              <>
+                <span className="col-span-2 border-t border-fa-edge/60 mt-1" />
+                <span className="text-fa-frost-dim">Balance</span>
+                <span className="text-right text-fa-frost-bright">{fmtUsd(bal.balance)}</span>
+                {bal.delta != null && (
+                  <>
+                    <span className="text-fa-frost-dim">Δ bal</span>
+                    <span className={`text-right ${bal.delta >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                      {fmtSignedUsd(bal.delta)}
+                    </span>
+                  </>
+                )}
+              </>
+            );
+          })()}
           {isLive && nextPrediction && (() => {
             // Only attach the forward-looking row to the in-flight candle's tooltip — that's the
             // candle the next prediction is anchored on. Delta is vs the prediction's anchorClose

@@ -471,7 +471,7 @@ function LedgerButton({ session }: { session: PaperSession }) {
             <div className="text-fa-frost-dim italic">No bets placed yet.</div>
           ) : (
             <div className="max-h-[280px] overflow-y-auto">
-              <table className="fa-table-bordered w-full">
+              <table className="fa-table-bordered w-full text-xs [&_th]:whitespace-nowrap [&_td]:whitespace-nowrap">
                 <thead className="text-fa-frost-dim sticky top-0 bg-fa-ink/95 backdrop-blur">
                   <tr className="text-left">
                     <th className="font-normal py-0.5 pr-3"><SortHeader<LedgerKey> {...headerProps("placed")}>Placed</SortHeader></th>
