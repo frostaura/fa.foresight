@@ -13,6 +13,7 @@ import {
   ChevronDown,
   CircleDollarSign,
   Info,
+  Plug,
   Plus,
   ShieldAlert,
   ShieldCheck,
@@ -40,12 +41,32 @@ import {
   useRequestGoLiveCodeMutation,
   useConfirmGoLiveMutation,
   useKillswitchMutation,
+  useGetPlatformConnectionQuery,
+  useUpdatePlatformConnectionMutation,
   type NormalizedSession,
   type CreateSessionRequest,
+  type PlatformConnection,
+  type UpdatePlatformConnectionRequest,
 } from "../store/api";
 
 const SYMBOLS = ["BTCUSDT"];
 const INTERVALS = ["5m", "15m", "1m"];
+
+// Polymarket signature-type enum → human label. 0 = EOA, 1 = POLY_PROXY, 2 = POLY_GNOSIS_SAFE.
+const SIGNATURE_TYPES: { value: number; label: string }[] = [
+  { value: 0, label: "EOA" },
+  { value: 1, label: "POLY_PROXY" },
+  { value: 2, label: "POLY_GNOSIS_SAFE" },
+];
+const sigTypeLabel = (v: number) => SIGNATURE_TYPES.find((s) => s.value === v)?.label ?? String(v);
+
+// "Configured · 0x…last4" when a wallet key is set, else "Not configured".
+const walletStatusText = (conn: Pick<PlatformConnection, "hasPrivateKey" | "walletAddress">) => {
+  if (!conn.hasPrivateKey) return "Not configured";
+  const addr = conn.walletAddress;
+  const tail = addr && addr.length >= 4 ? `0x…${addr.slice(-4)}` : "address derived";
+  return `Configured · ${tail}`;
+};
 
 // ── Arm flow ──────────────────────────────────────────────────────────────────
 function ArmStatusStrip({ armed, onShowSetup }: { armed: boolean; onShowSetup: () => void }) {
@@ -424,6 +445,282 @@ function LiveSessionCard({ session }: { session: NormalizedSession }) {
   );
 }
 
+// ── Connection summary card ───────────────────────────────────────────────────
+// Shows the active Polymarket connection at a glance (wallet status, live-trading flag, endpoints)
+// with an "Edit connection" button. The connection now lives in the DB per tenant and is edited
+// in-app via the dialog below — env is only a one-time bootstrap default.
+function ConnectionCard({ onEdit }: { onEdit: () => void }) {
+  const { data: conn, isLoading, isError } = useGetPlatformConnectionQuery();
+
+  return (
+    <div className="fa-card px-4 py-3 space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="inline-flex items-center gap-1.5 fa-section-title">
+          <Plug className="h-4 w-4 text-fa-frost-dim" />
+          Connection
+        </span>
+        {conn && (
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 fa-overline",
+              conn.liveTrading
+                ? "border-fa-warning/40 bg-fa-warning/10 text-fa-warning"
+                : "border-fa-edge bg-fa-glass text-fa-frost-dim"
+            )}
+          >
+            Live trading {conn.liveTrading ? "on" : "off"}
+          </span>
+        )}
+        <Button onClick={onEdit} variant="outline" size="sm" className="ml-auto">
+          Edit connection
+        </Button>
+      </div>
+
+      {isLoading && <p className="fa-caption text-fa-frost-dim">Loading connection…</p>}
+      {isError && (
+        <p className="fa-caption text-fa-danger">
+          Connection could not be loaded. Verify the backend is running.
+        </p>
+      )}
+      {conn && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-2 fa-caption">
+          <div>
+            <div className="fa-overline text-fa-frost-dim">Connector</div>
+            <div className="text-fa-frost capitalize">{conn.connectorId}</div>
+          </div>
+          <div>
+            <div className="fa-overline text-fa-frost-dim">Wallet</div>
+            <div className={conn.hasPrivateKey ? "text-fa-frost" : "text-fa-frost-dim"}>
+              {walletStatusText(conn)}
+            </div>
+          </div>
+          <div>
+            <div className="fa-overline text-fa-frost-dim">Signature type</div>
+            <div className="text-fa-frost">{sigTypeLabel(conn.signatureType)}</div>
+          </div>
+          <div>
+            <div className="fa-overline text-fa-frost-dim">Per-trade cap</div>
+            <div className="text-fa-frost tabular-nums">${conn.maxTradeUsd.toFixed(2)}</div>
+          </div>
+          <div className="sm:col-span-2">
+            <div className="fa-overline text-fa-frost-dim">CLOB endpoint</div>
+            <div className="text-fa-frost-dim truncate font-mono text-xs">{conn.clobBaseUrl}</div>
+          </div>
+          <div className="sm:col-span-2">
+            <div className="fa-overline text-fa-frost-dim">Gamma endpoint</div>
+            <div className="text-fa-frost-dim truncate font-mono text-xs">{conn.gammaBaseUrl}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Connection editor dialog ──────────────────────────────────────────────────
+// Edit the per-tenant Polymarket connection in-app. The private key is write-only — the API never
+// returns it, so the field is blank by default and only submitted when non-empty (blank = keep
+// current key). All other fields are prefilled from the GET and only changed values are sent.
+function ConnectionEditorDialog({ onClose }: { onClose: () => void }) {
+  const { data: conn } = useGetPlatformConnectionQuery();
+  const [updateConnection, { isLoading: saving, error: saveError, isSuccess }] =
+    useUpdatePlatformConnectionMutation();
+
+  // Form state, seeded once from the connection. `privateKey` stays empty unless the user types one.
+  const [privateKey, setPrivateKey] = useState("");
+  const [signatureType, setSignatureType] = useState(conn?.signatureType ?? 0);
+  const [funder, setFunder] = useState(conn?.funder ?? "");
+  const [clobBaseUrl, setClobBaseUrl] = useState(conn?.clobBaseUrl ?? "");
+  const [gammaBaseUrl, setGammaBaseUrl] = useState(conn?.gammaBaseUrl ?? "");
+  const [chainId, setChainId] = useState(conn?.chainId ?? 137);
+  const [maxTradeUsd, setMaxTradeUsd] = useState(conn?.maxTradeUsd ?? 0);
+  const [liveTrading, setLiveTrading] = useState(conn?.liveTrading ?? false);
+
+  const saveErrMsg =
+    saveError && "data" in saveError
+      ? (saveError.data as { error?: string })?.error ?? "Save failed"
+      : saveError
+        ? "Save failed"
+        : null;
+
+  const save = async () => {
+    // Send only changed fields; omit privateKey entirely when blank (keeps the existing key).
+    const body: UpdatePlatformConnectionRequest = {};
+    const trimmedKey = privateKey.trim();
+    if (trimmedKey.length > 0) body.privateKey = trimmedKey;
+    if (signatureType !== (conn?.signatureType ?? 0)) body.signatureType = signatureType;
+    if (funder.trim() !== (conn?.funder ?? "")) body.funder = funder.trim();
+    if (clobBaseUrl.trim() !== (conn?.clobBaseUrl ?? "")) body.clobBaseUrl = clobBaseUrl.trim();
+    if (gammaBaseUrl.trim() !== (conn?.gammaBaseUrl ?? "")) body.gammaBaseUrl = gammaBaseUrl.trim();
+    if (chainId !== (conn?.chainId ?? 137)) body.chainId = chainId;
+    if (maxTradeUsd !== (conn?.maxTradeUsd ?? 0)) body.maxTradeUsd = maxTradeUsd;
+    if (liveTrading !== (conn?.liveTrading ?? false)) body.liveTrading = liveTrading;
+
+    try {
+      await updateConnection(body).unwrap();
+      setPrivateKey(""); // never retain the typed key in state after a successful save
+    } catch {
+      // surfaced inline below
+    }
+  };
+
+  const labelCls = "fa-overline text-fa-frost-dim mb-1.5 block";
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[70] bg-fa-ink/70 backdrop-blur-sm flex items-center justify-center p-6 fa-confirm-enter"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="fa-conn-editor-title"
+    >
+      <div
+        className="fa-card w-full max-w-xl max-h-[85vh] overflow-y-auto p-6 space-y-5 relative shadow-[0_20px_60px_-15px_rgba(0,0,0,0.6)] border border-fa-edge"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3">
+          <div className="shrink-0 flex items-center justify-center w-10 h-10 rounded-full bg-fa-frost-bright/10 text-fa-frost-bright ring-1 ring-fa-frost-bright/30">
+            <Plug className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 id="fa-conn-editor-title" className="text-fa-frost-bright text-base font-light tracking-tight">
+              Edit connection
+            </h2>
+            <p className="fa-caption text-fa-frost-dim mt-1">
+              Your Polymarket connection is stored per tenant. Leave the wallet key blank to keep the
+              current one — it is never displayed.
+            </p>
+          </div>
+          <button onClick={onClose} aria-label="Dismiss" className="shrink-0 -mt-1 -mr-1 text-fa-frost-dim hover:text-fa-frost-bright transition">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          {/* Wallet private key — write-only. */}
+          <div>
+            <label htmlFor="fa-conn-pk" className={labelCls}>Wallet private key</label>
+            <p className="fa-caption text-fa-frost-dim mb-1.5">
+              {conn?.hasPrivateKey ? (
+                <span className="text-fa-success">
+                  Configured · {conn.walletAddress ? `0x…${conn.walletAddress.slice(-4)}` : "address derived"} ✓
+                </span>
+              ) : (
+                <span className="text-fa-frost-dim">Not set</span>
+              )}
+            </p>
+            <Input
+              id="fa-conn-pk"
+              type="password"
+              autoComplete="off"
+              value={privateKey}
+              onChange={(e) => setPrivateKey(e.target.value)}
+              placeholder="Leave blank to keep current"
+              className="text-sm font-mono"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="fa-conn-sig" className={labelCls}>Signature type</label>
+              <select
+                id="fa-conn-sig"
+                value={signatureType}
+                onChange={(e) => setSignatureType(Number(e.target.value))}
+                className="fa-input w-full text-sm"
+              >
+                {SIGNATURE_TYPES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.value} = {s.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="fa-conn-funder" className={labelCls}>Funder address (optional)</label>
+              <Input
+                id="fa-conn-funder"
+                value={funder}
+                onChange={(e) => setFunder(e.target.value)}
+                placeholder="0x…"
+                className="text-sm font-mono"
+              />
+            </div>
+            <div>
+              <label htmlFor="fa-conn-clob" className={labelCls}>CLOB base URL</label>
+              <Input
+                id="fa-conn-clob"
+                value={clobBaseUrl}
+                onChange={(e) => setClobBaseUrl(e.target.value)}
+                className="text-sm font-mono"
+              />
+            </div>
+            <div>
+              <label htmlFor="fa-conn-gamma" className={labelCls}>Gamma base URL</label>
+              <Input
+                id="fa-conn-gamma"
+                value={gammaBaseUrl}
+                onChange={(e) => setGammaBaseUrl(e.target.value)}
+                className="text-sm font-mono"
+              />
+            </div>
+            <div>
+              <label htmlFor="fa-conn-chain" className={labelCls}>Chain ID</label>
+              <Input
+                id="fa-conn-chain"
+                type="number"
+                value={chainId}
+                onChange={(e) => setChainId(Number(e.target.value))}
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <label htmlFor="fa-conn-cap" className={labelCls}>Per-trade cap (USD)</label>
+              <Input
+                id="fa-conn-cap"
+                type="number"
+                min={0}
+                step="0.01"
+                value={maxTradeUsd}
+                onChange={(e) => setMaxTradeUsd(Number(e.target.value))}
+                className="text-sm tabular-nums"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="inline-flex items-center gap-2 text-sm text-fa-frost-dim cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={liveTrading}
+                onChange={(e) => setLiveTrading(e.target.checked)}
+                className="rounded border-fa-edge bg-fa-glass"
+              />
+              Live trading
+            </label>
+            {liveTrading && !(conn?.liveTrading ?? false) && (
+              <p className="fa-caption text-fa-warning mt-1.5">
+                Turning this on places real orders once a session is armed and running. Validate with a
+                small per-trade cap first.
+              </p>
+            )}
+          </div>
+        </div>
+
+        {saveErrMsg && <p className="fa-caption text-fa-danger">{saveErrMsg}</p>}
+        {isSuccess && !saveErrMsg && (
+          <p className="fa-caption text-fa-success">Connection saved.</p>
+        )}
+
+        <div className="flex items-center justify-end gap-3 pt-1">
+          <Button onClick={onClose} variant="outline" size="sm">Close</Button>
+          <Button onClick={save} disabled={saving} variant="primary" size="sm">
+            {saving ? "Saving…" : "Save connection"}
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 // ── Setup guide dialog ──────────────────────────────────────────────────────────
 // The full Polymarket connection setup is non-trivial (fund a Polygon wallet, wrap USDC.e → pUSD,
 // approve the exchanges, set env keys, derive CLOB creds, do the $1 validation). A tooltip can't
@@ -449,7 +746,7 @@ function EnvRow({ k, v }: { k: string; v: string }) {
   );
 }
 
-function LiveSetupDialog({ onClose }: { onClose: () => void }) {
+function LiveSetupDialog({ onClose, onOpenConnection }: { onClose: () => void; onOpenConnection: () => void }) {
   return createPortal(
     <div
       className="fixed inset-0 z-[70] bg-fa-ink/70 backdrop-blur-sm flex items-center justify-center p-6 fa-confirm-enter"
@@ -486,19 +783,32 @@ function LiveSetupDialog({ onClose }: { onClose: () => void }) {
             (Polymarket collateral). Approve the CTF exchange and neg-risk exchange to spend your pUSD and
             CTF outcome tokens. (Doc steps 1–3, run with <code>cast</code>.)
           </SetupStep>
-          <SetupStep n={2} title="Configure the backend .env">
-            <ul className="mt-1 space-y-1">
+          <SetupStep n={2} title="Set your connection here">
+            Open the <span className="text-fa-frost">Connection</span> card on this page and enter your
+            wallet signing key, signature type, funder, and per-trade cap. The connection is stored
+            securely per tenant — no <code>.env</code> editing.
+            <div className="mt-2">
+              <Button
+                onClick={() => { onClose(); onOpenConnection(); }}
+                variant="outline"
+                size="sm"
+              >
+                <Plug className="h-3.5 w-3.5" /> Open connection editor
+              </Button>
+            </div>
+            <ul className="mt-3 space-y-1 opacity-70">
+              <li className="fa-caption text-fa-frost-dim/80">
+                These were the old env defaults — now configured in-app via the editor above:
+              </li>
               <EnvRow k="KeyVault__PrivateKey" v="wallet signing key (hex)" />
               <EnvRow k="KeyVault__SignatureType" v="0 = EOA · 1 = proxy · 2 = Gnosis Safe" />
-              <EnvRow k="Polymarket__WalletAddress" v="your wallet address" />
-              <EnvRow k="Polymarket__ApiKey / ApiSecret / ApiPassphrase" v="auto-derived on first use — leave blank" />
               <EnvRow k="Polymarket__MaxTradeUsd" v="per-trade cap — start at 1 for validation" />
-              <EnvRow k="Polymarket__LiveTrading" v="keep false until validated" />
+              <EnvRow k="Polymarket__LiveTrading" v="keep off until validated" />
             </ul>
           </SetupStep>
-          <SetupStep n={3} title="Restart the backend">
-            On boot it loads the wallet and derives its CLOB API credentials via the L1 auth flow
-            (logged at startup) — no manual key creation needed.
+          <SetupStep n={3} title="Credentials derive automatically">
+            Once the wallet key is saved, the backend derives its CLOB API credentials via the L1 auth
+            flow on first use — no manual key creation needed.
           </SetupStep>
           <SetupStep n={4} title="Arm">
             Request a confirmation code and confirm it on this page. Arming is in-memory and resets if the
@@ -509,9 +819,9 @@ function LiveSetupDialog({ onClose }: { onClose: () => void }) {
             before trusting automation.
           </SetupStep>
           <SetupStep n={6} title="Go live">
-            Set <code>Polymarket__LiveTrading=true</code>, restart, then create a session below — it trades
-            automatically each qualifying candle while armed. The killswitch (or stopping a session) halts
-            it anytime.
+            Turn on <span className="text-fa-frost">Live trading</span> in the Connection editor, then
+            create a session below — it trades automatically each qualifying candle while armed. The
+            killswitch (or stopping a session) halts it anytime.
           </SetupStep>
         </div>
 
@@ -548,6 +858,7 @@ export default function Live() {
   const toggleForm = () => setFormOverride(!formOpen);
 
   const [showSetup, setShowSetup] = useState(false);
+  const [showConnection, setShowConnection] = useState(false);
 
   return (
     <div>
@@ -573,6 +884,9 @@ export default function Live() {
       <div className="p-4 sm:p-8 space-y-6">
         {/* Arm status + flow */}
         <ArmStatusStrip armed={armed} onShowSetup={() => setShowSetup(true)} />
+
+        {/* Connection — view/edit the per-tenant Polymarket connection in-app */}
+        <ConnectionCard onEdit={() => setShowConnection(true)} />
 
         {/* New live session — collapsible */}
         <div className="fa-card overflow-hidden">
@@ -630,7 +944,13 @@ export default function Live() {
         </div>
       </div>
 
-      {showSetup && <LiveSetupDialog onClose={() => setShowSetup(false)} />}
+      {showSetup && (
+        <LiveSetupDialog
+          onClose={() => setShowSetup(false)}
+          onOpenConnection={() => setShowConnection(true)}
+        />
+      )}
+      {showConnection && <ConnectionEditorDialog onClose={() => setShowConnection(false)} />}
     </div>
   );
 }

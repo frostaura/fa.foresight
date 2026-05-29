@@ -52,6 +52,42 @@ export interface PolymarketReference {
   error?: string;
 }
 
+/**
+ * Masked view of a tenant's platform connection, returned by GET/PUT
+ * /api/platform-connections/default. The raw private key is NEVER returned — only `hasPrivateKey`
+ * and the derived `walletAddress`. `walletAddress`/`funder` may be absent when unset.
+ */
+export interface PlatformConnection {
+  connectorId: string;
+  isDefault: boolean;
+  hasPrivateKey: boolean;
+  walletAddress?: string | null;
+  /** 0 = EOA, 1 = POLY_PROXY, 2 = POLY_GNOSIS_SAFE. */
+  signatureType: number;
+  funder?: string | null;
+  clobBaseUrl: string;
+  gammaBaseUrl: string;
+  chainId: number;
+  liveTrading: boolean;
+  maxTradeUsd: number;
+}
+
+/**
+ * Partial body for PUT /api/platform-connections/default. All fields optional — omitted = unchanged.
+ * Omit `privateKey` (or send blank/undefined) to keep the existing wallet key. A supplied key is
+ * validated + encrypted server-side; its wallet address is derived.
+ */
+export interface UpdatePlatformConnectionRequest {
+  privateKey?: string;
+  signatureType?: number;
+  funder?: string;
+  clobBaseUrl?: string;
+  gammaBaseUrl?: string;
+  chainId?: number;
+  liveTrading?: boolean;
+  maxTradeUsd?: number;
+}
+
 const baseUrl = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
 
 export const api = createApi({
@@ -64,7 +100,7 @@ export const api = createApi({
       return headers;
     }
   }),
-  tagTypes: ["Tenant", "LivePrediction", "Model", "ActiveModel", "Backtest", "Session", "Chaos", "Strategy", "GoLive"],
+  tagTypes: ["Tenant", "LivePrediction", "Model", "ActiveModel", "Backtest", "Session", "Chaos", "Strategy", "GoLive", "PlatformConnection"],
   endpoints: (b) => ({
     getMe: b.query<TenantInfo, void>({ query: () => "tenants/me", providesTags: ["Tenant"] }),
     listTenants: b.query<TenantInfo[], void>({ query: () => "tenants", providesTags: ["Tenant"] }),
@@ -184,6 +220,20 @@ export const api = createApi({
     killswitch: b.mutation<{ armed: boolean; message: string }, void>({
       query: () => ({ url: "golive/killswitch", method: "POST" }),
       invalidatesTags: ["GoLive"],
+    }),
+
+    // ── Platform connection (per-tenant Polymarket connection, edited in-app) ──
+    // The connection (wallet key, signature type, endpoints, live-trading flag, per-trade cap) now
+    // lives in the DB per tenant; env is a one-time bootstrap default. Secrets are masked: the GET
+    // never returns the raw private key (only hasPrivateKey + the derived walletAddress).
+    getPlatformConnection: b.query<PlatformConnection, void>({
+      query: () => "platform-connections/default",
+      providesTags: ["PlatformConnection"],
+    }),
+    // Partial update — omitted fields stay unchanged. Omitting privateKey keeps the existing key.
+    updatePlatformConnection: b.mutation<PlatformConnection, UpdatePlatformConnectionRequest>({
+      query: (body) => ({ url: "platform-connections/default", method: "PUT", body }),
+      invalidatesTags: ["PlatformConnection"],
     }),
 
     // iter-4 — prediction models CRUD.
@@ -358,6 +408,8 @@ export const {
   useRequestGoLiveCodeMutation,
   useConfirmGoLiveMutation,
   useKillswitchMutation,
+  useGetPlatformConnectionQuery,
+  useUpdatePlatformConnectionMutation,
   useListModelsQuery,
   useGetModelQuery,
   useCreateModelMutation,
