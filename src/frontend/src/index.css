@@ -236,11 +236,16 @@ body {
   background: rgba(11, 27, 48, 0.95) !important;
   border: 1px solid rgba(164, 212, 244, 0.32) !important;
   border-radius: 8px;
+  /* overflow:hidden clips the square button corners so they never poke past the container's
+     rounded border — the stack reads as a single clean rounded pill */
+  overflow: hidden;
   box-shadow: 0 4px 16px rgba(0,0,0,0.5) !important;
 }
 .react-flow__controls-button {
   background: rgba(16, 39, 68, 0.90) !important;
   border-bottom: 1px solid rgba(164, 212, 244, 0.18) !important;
+  /* Square buttons are fine here — overflow:hidden on the parent clips the corners cleanly */
+  border-radius: 0 !important;
   color: #A4D4F4 !important;
   fill: #A4D4F4 !important;
   transition: background 150ms ease, fill 150ms ease;
@@ -499,6 +504,20 @@ body {
   transform-origin: center;
   color: #7CC0F0; /* FrostAura frost-blue; aligns with --fa-frost / live-pulse hue */
   filter: drop-shadow(0 0 4px rgba(124, 192, 240, 0.55));
+}
+
+/* Bank-balance overlay line — glowing FrostAura blue stroke drawn over the candlestick chart.
+   Applied as a filter on the recharts <Line> SVG path element so the glow composites cleanly
+   on top of the dark background without needing a separate wrapper SVG. The drop-shadow filter
+   stacks two layers: a wide outer halo (large stdDeviation, lower opacity) for depth and a
+   tight inner glow (small stdDeviation, full opacity) that keeps the line itself crisp and bright.
+   A faint wide underlay stroke is rendered separately by the LineChart (strokeWidth=8, low opacity)
+   to give a soft luminous aura below the precise stroke. */
+.fa-balance-line {
+  filter:
+    drop-shadow(0 0 6px rgba(164, 212, 244, 0.8))
+    drop-shadow(0 0 12px rgba(164, 212, 244, 0.45))
+    drop-shadow(0 0 24px rgba(164, 212, 244, 0.25));
 }
 
 /* ── Ticker / marquee ──────────────────────────────────────────────────────────────────────────

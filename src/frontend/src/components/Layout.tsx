@@ -211,7 +211,6 @@ export default function Layout() {
             <NavLink
               key={item.to}
               to={item.to}
-              end={item.to === "/models"}
               className={linkClass}
               title={collapsed && !isDrawer ? item.label : undefined}
               onClick={isDrawer ? closeDrawer : undefined}

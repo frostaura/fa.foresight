@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import ReactFlow, {
   Background,
   Controls,
@@ -44,16 +43,15 @@ import {
  * The flow definition is the source of truth — reactflow nodes/edges are derived from
  * (and synced back to) the parsed JSON. Save serializes back to the API.
  */
+/**
+ * FlowDesigner — renders inside the normal app layout (no portal, no fixed overlay).
+ * The parent page is responsible for giving it a full-height flex container.
+ */
 export default function FlowDesigner({ model, onClose }: { model: Model; onClose: () => void }) {
-  // Portal to document.body so the `fixed inset-0` overlay escapes any transformed/filtered
-  // ancestor (the card grid uses `transition` + `transform` hover effects that create a
-  // containing block, which captures `position: fixed` to the card's bounds instead of the
-  // viewport). Without the portal the designer renders trapped inside its parent card.
-  return createPortal(
+  return (
     <ReactFlowProvider>
       <DesignerInner model={model} onClose={onClose} />
-    </ReactFlowProvider>,
-    document.body
+    </ReactFlowProvider>
   );
 }
 
@@ -177,38 +175,44 @@ function DesignerInner({ model, onClose }: { model: Model; onClose: () => void }
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex"
-      style={{ background: "#040810" }}
+      className="flex-1 flex min-h-0 overflow-hidden"
       data-fa-designer
-      onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
     >
+      {/* Left: palette + canvas */}
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="px-5 py-3 border-b border-fa-edge flex items-center gap-3 bg-fa-ink-2/40 backdrop-blur">
-          <div className="min-w-0">
-            <h2 className="text-fa-frost-bright text-base font-light truncate">{model.name}</h2>
-            <div className="text-fa-frost-dim text-[11px]">
+        {/* Header strip — model name, Save, Back */}
+        <div className="shrink-0 px-4 sm:px-5 py-3 border-b border-fa-edge flex items-center gap-2 sm:gap-3 bg-fa-ink-2/40 backdrop-blur">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-fa-frost-bright text-sm sm:text-base font-light truncate">{model.name}</h2>
+            <div className="text-fa-frost-dim text-[10px] sm:text-[11px] hidden sm:block">
               {model.kind === "llm" ? "LLM model" : "Deterministic model"} · {model.supportsBacktesting ? "backtestable" : "live-only"}
               {isBuiltIn && " · read-only (built-in; duplicate to edit)"}
             </div>
           </div>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {!isBuiltIn && (
               <button onClick={onSave} disabled={isSaving}
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-fa-frost-bright/20 hover:bg-fa-frost-bright/30 text-fa-frost-bright text-sm border border-fa-frost-bright/30 disabled:opacity-50 disabled:cursor-not-allowed transition">
-                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-fa-frost-bright/20 hover:bg-fa-frost-bright/30 text-fa-frost-bright text-xs border border-fa-frost-bright/30 disabled:opacity-50 disabled:cursor-not-allowed transition">
+                {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                 Save
               </button>
             )}
             <button onClick={onClose} data-fa-designer-close
-              className="p-1.5 rounded-md text-fa-frost-dim hover:text-fa-frost-bright hover:bg-fa-glass transition">
-              <X className="h-4 w-4" />
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-dim hover:text-fa-frost-bright text-xs transition">
+              <X className="h-3.5 w-3.5" />
+              Back
             </button>
           </div>
         </div>
 
+        {/* Canvas row: palette (hidden on mobile) + flow */}
         <div className="flex-1 flex min-h-0">
-          {!isBuiltIn && <NodePalette catalogue={catalogue ?? {}} />}
+          {/* Palette: hidden at < sm so the canvas gets all horizontal space on mobile. */}
+          {!isBuiltIn && (
+            <div className="hidden sm:block">
+              <NodePalette catalogue={catalogue ?? {}} />
+            </div>
+          )}
           <div ref={wrapper} className="flex-1 relative" onDrop={onDrop} onDragOver={onDragOver}>
             <ReactFlow
               nodes={nodes}
@@ -247,7 +251,9 @@ function DesignerInner({ model, onClose }: { model: Model; onClose: () => void }
         </div>
       </div>
 
-      <div className="w-[320px] shrink-0 border-l border-fa-edge bg-fa-ink-2/40 flex flex-col min-h-0">
+      {/* Right: inspector + run panel — hidden on mobile to avoid horizontal overflow on
+          the canvas. At sm+ it slides back in at its usual width. */}
+      <div className="hidden sm:flex w-[280px] lg:w-[320px] shrink-0 border-l border-fa-edge bg-fa-ink-2/40 flex-col min-h-0">
         <div className="px-4 py-3 border-b border-fa-edge text-fa-frost-bright text-sm">Inspector</div>
         <div className="flex-1 overflow-y-auto">
           {selectedNode ? (

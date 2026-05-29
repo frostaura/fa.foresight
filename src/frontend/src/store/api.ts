@@ -466,6 +466,10 @@ export interface Model {
   tenantId: string | null;
   name: string;
   description?: string | null;
+  /** AI-generated plain-language description for non-technical users. Null until generation completes. */
+  simpleDescription?: string | null;
+  /** AI-generated technical description for data-scientists. Null until generation completes. */
+  technicalDescription?: string | null;
   kind: "llm" | "deterministic";
   supportsBacktesting: boolean;
   isBuiltIn: boolean;

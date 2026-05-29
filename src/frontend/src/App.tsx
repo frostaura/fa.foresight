@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import { ConfirmProvider } from "./components/ConfirmDialog";
 import Models from "./pages/Models";
+import ModelDesignerPage from "./pages/ModelDesignerPage";
 import PaperTrading from "./pages/PaperTrading";
 import Status from "./pages/Status";
 import Live from "./pages/Live";
@@ -28,6 +29,8 @@ export default function App() {
             <Route path="models" element={<Models />} />
             {/* Alias so the nav link /models/backtesting opens models with backtesting tab pre-selected */}
             <Route path="models/backtesting" element={<Navigate to="/models?view=backtesting" replace />} />
+            {/* Per-model flow designer — renders inside the Layout shell so the sidebar stays visible */}
+            <Route path="models/:modelId/designer" element={<ModelDesignerPage />} />
 
             {/* Legacy redirect — paper-trading used to be the root route */}
             <Route path="paper-trading" element={<Navigate to="/trading/paper" replace />} />

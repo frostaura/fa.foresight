@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Star, Lock, FlaskConical, Brain, Plus, Loader2, Play, AlertTriangle, Cpu, Trash2, X, Info } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Star, Lock, FlaskConical, Brain, Plus, Loader2, Play, AlertTriangle, Cpu, Trash2, X, Info, BookOpen } from "lucide-react";
 import { useConfirm } from "../components/ConfirmDialog";
 import CreateModelDialog from "../components/CreateModelDialog";
-import FlowDesigner from "../components/FlowDesigner";
 import InfoTip, { TipBody } from "../components/InfoTip";
 import PageHeader from "../components/PageHeader";
 import Ticker, { type TickerItem } from "../components/Ticker";
@@ -115,6 +114,8 @@ export default function Models() {
   );
 }
 
+type DescriptionMode = "simple" | "technical";
+
 function DefinitionsTab({ models, isLoading }: { models: Model[]; isLoading: boolean }) {
   const [showCreate, setShowCreate] = useState(false);
   // The "effective default" is the SINGLE model the resolver would pick if no per-card override
@@ -123,6 +124,9 @@ function DefinitionsTab({ models, isLoading }: { models: Model[]; isLoading: boo
   const tenantDefault = models.find((m) => m.isDefault && m.tenantId !== null);
   const globalDefault = models.find((m) => m.isDefault && m.tenantId === null);
   const effectiveDefaultId = tenantDefault?.id ?? globalDefault?.id ?? null;
+
+  // AI description mode — persisted so the user's choice survives reloads.
+  const [descMode, setDescMode] = useLocalStorageState<DescriptionMode>("fa.models.descMode", "simple");
 
   // Card sort. Two keys (score / name) × two directions (asc / desc). Default is score desc so
   // the strongest model is first to read. Persisted under fa.models.sort.* so the user's pick
@@ -161,11 +165,41 @@ function DefinitionsTab({ models, isLoading }: { models: Model[]; isLoading: boo
     <div className="space-y-4">
       {/* Leaderboard as a single-line auto-scrolling ticker — replaces the boxed table. */}
       <TopPerformersTicker models={models} />
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-fa-frost-dim text-sm">
+      {/* Controls row — count on the left; sort + description toggle + New model on the right.
+          At mobile widths the right cluster wraps below the count via flex-wrap. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="text-fa-frost-dim text-sm shrink-0">
           {isLoading ? "Loading…" : `${models.length} model${models.length === 1 ? "" : "s"}`}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 ml-auto">
+          {/* Description mode — Simple | Data-scientist segmented control. */}
+          <div
+            className="inline-flex items-center rounded-md border border-fa-edge bg-fa-glass overflow-hidden text-[11px]"
+            title="Switch the AI-generated description shown on each card between plain-language (Simple) and technical (Data-scientist). Falls back to the static description when the AI variant is not yet available."
+          >
+            {(["simple", "technical"] as DescriptionMode[]).map((mode) => {
+              const active = descMode === mode;
+              const Icon = mode === "simple" ? BookOpen : FlaskConical;
+              const label = mode === "simple" ? "Simple" : "Data-scientist";
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setDescMode(mode)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 px-2.5 py-1 transition",
+                    active
+                      ? "bg-fa-glass-strong text-fa-frost-bright"
+                      : "text-fa-frost-dim hover:text-fa-frost-bright",
+                  )}
+                >
+                  <Icon className="h-3 w-3 shrink-0" />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </div>
+
           {/* Sort picker — two-key toggle. Clicking the active key flips its direction; clicking
               the inactive key activates it with that key's natural starting direction (Score
               starts at desc so "best first" lands; Name starts at asc so A→Z lands). */}
@@ -212,9 +246,9 @@ function DefinitionsTab({ models, isLoading }: { models: Model[]; isLoading: boo
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         {sortedModels.map((m) => (
-          <ModelCard key={m.id} model={m} isEffectiveDefault={m.id === effectiveDefaultId} />
+          <ModelCard key={m.id} model={m} isEffectiveDefault={m.id === effectiveDefaultId} descMode={descMode} />
         ))}
       </div>
     </div>
@@ -396,13 +430,21 @@ function TopPerformersTicker({ models }: { models: Model[] }) {
   );
 }
 
-function ModelCard({ model, isEffectiveDefault }: { model: Model; isEffectiveDefault: boolean }) {
+function ModelCard({
+  model,
+  isEffectiveDefault,
+  descMode,
+}: {
+  model: Model;
+  isEffectiveDefault: boolean;
+  descMode: DescriptionMode;
+}) {
   const KindIcon = model.kind === "llm" ? Brain : FlaskConical;
   const [train, { isLoading: isTraining }] = useTrainModelMutation();
   const [setDefault] = useSetDefaultModelMutation();
   const [deleteModel] = useDeleteModelMutation();
   const [error, setError] = useState<string | null>(null);
-  const [showDesigner, setShowDesigner] = useState(false);
+  const navigate = useNavigate();
   const confirm = useConfirm();
 
   // Per-interval WF accuracy. Shared parser used by the leaderboard too — same data source so
@@ -415,6 +457,15 @@ function ModelCard({ model, isEffectiveDefault }: { model: Model; isEffectiveDef
   // tab's in-flight mutation. The local `isTraining` covers the instant between the click and the
   // first refetch that flips trainingStatus to "training".
   const isTrainingNow = isTraining || model.trainingStatus === "training";
+
+  // Resolve which description to show based on the global descMode toggle.
+  // Preference order: chosen AI variant → static description → nothing.
+  const displayDescription = useMemo(() => {
+    if (descMode === "simple") {
+      return model.simpleDescription ?? model.description ?? null;
+    }
+    return model.technicalDescription ?? model.description ?? null;
+  }, [descMode, model.simpleDescription, model.technicalDescription, model.description]);
 
   const onTrain = async () => {
     setError(null);
@@ -446,10 +497,11 @@ function ModelCard({ model, isEffectiveDefault }: { model: Model; isEffectiveDef
 
   return (
     <div className="fa-card px-5 py-4 flex flex-col gap-3 cursor-pointer hover:border-fa-frost/30 transition"
-         onClick={() => setShowDesigner(true)}
+         onClick={() => navigate(`/models/${model.id}/designer`)}
          title="Open designer">
-      {showDesigner && <FlowDesigner model={model} onClose={() => setShowDesigner(false)} />}
-      <div className="flex items-start justify-between gap-3">
+      {/* Card header — name + built-in lock on the left; default star on the right. Wraps
+          gracefully at narrow widths. */}
+      <div className="flex items-start justify-between gap-3 min-w-0">
         <div className="flex items-center gap-2 min-w-0">
           <KindIcon className="h-4 w-4 text-fa-frost-bright shrink-0" />
           <div className="text-fa-frost-bright text-sm font-medium truncate" title={model.name}>
@@ -473,11 +525,15 @@ function ModelCard({ model, isEffectiveDefault }: { model: Model; isEffectiveDef
         </button>
       </div>
 
-      {model.description && (
-        <p className="text-fa-frost-dim text-xs leading-relaxed line-clamp-2">{model.description}</p>
+      {/* AI / static description. The chosen variant (simple or technical) is shown; falls back
+          to the static description when the AI version isn't ready yet, so we never show an
+          empty description block. */}
+      {displayDescription && (
+        <p className="text-fa-frost-dim text-xs leading-relaxed line-clamp-2">{displayDescription}</p>
       )}
 
-      <div className="flex items-center gap-4 text-[11px] text-fa-frost-dim">
+      {/* Per-interval stats row. Wraps on very narrow viewports rather than overflowing. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-fa-frost-dim">
         <div>
           <div className="uppercase tracking-wider text-[10px]">Kind</div>
           <div className="text-fa-frost-bright">{model.kind === "llm" ? "LLM" : "Deterministic"}</div>
@@ -508,8 +564,9 @@ function ModelCard({ model, isEffectiveDefault }: { model: Model; isEffectiveDef
         })()}
       </div>
 
+      {/* Train + Delete action row. Wraps on mobile so buttons don't overflow. */}
       {model.kind === "deterministic" && !model.isBuiltIn && (
-        <div className="flex items-center gap-2 pt-1">
+        <div className="flex flex-wrap items-center gap-2 pt-1">
           <button onClick={(e) => { e.stopPropagation(); onTrain(); }} disabled={isTrainingNow}
             className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-bright text-[11px] transition disabled:opacity-50">
             {isTrainingNow ? <Loader2 className="h-3 w-3 animate-spin" /> : <Cpu className="h-3 w-3" />}
@@ -524,7 +581,7 @@ function ModelCard({ model, isEffectiveDefault }: { model: Model; isEffectiveDef
       )}
 
       {hasTrainingRange && (
-        <div className="text-[10px] text-fa-frost-dim/70 -mt-1" title="The candle range the model was trained on. Honest-backtest runs the model on a window strictly outside this.">
+        <div className="text-[10px] text-fa-frost-dim/70 -mt-1 break-words" title="The candle range the model was trained on. Honest-backtest runs the model on a window strictly outside this.">
           Trained {model.trainSymbol}/{model.trainInterval} · {fmtRunDate(new Date(model.trainStartMs as number))} → {fmtRunDate(new Date(model.trainEndMs as number))}
         </div>
       )}

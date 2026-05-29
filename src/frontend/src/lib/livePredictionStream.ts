@@ -102,13 +102,20 @@ export function useLivePredictionStream(symbol: string, interval: string, take =
     // active model is deterministic, so the server replays it over the recent `take` candles
     // (leakage-free) and persists the gaps as resolved predictions — then we re-pull so they render.
     // Idempotent server-side: candles already predicted are skipped, so re-mounts cost little.
+    // Always re-pull after backfill completes (regardless of `added` count) so the chart and table
+    // see predictions for the full visible window even when all rows were already in the DB.
     fetch(
       `${apiBase}/live/predictions/backfill?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&candles=${take}`,
       { method: "POST", headers: { "X-Tenant-Slug": tenant }, signal: controller.signal }
     )
       .then((res) => (res.ok ? res.json() : null))
-      .then((r: { added?: number } | null) => {
-        if (alive && r && (r.added ?? 0) > 0) return backfill();
+      .then((_r: { added?: number } | null) => {
+        // Re-fetch the predictions snapshot unconditionally: the backfill may have added rows
+        // (added > 0) or they may already exist (added = 0, idempotent). Either way a fresh GET
+        // guarantees the in-memory cache reflects the full window — the most common issue was
+        // "predictions exist on the server but the chart shows dots for only the last two candles"
+        // because the initial GET ran before backfill completed and the re-pull was gated on added > 0.
+        if (alive) return backfill();
       })
       .catch((e) => {
         if ((e as Error).name !== "AbortError") {

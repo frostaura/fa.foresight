@@ -2,11 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useSort, SortHeader } from "../lib/sort";
 import {
   Area,
-  AreaChart,
   Bar,
-  BarChart,
   CartesianGrid,
   ComposedChart,
+  Line,
   ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
@@ -499,15 +498,17 @@ export default function LiveBitcoinChart({
   const trendColor = up ? UP : DOWN;
 
   // Y-domain fits tightly to the visible OHLC range with a small percentage pad on both sides so
-  // wicks don't kiss the chart frame. The prediction line that used to fold its predictedClose
-  // into the domain was removed, so the domain no longer has to stretch for it — yielding tighter
-  // candles and better readability of small recent moves.
+  // wicks don't kiss the chart frame. The upper bound is padded more generously (8% vs 4% bottom)
+  // so the result-orb ReferenceDots — positioned at yDomain[1] — render fully inside the plot area
+  // without being clipped by the SVG's top edge. The chart margin (top: 20) adds additional pixel
+  // headroom above the top domain gridline, which is where the orbs sit.
   const yDomain = useMemo<[number, number]>(() => {
     if (rows.length === 0) return [0, 1];
     const lo = Math.min(...rows.map((r) => r.low));
     const hi = Math.max(...rows.map((r) => r.high));
-    const pad = Math.max(1, hi - lo) * 0.05;
-    return [lo - pad, hi + pad];
+    const range = Math.max(1, hi - lo);
+    // Bottom: 4% pad (wicks clear the bottom axis). Top: 8% pad (orbs must sit fully inside).
+    return [lo - range * 0.04, hi + range * 0.08];
   }, [rows]);
 
   // One vertical divider per candle boundary — that's the "every X of the timeframe" behaviour
@@ -585,6 +586,49 @@ export default function LiveBitcoinChart({
     }
     return dots;
   }, [paperSession, rowOpenTimes, displayablePredictions, closeByOpenTime, interval, gateNoBets]);
+
+  // Bank-balance overlay series. Built from the paper-session ledger: each resolved bet contributes
+  // one point (openTime → balanceAfter). Points are snapped to the candle's targetOpenTime so they
+  // align with the x-axis ticks. Unresolved bets are skipped — they don't have a final balance yet.
+  // The initial balance is prepended as a synthetic point at the session's first bet's targetOpenTime
+  // minus one interval so there's a meaningful left anchor even before any bet resolves. When no
+  // session exists (or no resolved bets), the series is empty and the overlay is not rendered.
+  const balanceSeries = useMemo<{ openTime: number; balance: number }[]>(() => {
+    if (!paperSession || paperSession.bets.length === 0) return [];
+    const intervalMs = INTERVAL_MS[interval];
+    const resolved = paperSession.bets
+      .filter((b) => b.resolved && b.balanceAfter != null)
+      .sort((a, b) => a.targetOpenTime - b.targetOpenTime);
+    if (resolved.length === 0) return [];
+    // Initial balance point one candle before the first resolved bet so the line has a visible
+    // left origin. Clamped to the visible window so it doesn't force x-scale expansion.
+    const points: { openTime: number; balance: number }[] = [
+      { openTime: resolved[0].targetOpenTime - intervalMs, balance: paperSession.initialBalance },
+      ...resolved.map((b) => ({ openTime: b.targetOpenTime, balance: b.balanceAfter! })),
+    ];
+    return points;
+  }, [paperSession, interval]);
+
+  // Balance Y-domain: spans from 0 to 120% of the maximum balance so the line reads as an upward
+  // trend without rescaling the candle axis. We use a hidden secondary YAxis with this domain.
+  const balanceYDomain = useMemo<[number, number]>(() => {
+    if (balanceSeries.length === 0) return [0, 1];
+    const maxBal = Math.max(...balanceSeries.map((p) => p.balance));
+    const minBal = Math.min(0, Math.min(...balanceSeries.map((p) => p.balance)));
+    return [minBal, maxBal * 1.2];
+  }, [balanceSeries]);
+
+  // Merge balance points into the chart row data so recharts can render them on the same x-axis.
+  // Each row gets a `balance` field if a ledger point exists for that candle, otherwise undefined
+  // (recharts treats undefined as a gap — that's fine, the line only draws where bets resolved).
+  const rowsWithBalance = useMemo<(Row & { balance?: number })[]>(() => {
+    if (balanceSeries.length === 0) return rows;
+    const byTime = new Map(balanceSeries.map((p) => [p.openTime, p.balance]));
+    return rows.map((r) => {
+      const bal = byTime.get(r.openTime);
+      return bal != null ? { ...r, balance: bal } : r;
+    });
+  }, [rows, balanceSeries]);
 
   return (
     <div className={fullscreen
@@ -720,27 +764,44 @@ export default function LiveBitcoinChart({
           />
         ) : kind === "line" ? (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={rows} margin={{ top: 4, right: 8, left: -8, bottom: 0 }}>
+            <ComposedChart data={rowsWithBalance} margin={{ top: 20, right: 8, left: -8, bottom: 0 }}>
               <CartesianGrid stroke="rgb(255 255 255 / 0.05)" vertical={false} />
               <XAxis dataKey="openTime" type="number" domain={["dataMin", "dataMax"]} scale="time"
                 tickFormatter={(v: number) => formatTick(v)}
                 tick={{ fill: "rgb(148 163 184)", fontSize: 10 }}
                 stroke="rgb(255 255 255 / 0.1)" minTickGap={48} />
-              <YAxis domain={yDomain} tickFormatter={(v: number) => `$${Math.round(v).toLocaleString()}`}
+              {/* Primary Y-axis: BTC price scale */}
+              <YAxis yAxisId="price" domain={yDomain} tickFormatter={(v: number) => `$${Math.round(v).toLocaleString()}`}
                 tick={{ fill: "rgb(148 163 184)", fontSize: 10 }}
                 stroke="rgb(255 255 255 / 0.1)" width={60} />
+              {/* Secondary Y-axis: bank balance — hidden, scaled independently so the balance line
+                  reads as an overlay trend without compressing or stretching the price candles. */}
+              {balanceSeries.length > 0 && (
+                <YAxis yAxisId="balance" orientation="right" domain={balanceYDomain} hide />
+              )}
               <Tooltip
                 cursor={{ stroke: "rgb(148 163 184 / 0.4)", strokeDasharray: "2 2" }}
                 content={renderTooltip(rows, last?.openTime, nextPrediction)}
               />
               {dividerTimes.map((t) => (
-                <ReferenceLine key={t} x={t} stroke={NEUTRAL} strokeOpacity={0.12} strokeWidth={1} />
+                <ReferenceLine key={t} yAxisId="price" x={t} stroke={NEUTRAL} strokeOpacity={0.12} strokeWidth={1} />
               ))}
-              <Area type="monotone" dataKey="close" stroke={trendColor} strokeWidth={2}
+              <Area yAxisId="price" type="monotone" dataKey="close" stroke={trendColor} strokeWidth={2}
                 fill={trendColor} fillOpacity={0.12} isAnimationActive={false} />
+              {/* Bank-balance overlay — glowing FrostAura blue line. Rendered after the area fill
+                  so it composites on top of the price series. connectNulls=false lets the line draw
+                  only between resolved-bet candles (gaps for candles with no bet outcome). */}
+              {balanceSeries.length > 0 && (
+                <Line yAxisId="balance" type="monotone" dataKey="balance"
+                  stroke="#A4D4F4" strokeWidth={2} dot={false} isAnimationActive={false}
+                  connectNulls={false} strokeOpacity={0.9}
+                  className="fa-balance-line"
+                />
+              )}
               {resultDots.map((d) => (
                 <ReferenceDot
                   key={d.id}
+                  yAxisId="price"
                   x={d.anchor}
                   y={yDomain[1]}
                   ifOverflow="visible"
@@ -751,33 +812,38 @@ export default function LiveBitcoinChart({
               ))}
               {last && currentPrediction && (
                 <ReferenceDot
+                  yAxisId="price"
                   x={last.openTime}
                   y={yDomain[1]}
                   ifOverflow="visible"
                   shape={(p: unknown) => <PendingActiveDot {...(p as { cx?: number; cy?: number })} lean={currentLean} />}
                 />
               )}
-            </AreaChart>
+            </ComposedChart>
           </ResponsiveContainer>
         ) : kind === "bar" ? (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={rows} margin={{ top: 4, right: 8, left: -8, bottom: 0 }}>
+            <ComposedChart data={rowsWithBalance} margin={{ top: 20, right: 8, left: -8, bottom: 0 }}>
               <CartesianGrid stroke="rgb(255 255 255 / 0.05)" vertical={false} />
               <XAxis dataKey="openTime" type="category"
                 tickFormatter={(v: number) => formatTick(v)}
                 tick={{ fill: "rgb(148 163 184)", fontSize: 10 }}
                 stroke="rgb(255 255 255 / 0.1)" minTickGap={48} />
-              <YAxis domain={yDomain} tickFormatter={(v: number) => `$${Math.round(v).toLocaleString()}`}
+              <YAxis yAxisId="price" domain={yDomain} tickFormatter={(v: number) => `$${Math.round(v).toLocaleString()}`}
                 tick={{ fill: "rgb(148 163 184)", fontSize: 10 }}
                 stroke="rgb(255 255 255 / 0.1)" width={60} />
+              {balanceSeries.length > 0 && (
+                <YAxis yAxisId="balance" orientation="right" domain={balanceYDomain} hide />
+              )}
               <Tooltip
                 cursor={{ fill: "rgb(148 163 184 / 0.08)" }}
                 content={renderTooltip(rows, last?.openTime, nextPrediction)}
               />
               {dividerTimes.map((t) => (
-                <ReferenceLine key={t} x={t} stroke={NEUTRAL} strokeOpacity={0.12} strokeWidth={1} />
+                <ReferenceLine key={t} yAxisId="price" x={t} stroke={NEUTRAL} strokeOpacity={0.12} strokeWidth={1} />
               ))}
               <Bar
+                yAxisId="price"
                 dataKey="close"
                 isAnimationActive={false}
                 shape={(props: unknown) => {
@@ -799,9 +865,17 @@ export default function LiveBitcoinChart({
                   );
                 }}
               />
+              {balanceSeries.length > 0 && (
+                <Line yAxisId="balance" type="monotone" dataKey="balance"
+                  stroke="#A4D4F4" strokeWidth={2} dot={false} isAnimationActive={false}
+                  connectNulls={false} strokeOpacity={0.9}
+                  className="fa-balance-line"
+                />
+              )}
               {resultDots.map((d) => (
                 <ReferenceDot
                   key={d.id}
+                  yAxisId="price"
                   x={d.anchor}
                   y={yDomain[1]}
                   ifOverflow="visible"
@@ -812,38 +886,57 @@ export default function LiveBitcoinChart({
               ))}
               {last && currentPrediction && (
                 <ReferenceDot
+                  yAxisId="price"
                   x={last.openTime}
                   y={yDomain[1]}
                   ifOverflow="visible"
                   shape={(p: unknown) => <PendingActiveDot {...(p as { cx?: number; cy?: number })} lean={currentLean} />}
                 />
               )}
-            </BarChart>
+            </ComposedChart>
           </ResponsiveContainer>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={rows} margin={{ top: 4, right: 8, left: -8, bottom: 0 }}>
+            <ComposedChart data={rowsWithBalance} margin={{ top: 20, right: 8, left: -8, bottom: 0 }}>
               <CartesianGrid stroke="rgb(255 255 255 / 0.05)" vertical={false} />
               <XAxis dataKey="openTime" type="category"
                 tickFormatter={(v: number) => formatTick(v)}
                 tick={{ fill: "rgb(148 163 184)", fontSize: 10 }}
                 stroke="rgb(255 255 255 / 0.1)" minTickGap={48} />
-              <YAxis domain={yDomain} tickFormatter={(v: number) => `$${Math.round(v).toLocaleString()}`}
+              {/* Primary Y-axis: BTC price scale */}
+              <YAxis yAxisId="price" domain={yDomain} tickFormatter={(v: number) => `$${Math.round(v).toLocaleString()}`}
                 tick={{ fill: "rgb(148 163 184)", fontSize: 10 }}
                 stroke="rgb(255 255 255 / 0.1)" width={60} />
+              {/* Secondary Y-axis: bank balance — hidden, independently scaled so the balance line
+                  reads as an overlay trend without compressing or distorting the price axis. */}
+              {balanceSeries.length > 0 && (
+                <YAxis yAxisId="balance" orientation="right" domain={balanceYDomain} hide />
+              )}
               <Tooltip
                 cursor={{ fill: "rgb(148 163 184 / 0.08)" }}
                 content={renderTooltip(rows, last?.openTime, nextPrediction)}
               />
               {dividerTimes.map((t) => (
-                <ReferenceLine key={t} x={t} stroke={NEUTRAL} strokeOpacity={0.12} strokeWidth={1} />
+                <ReferenceLine key={t} yAxisId="price" x={t} stroke={NEUTRAL} strokeOpacity={0.12} strokeWidth={1} />
               ))}
               {/* `range` = [low, high] lets recharts compute the wick height; CandleShape draws
                   body + wick using the original OHLC fields off payload. */}
-              <Bar dataKey="range" isAnimationActive={false} shape={(p: unknown) => <CandleShape {...(p as CandleShapeProps)} />} />
+              <Bar yAxisId="price" dataKey="range" isAnimationActive={false} shape={(p: unknown) => <CandleShape {...(p as CandleShapeProps)} />} />
+              {/* Bank-balance glowing-blue overlay line. Rendered above the candles so it reads as a
+                  portfolio-performance trend compositing over the price view. Uses a secondary hidden
+                  Y-axis so the balance scale is independent of the BTC price scale. Only shown when
+                  a paper session with at least one resolved bet exists. */}
+              {balanceSeries.length > 0 && (
+                <Line yAxisId="balance" type="monotone" dataKey="balance"
+                  stroke="#A4D4F4" strokeWidth={2} dot={false} isAnimationActive={false}
+                  connectNulls={false} strokeOpacity={0.9}
+                  className="fa-balance-line"
+                />
+              )}
               {resultDots.map((d) => (
                 <ReferenceDot
                   key={d.id}
+                  yAxisId="price"
                   x={d.anchor}
                   y={yDomain[1]}
                   ifOverflow="visible"
@@ -854,6 +947,7 @@ export default function LiveBitcoinChart({
               ))}
               {last && currentPrediction && (
                 <ReferenceDot
+                  yAxisId="price"
                   x={last.openTime}
                   y={yDomain[1]}
                   ifOverflow="visible"
@@ -1438,11 +1532,24 @@ function CandleTable({ rows, nextPrediction, nextTargetTime, predictions }: {
                     <span className="text-fa-frost-dim">—</span>
                   ) : resultState === "open" ? (
                     <span className="text-amber-300/80" title={pred.reasoning ?? undefined}>pending</span>
-                  ) : resultState === "hit" ? (
-                    <span className="text-emerald-300" title={pred.reasoning ?? undefined}>hit</span>
-                  ) : (
-                    <span className="text-rose-300" title={pred.reasoning ?? undefined}>miss</span>
-                  )}
+                  ) : (() => {
+                    // Show: predicted side · actual move · hit/miss verdict — three pieces of info
+                    // in one compact cell so the table reads as a trade journal, not just a score.
+                    const pUp = pred.directionUpProbabilityCalibrated ?? pred.directionUpProbability;
+                    const predUp = pUp >= 0.5;
+                    const actUp = prior ? r.close > prior.close : null;
+                    const sideColor = predUp ? "text-emerald-300/60" : "text-rose-300/60";
+                    const actColor = actUp == null ? "text-fa-frost-dim/40" : actUp ? "text-emerald-300/60" : "text-rose-300/60";
+                    return (
+                      <span className="inline-flex items-center gap-1" title={pred.reasoning ?? undefined}>
+                        <span className={`text-[10px] ${sideColor}`}>{predUp ? "↑" : "↓"}</span>
+                        {actUp != null && <span className={`text-[10px] ${actColor}`}>{actUp ? "↑" : "↓"}</span>}
+                        <span className={resultState === "hit" ? "text-emerald-300" : "text-rose-300"}>
+                          {resultState === "hit" ? "hit" : "miss"}
+                        </span>
+                      </span>
+                    );
+                  })()}
                 </td>
               </tr>
             );
