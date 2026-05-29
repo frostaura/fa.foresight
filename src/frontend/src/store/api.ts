@@ -64,7 +64,7 @@ export const api = createApi({
       return headers;
     }
   }),
-  tagTypes: ["Tenant", "LivePrediction", "Model", "ActiveModel", "Backtest", "Session", "Chaos", "Strategy"],
+  tagTypes: ["Tenant", "LivePrediction", "Model", "ActiveModel", "Backtest", "Session", "Chaos", "Strategy", "GoLive"],
   endpoints: (b) => ({
     getMe: b.query<TenantInfo, void>({ query: () => "tenants/me", providesTags: ["Tenant"] }),
     listTenants: b.query<TenantInfo[], void>({ query: () => "tenants", providesTags: ["Tenant"] }),
@@ -165,6 +165,25 @@ export const api = createApi({
     }),
     getPolymarketReference: b.query<PolymarketReference | null, { symbol: string; targetOpenTimeMs: number; intervalMs: number }>({
       query: (params) => ({ url: "live/polymarket-reference", params })
+    }),
+
+    // ── Go-live arm flow ─────────────────────────────────────────────────────
+    // In-memory, per-tenant arm gate (separate from the Polymarket__LiveTrading .env flag — both
+    // are required for real orders). Resets on backend restart. `armed === true` ⇒ "set up" for UI.
+    getGoLiveStatus: b.query<{ armed: boolean }, void>({
+      query: () => "golive/status",
+      providesTags: ["GoLive"],
+    }),
+    requestGoLiveCode: b.mutation<{ message: string; code: string }, void>({
+      query: () => ({ url: "golive/request-code", method: "POST" }),
+    }),
+    confirmGoLive: b.mutation<{ armed: boolean; message: string }, { code: string }>({
+      query: (body) => ({ url: "golive/confirm", method: "POST", body }),
+      invalidatesTags: ["GoLive"],
+    }),
+    killswitch: b.mutation<{ armed: boolean; message: string }, void>({
+      query: () => ({ url: "golive/killswitch", method: "POST" }),
+      invalidatesTags: ["GoLive"],
     }),
 
     // iter-4 — prediction models CRUD.
@@ -335,6 +354,10 @@ export const {
   usePredictLiveMutation,
   useListLivePredictionsQuery,
   useGetPolymarketReferenceQuery,
+  useGetGoLiveStatusQuery,
+  useRequestGoLiveCodeMutation,
+  useConfirmGoLiveMutation,
+  useKillswitchMutation,
   useListModelsQuery,
   useGetModelQuery,
   useCreateModelMutation,

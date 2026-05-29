@@ -228,13 +228,20 @@ export default function LiveBitcoinChart({
   interval,
   kind,
   visibleCount = 15,
-  limit = 500
+  limit = 500,
+  hidePaperPanel = false
 }: {
   symbol: string;
   interval: BinanceInterval;
   kind: ChartKind;
   visibleCount?: number;
   limit?: number;
+  /**
+   * Live-trading mode. When true the card skips its internal paper-trading strip (the Live page
+   * renders its own real-money numbers strip alongside) AND hides the per-card ModelPicker (the
+   * live session pins one model). Default false → behaviour identical to the Paper Trading surface.
+   */
+  hidePaperPanel?: boolean;
 }) {
   const { candles, loading, error } = useLiveKlines(symbol, interval, limit);
   const { isFav, toggle } = useLiveTimeframeFavorites();
@@ -683,7 +690,7 @@ export default function LiveBitcoinChart({
         {/* Price + delta intentionally removed here — the live price already renders prominently
             above this card, so the model selector takes the freed width (flex-1) instead. */}
         <div className="flex flex-1 items-center gap-2 min-w-0 basis-full sm:basis-auto sm:order-none order-last">
-          <ModelPicker symbol={symbol} interval={interval} grow status={modelStatus} />
+          {!hidePaperPanel && <ModelPicker symbol={symbol} interval={interval} grow status={modelStatus} />}
           <InfoTip
             content={
               <TipBody title={`Confidence gate · ${gateNoBets ? "ON" : "OFF"}`}>
@@ -741,13 +748,16 @@ export default function LiveBitcoinChart({
         showLive={!loading && !error && rows.length > 0}
       />
 
-      {/* Row 3 — paper trade strip (own band so it doesn't compete with the action card) */}
-      <PaperTradingPanel
-        symbol={symbol}
-        interval={interval}
-        closeByOpenTime={closeByOpenTime}
-        intervalMs={INTERVAL_MS[interval]}
-      />
+      {/* Row 3 — paper trade strip (own band so it doesn't compete with the action card).
+          Suppressed in live mode (hidePaperPanel): the Live page owns its real-money strip. */}
+      {!hidePaperPanel && (
+        <PaperTradingPanel
+          symbol={symbol}
+          interval={interval}
+          closeByOpenTime={closeByOpenTime}
+          intervalMs={INTERVAL_MS[interval]}
+        />
+      )}
 
       {/* Chart/table container. h-56 in grid card; flex-1 fills the remaining viewport height
           in fullscreen mode for a proper tablet dashboard view. */}

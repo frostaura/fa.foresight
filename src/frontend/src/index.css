@@ -148,6 +148,18 @@ body {
   .fa-stat-value {
     @apply fa-metric text-fa-frost-bright;
   }
+
+  /* Real-money accent for live-trading session cards. A subtle amber/gold hairline on the top and
+     left edges (inset box-shadow so it feathers rather than reading as a hard border) plus a faint
+     warm wash from the top-left corner. Distinguishes a live card from the frost-blue paper surface
+     without going garish — FrostAura stays frosty/clean; the amber is a quiet "real capital" cue. */
+  .fa-live-accent {
+    box-shadow:
+      inset 0 2px 0 0 var(--fa-live-accent-color),
+      inset 2px 0 0 0 var(--fa-live-accent-color),
+      inset 0 12px 22px -16px color-mix(in srgb, var(--fa-live-accent-color) 36%, transparent);
+    --fa-live-accent-color: #e8c26a; /* warm gold — same family as the in-progress candle marker */
+  }
 }
 
 /* On-brand range slider. The visible track is two layers: a dim base painted by the input itself
