@@ -1,10 +1,10 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import { ConfirmProvider } from "./components/ConfirmDialog";
-import MarketsLayout from "./pages/MarketsLayout";
 import Models from "./pages/Models";
 import PaperTrading from "./pages/PaperTrading";
-import Channels from "./pages/Channels";
+import Status from "./pages/Status";
+import Live from "./pages/Live";
 
 export default function App() {
   return (
@@ -12,12 +12,28 @@ export default function App() {
       <ConfirmProvider>
         <Routes>
           <Route element={<Layout />}>
-            <Route index element={<Navigate to="/paper-trading" replace />} />
-            <Route path="markets/*" element={<MarketsLayout />} />
-            <Route path="paper-trading" element={<PaperTrading />} />
+            {/* Default → Trading → Status */}
+            <Route index element={<Navigate to="/trading/status" replace />} />
+
+            {/* Trading group */}
+            <Route path="trading">
+              <Route index element={<Navigate to="/trading/status" replace />} />
+              <Route path="status" element={<Status />} />
+              <Route path="live" element={<Live />} />
+              <Route path="paper" element={<PaperTrading />} />
+            </Route>
+
+            {/* Models + Backtesting — kept at /models; the ?view=backtesting param
+                drives the sub-tab, matching the existing Models page pattern. */}
             <Route path="models" element={<Models />} />
-            <Route path="channels" element={<Channels />} />
-            <Route path="*" element={<Navigate to="/paper-trading" replace />} />
+            {/* Alias so the nav link /models/backtesting opens models with backtesting tab pre-selected */}
+            <Route path="models/backtesting" element={<Navigate to="/models?view=backtesting" replace />} />
+
+            {/* Legacy redirect — paper-trading used to be the root route */}
+            <Route path="paper-trading" element={<Navigate to="/trading/paper" replace />} />
+
+            {/* Catch-all */}
+            <Route path="*" element={<Navigate to="/trading/status" replace />} />
           </Route>
         </Routes>
       </ConfirmProvider>

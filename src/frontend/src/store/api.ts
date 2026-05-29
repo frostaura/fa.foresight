@@ -1,50 +1,5 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 
-export interface MarketSummary {
-  providerId: string;
-  externalId: string;
-  question: string;
-  category: string;
-  resolvesAt?: string | null;
-  status: string;
-  resolutionCriteria?: string | null;
-  imageUrl?: string | null;
-  iconUrl?: string | null;
-  yesPrice?: number | null;
-  noPrice?: number | null;
-  volume?: number | null;
-  volume24h?: number | null;
-  liquidity?: number | null;
-}
-
-export interface MarketDetail extends MarketSummary {
-  price?: { yes: number; no: number; volume24h: number; observedAt: string } | null;
-}
-
-export interface SentimentArticle {
-  url: string;
-  title: string;
-  source: string;
-  publishedAt: string | null;
-  score: number;
-  label: string;
-}
-
-export interface SentimentBucket {
-  day: string;
-  avg: number;
-  count: number;
-}
-
-export interface MarketSentiment {
-  overallScore: number;
-  positiveCount: number;
-  negativeCount: number;
-  neutralCount: number;
-  buckets: SentimentBucket[];
-  articles: SentimentArticle[];
-}
-
 export interface TenantInfo {
   id: string;
   name: string;
@@ -86,14 +41,6 @@ export interface LivePrediction {
   directionHit?: boolean | null;
 }
 
-export interface Favorite {
-  id: string;
-  tenantId: string;
-  symbol: string;
-  interval: string;
-  createdAt: string;
-}
-
 export interface PolymarketReference {
   providerId: string;
   externalId: string;
@@ -117,42 +64,35 @@ export const api = createApi({
       return headers;
     }
   }),
-  tagTypes: ["Tenant", "Market", "LivePrediction", "Favorite", "Model", "ActiveModel", "Backtest"],
+  tagTypes: ["Tenant", "LivePrediction", "Model", "ActiveModel", "Backtest", "Session", "Chaos"],
   endpoints: (b) => ({
     getMe: b.query<TenantInfo, void>({ query: () => "tenants/me", providesTags: ["Tenant"] }),
     listTenants: b.query<TenantInfo[], void>({ query: () => "tenants", providesTags: ["Tenant"] }),
 
-    discoverMarkets: b.query<MarketSummary[], { providerId?: string; q?: string; category?: string; minVolume?: number; sort?: string; resolvesWithinDays?: number; take?: number; skip?: number; includeClosed?: boolean }>({
-      query: (params) => ({ url: "markets/discover", params })
+    // ── Trading sessions (Status / Live pages) ──────────────────────────────
+    // These endpoints are NOT yet implemented on the backend. The UI calls them
+    // optimistically and degrades gracefully on 404/error.
+    listSessions: b.query<TradingSession[], { kind?: "paper" | "live" }>({
+      query: (params) => ({ url: "sessions", params }),
+      providesTags: ["Session"],
     }),
-    getMarket: b.query<MarketDetail, { providerId: string; externalId: string }>({
-      query: ({ providerId, externalId }) => `markets/${providerId}/${encodeURIComponent(externalId)}`
+    createSession: b.mutation<TradingSession, CreateSessionRequest>({
+      query: (body) => ({ url: "sessions", method: "POST", body }),
+      invalidatesTags: ["Session"],
     }),
-    getMarketHistory: b.query<{ t: string; yes: number }[], { providerId: string; externalId: string; interval: string }>({
-      query: ({ providerId, externalId, interval }) => ({
-        url: `markets/${providerId}/${encodeURIComponent(externalId)}/history`,
-        params: { interval }
-      })
+    listChaosRuns: b.query<ChaosRun[], { modelId?: string }>({
+      query: (params) => ({ url: "chaos", params }),
+      providesTags: ["Chaos"],
     }),
-    chatMarket: b.mutation<
-      { reply: string; model: string },
-      { providerId: string; externalId: string; messages: { role: string; content: string }[] }
-    >({
-      query: ({ providerId, externalId, messages }) => ({
-        url: `markets/${providerId}/${encodeURIComponent(externalId)}/chat`,
-        method: "POST",
-        body: { messages }
-      })
+
+    // ── Flow sandbox execution ───────────────────────────────────────────────
+    runFlowNode: b.mutation<RunNodeResult, RunNodeRequest>({
+      query: (body) => ({ url: "flows/run-node", method: "POST", body }),
     }),
-    suggestMarketQuestions: b.mutation<
-      { suggestions: string[] },
-      { providerId: string; externalId: string; messages: { role: string; content: string }[] }
-    >({
-      query: ({ providerId, externalId, messages }) => ({
-        url: `markets/${providerId}/${encodeURIComponent(externalId)}/suggestions`,
-        method: "POST",
-        body: { messages }
-      })
+
+    // ── Strategies catalogue ─────────────────────────────────────────────────
+    listStrategies: b.query<Strategy[], void>({
+      query: () => "strategies",
     }),
 
     predictLive: b.mutation<LivePrediction, { symbol: string; interval: string; horizon?: number }>({
@@ -190,18 +130,6 @@ export const api = createApi({
     }),
     getPolymarketReference: b.query<PolymarketReference | null, { symbol: string; targetOpenTimeMs: number; intervalMs: number }>({
       query: (params) => ({ url: "live/polymarket-reference", params })
-    }),
-    listFavorites: b.query<Favorite[], void>({
-      query: () => "favorites",
-      providesTags: ["Favorite"]
-    }),
-    addFavorite: b.mutation<Favorite, { symbol: string; interval: string }>({
-      query: (body) => ({ url: "favorites", method: "POST", body }),
-      invalidatesTags: ["Favorite"]
-    }),
-    removeFavorite: b.mutation<void, { symbol: string; interval: string }>({
-      query: ({ symbol, interval }) => ({ url: `favorites/${symbol}/${interval}`, method: "DELETE" }),
-      invalidatesTags: ["Favorite"]
     }),
 
     // iter-4 — prediction models CRUD.
@@ -353,28 +281,14 @@ export const api = createApi({
       query: () => "staking-strategies"
     }),
 
-    // Channel management — list supported bot channels + configured state; test connectivity live.
-    listChannels: b.query<Channel[], void>({ query: () => "channels" }),
-    testChannel: b.mutation<{ ok: boolean; detail: string }, string>({
-      query: (id) => ({ url: `channels/${id}/test`, method: "POST" })
-    }),
-
   })
 });
 
 export const {
   useGetMeQuery,
-  useDiscoverMarketsQuery,
-  useGetMarketQuery,
-  useGetMarketHistoryQuery,
-  useChatMarketMutation,
-  useSuggestMarketQuestionsMutation,
   usePredictLiveMutation,
   useListLivePredictionsQuery,
   useGetPolymarketReferenceQuery,
-  useListFavoritesQuery,
-  useAddFavoriteMutation,
-  useRemoveFavoriteMutation,
   useListModelsQuery,
   useGetModelQuery,
   useCreateModelMutation,
@@ -399,18 +313,76 @@ export const {
   useFlowAssistantMutation,
   useGetSymbolsQuery,
   useGetStakingStrategiesQuery,
-  useListChannelsQuery,
-  useTestChannelMutation,
+  // New endpoints for Trading → Status / Live
+  useListSessionsQuery,
+  useCreateSessionMutation,
+  useListChaosRunsQuery,
+  useRunFlowNodeMutation,
+  useListStrategiesQuery,
 } = api;
 
-export interface Channel {
+// ── Trading Session types (new; backend pending) ─────────────────────────────
+export interface TradingSession {
+  id: string;
+  tenantId: string;
+  kind: "paper" | "live";
+  modelId: string;
+  strategyId: string;
+  symbol: string;
+  interval: string;
+  initialBalance: number;
+  initialBetSize: number;
+  currentBalance: number;
+  betsPlaced: number;
+  betsWon: number;
+  hitRate?: number | null;
+  status: "active" | "paused" | "stopped";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSessionRequest {
+  kind: "paper" | "live";
+  modelId: string;
+  strategyId: string;
+  symbol: string;
+  interval: string;
+  initialBalance: number;
+  initialBetSize: number;
+  applyGate: boolean;
+}
+
+export interface ChaosRun {
+  id: string;
+  tenantId: string;
+  modelId: string;
+  batchId: string;
+  runCount: number;
+  bustCount: number;
+  bustRate: number;
+  medianProfit: number;
+  status: "running" | "complete" | "failed";
+  startedAt: string;
+  completedAt?: string | null;
+}
+
+export interface RunNodeRequest {
+  nodeTypeId: string;
+  params: Record<string, unknown>;
+  inputs: Record<string, unknown>;
+}
+
+export interface RunNodeResult {
+  outputs: Record<string, unknown>;
+  stdout: string;
+  error?: string | null;
+  durationMs: number;
+}
+
+export interface Strategy {
   id: string;
   name: string;
-  configured: boolean;
-  notifyTarget?: string | null;
-  allowlistCount: number;
-  supportsCommands: boolean;
-  supportsRichContent: boolean;
+  description: string;
 }
 
 export interface AssistantReply {

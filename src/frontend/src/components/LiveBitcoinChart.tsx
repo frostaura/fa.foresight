@@ -14,7 +14,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import { ArrowDown, ArrowUp, Sparkles, Star } from "lucide-react";
+import { ArrowDown, ArrowUp, Maximize2, Minimize2, Sparkles, Star } from "lucide-react";
 import PaperTradingPanel from "./PaperTradingPanel";
 import InfoTip, { TipBody } from "./InfoTip";
 import ShimmerOnChange from "./ShimmerOnChange";
@@ -240,6 +240,15 @@ export default function LiveBitcoinChart({
   const { isFav, toggle } = useLiveTimeframeFavorites();
   const favorited = isFav(symbol, interval);
   const [view, setView] = useState<ViewMode>("chart");
+  const [fullscreen, setFullscreen] = useState(false);
+
+  // Escape key collapses fullscreen — standard UX for any overlay
+  useEffect(() => {
+    if (!fullscreen) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setFullscreen(false); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [fullscreen]);
 
   // When on, the chart respects the backtester's confidence gate: candles the model wouldn't bet on
   // (pUp in the ±2pp no-band) render as grey "skip" dots and drop out of the visible hit-rate. When
@@ -578,7 +587,10 @@ export default function LiveBitcoinChart({
   }, [paperSession, rowOpenTimes, displayablePredictions, closeByOpenTime, interval, gateNoBets]);
 
   return (
-    <div className="fa-card p-4 flex flex-col">
+    <div className={fullscreen
+      ? "fixed inset-0 z-50 bg-fa-ink border border-fa-edge flex flex-col p-4"
+      : "fa-card p-4 flex flex-col"
+    }>
       {/* Row 1 — context strip: favorited timeframe pill, live price + delta, view toggle */}
       <div className="flex items-center gap-3">
         <InfoTip
@@ -644,6 +656,19 @@ export default function LiveBitcoinChart({
               </button>
             ))}
           </div>
+          {/* Full-screen toggle — expands the chart card to cover the viewport for a tablet
+              dashboard view. Escape key and the button both collapse it. */}
+          <button
+            onClick={() => setFullscreen((v) => !v)}
+            aria-label={fullscreen ? "Exit full screen" : "Full screen"}
+            title={fullscreen ? "Exit full screen (Esc)" : "Full screen"}
+            className="shrink-0 p-1.5 rounded-md border border-fa-edge text-fa-frost-dim hover:text-fa-frost-bright hover:bg-fa-glass transition"
+            onKeyDown={(e) => { if (e.key === "Escape") setFullscreen(false); }}
+          >
+            {fullscreen
+              ? <Minimize2 className="h-3.5 w-3.5" />
+              : <Maximize2 className="h-3.5 w-3.5" />}
+          </button>
         </div>
       </div>
 
@@ -672,7 +697,9 @@ export default function LiveBitcoinChart({
         intervalMs={INTERVAL_MS[interval]}
       />
 
-      <div className="h-56 mt-3 relative">
+      {/* Chart/table container. h-56 in grid card; flex-1 fills the remaining viewport height
+          in fullscreen mode for a proper tablet dashboard view. */}
+      <div className={`${fullscreen ? "flex-1 min-h-0" : "h-56"} mt-3 relative`}>
         {/* LivePulse now lives inside the NextCandleAction header next to "Next candle". */}
         {loading && rows.length === 0 ? (
           <div className="h-full flex items-center justify-center text-fa-frost-dim text-sm gap-2">

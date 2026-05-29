@@ -15,13 +15,12 @@ import ReactFlow, {
   useReactFlow
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { AlertTriangle, Bot, Loader2, Save, Sparkles, X, Wand2 } from "lucide-react";
+import { AlertTriangle, Loader2, Play, Save, Terminal, X } from "lucide-react";
 import { cn } from "../lib/cn";
 import {
-  useFlowAssistantMutation,
   useGetNodeCatalogueQuery,
+  useRunFlowNodeMutation,
   useUpdateModelMutation,
-  type AssistantReply,
   type FlowDefinition,
   type FlowEdge,
   type FlowNode,
@@ -61,10 +60,10 @@ export default function FlowDesigner({ model, onClose }: { model: Model; onClose
 function DesignerInner({ model, onClose }: { model: Model; onClose: () => void }) {
   const { data: catalogue } = useGetNodeCatalogueQuery();
   const [updateModel, { isLoading: isSaving }] = useUpdateModelMutation();
-  const [assistant, { isLoading: isAsking, data: assistantReply }] = useFlowAssistantMutation();
+  const [runNode, { isLoading: isRunning }] = useRunFlowNodeMutation();
   const [error, setError] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [pendingDiffDefinition, setPendingDiffDefinition] = useState<string | null>(null);
+  const [runOutput, setRunOutput] = useState<string | null>(null);
 
   // Parse the current flow definition once on mount + when it changes (e.g. after assistant apply).
   const initialDef = useMemo<FlowDefinition | null>(() => {
@@ -151,13 +150,27 @@ function DesignerInner({ model, onClose }: { model: Model; onClose: () => void }
     setNodes((nds) => nds.map((n) => (n.id === selectedNode.id ? { ...n, data: { ...n.data, params: nextParams } } : n)));
   };
 
-  const onApplyAssistant = (reply: AssistantReply) => {
-    if (!reply.updatedDefinition) return;
-    let parsed: FlowDefinition;
-    try { parsed = JSON.parse(reply.updatedDefinition); } catch { return; }
-    setNodes(definitionToRfNodes(parsed, catalogue));
-    setEdges(definitionToRfEdges(parsed));
-    setPendingDiffDefinition(null);
+  // Run the currently-selected node through the sandbox sidecar.
+  const onRunNode = async () => {
+    if (!selectedNode) return;
+    setRunOutput(null);
+    setError(null);
+    try {
+      const result = await runNode({
+        nodeTypeId: selectedNode.data.typeId,
+        params: selectedNode.data.params,
+        inputs: {},
+      }).unwrap();
+      const lines = [];
+      if (result.stdout) lines.push(result.stdout);
+      if (result.error) lines.push(`ERROR: ${result.error}`);
+      lines.push(`Outputs: ${JSON.stringify(result.outputs, null, 2)}`);
+      lines.push(`Completed in ${result.durationMs}ms`);
+      setRunOutput(lines.join("\n"));
+    } catch (e: unknown) {
+      const err = e as { data?: { error?: string } };
+      setRunOutput(`Error: ${err.data?.error ?? "Run failed"}`);
+    }
   };
 
   const nodeTypes = useMemo(() => ({ "fa-node": FlowNodeComponent }), []);
@@ -224,12 +237,6 @@ function DesignerInner({ model, onClose }: { model: Model; onClose: () => void }
               <Background gap={20} size={1} color="#1d2c43" />
               <Controls showInteractive={false} />
             </ReactFlow>
-            {pendingDiffDefinition && (
-              <DiffPreviewOverlay
-                onApply={() => onApplyAssistant({ updatedDefinition: pendingDiffDefinition } as AssistantReply)}
-                onDiscard={() => setPendingDiffDefinition(null)}
-              />
-            )}
             {error && (
               <div className="absolute bottom-3 left-3 right-3 flex items-start gap-2 p-3 rounded-md border border-rose-300/30 bg-rose-300/5 text-rose-300 text-xs">
                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -249,21 +256,14 @@ function DesignerInner({ model, onClose }: { model: Model; onClose: () => void }
             <div className="p-4 text-fa-frost-dim text-xs">Select a node to edit its params.</div>
           )}
         </div>
-        {!isBuiltIn && (
-          <AiChatPanel
-            modelId={model.id}
-            isAsking={isAsking}
-            reply={assistantReply ?? null}
-            onSend={async (text) => {
-              const reply = await assistant({
-                id: model.id,
-                intent: "modify",
-                history: [{ role: "user", content: text }]
-              }).unwrap();
-              if (reply.updatedDefinition) setPendingDiffDefinition(reply.updatedDefinition);
-            }}
-          />
-        )}
+        {/* Run & Inspect panel — replaces the AI assistant chat. Runs the selected node
+            through the sandbox sidecar (POST /api/flows/run-node) and shows stdout + outputs. */}
+        <RunInspectPanel
+          selectedNode={selectedNode}
+          isRunning={isRunning}
+          output={runOutput}
+          onRun={onRunNode}
+        />
       </div>
     </div>
   );
@@ -443,55 +443,53 @@ function NodeInspector({ node, catalogue, onChange, disabled }:
   );
 }
 
-// ── AI chat panel ────────────────────────────────────────────────────────────────────────────
+// ── Run & Inspect panel (replaces AI chat) ───────────────────────────────────────────────────
+//
+// Runs the currently-selected node through the sandbox sidecar (POST /api/flows/run-node)
+// and surfaces stdout + outputs. The sandbox is network-isolated and purity-enforced so the
+// result is deterministic — same definition + inputs = identical output.
 
-function AiChatPanel({ modelId: _modelId, isAsking, reply, onSend }:
-    { modelId: string; isAsking: boolean; reply: AssistantReply | null; onSend: (text: string) => Promise<void> }) {
-  const [text, setText] = useState("");
-  const submit = async () => {
-    const t = text.trim();
-    if (!t) return;
-    setText("");
-    try { await onSend(t); } catch { /* error shown via reply.error path */ }
-  };
+function RunInspectPanel({
+  selectedNode,
+  isRunning,
+  output,
+  onRun,
+}: {
+  selectedNode: RFNode<FaNodeData> | null;
+  isRunning: boolean;
+  output: string | null;
+  onRun: () => void;
+}) {
   return (
-    <div className="border-t border-fa-edge p-3 space-y-2">
-      <div className="flex items-center gap-1.5 text-fa-frost-bright text-xs">
-        <Bot className="h-3.5 w-3.5" /> AI Assistant
+    <div className="border-t border-fa-edge p-3 space-y-2 shrink-0">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-fa-frost-bright text-xs">
+          <Terminal className="h-3.5 w-3.5" /> Run &amp; Inspect
+        </div>
+        <button
+          onClick={onRun}
+          disabled={isRunning || !selectedNode}
+          title={selectedNode ? `Run ${selectedNode.data.typeId}` : "Select a node to run it"}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-fa-frost-bright/15 hover:bg-fa-frost-bright/25 text-fa-frost-bright text-[11px] border border-fa-frost-bright/30 disabled:opacity-40 disabled:cursor-not-allowed transition"
+        >
+          {isRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+          {isRunning ? "Running…" : "Run node"}
+        </button>
       </div>
-      {reply && (
-        <div className="text-[11px] text-fa-frost-dim space-y-1">
-          {reply.error ? (
-            <div className="text-rose-300">{reply.error}</div>
-          ) : reply.updatedDefinition ? (
-            <div className="text-emerald-300">Diff ready — preview overlay shown on canvas.</div>
-          ) : null}
-          {reply.rationale && <div className="italic">{reply.rationale}</div>}
+      {!selectedNode && (
+        <div className="text-fa-frost-dim text-[11px]">Select a node on the canvas to run it through the sandbox.</div>
+      )}
+      {selectedNode && !output && !isRunning && (
+        <div className="text-fa-frost-dim text-[11px]">
+          Node: <span className="text-fa-frost-bright font-mono">{selectedNode.data.typeId}</span>
+          <br />Click "Run node" to execute through the sandbox sidecar.
         </div>
       )}
-      <textarea
-        rows={3}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder='e.g. "add a Bollinger feature and route bbU into the matrix"'
-        className="w-full bg-fa-glass border border-fa-edge rounded-md p-2 text-fa-frost-bright text-[11px] resize-none"
-      />
-      <button onClick={submit} disabled={isAsking || !text.trim()}
-        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md bg-fa-frost-bright/20 hover:bg-fa-frost-bright/30 text-fa-frost-bright text-xs border border-fa-frost-bright/30 disabled:opacity-50 disabled:cursor-not-allowed transition">
-        {isAsking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-        {isAsking ? "Thinking…" : "Ask"}
-      </button>
-    </div>
-  );
-}
-
-function DiffPreviewOverlay({ onApply, onDiscard }: { onApply: () => void; onDiscard: () => void }) {
-  return (
-    <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-3 px-4 py-2 rounded-md border border-emerald-300/40 bg-emerald-300/10 text-emerald-300 text-xs shadow-lg backdrop-blur">
-      <Sparkles className="h-4 w-4" />
-      Diff ready
-      <button onClick={onApply} className="px-2 py-0.5 rounded-md bg-emerald-300/20 hover:bg-emerald-300/30">Apply</button>
-      <button onClick={onDiscard} className="px-2 py-0.5 rounded-md bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-dim">Discard</button>
+      {output && (
+        <pre className="text-[10px] font-mono text-fa-frost bg-fa-ink rounded-md p-2 overflow-auto max-h-28 whitespace-pre-wrap leading-relaxed">
+          {output}
+        </pre>
+      )}
     </div>
   );
 }

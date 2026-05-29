@@ -2,6 +2,46 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── shadcn/ui CSS variable layer ─────────────────────────────────────────────────────────────
+   Mapped onto FrostAura's frosty-glass palette so every shadcn primitive inherits the brand.
+   hsl() values are expressed without the hsl() wrapper — tailwind consumes them as
+   `hsl(var(--background))` etc.
+
+   Color reference (FrostAura palette):
+     --fa-ink     #06121F  → hsl(211 62% 8%)
+     --fa-ink-2   #0B1B30  → hsl(213 64% 11%)
+     --fa-ink-3   #102744  → hsl(213 63% 16%)
+     --fa-frost   #A4D4F4  → hsl(207 78% 80%)
+     --fa-frost-bright #D4ECFF → hsl(209 100% 91%)
+     --fa-frost-dim #5C8AB4 → hsl(210 36% 54%)
+     --fa-success #7CE3B6  → hsl(155 67% 68%)
+     --fa-danger  #F08484  → hsl(0 73% 73%)
+   ────────────────────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    --background:       213 64% 7%;
+    --foreground:       207 78% 80%;
+    --card:             213 64% 8%;
+    --card-foreground:  207 78% 80%;
+    --popover:          213 64% 9%;
+    --popover-foreground: 207 78% 80%;
+    --primary:          209 100% 91%;
+    --primary-foreground: 213 64% 7%;
+    --secondary:        213 63% 16%;
+    --secondary-foreground: 207 78% 80%;
+    --muted:            213 63% 14%;
+    --muted-foreground: 210 36% 54%;
+    --accent:           213 63% 16%;
+    --accent-foreground: 209 100% 91%;
+    --destructive:      0 73% 73%;
+    --destructive-foreground: 213 64% 7%;
+    --border:           207 30% 22%;
+    --input:            213 63% 14%;
+    --ring:             207 78% 80%;
+    --radius:           0.5rem;
+  }
+}
+
 /* Design tokens — single source of truth. Tailwind theme mirrors these so any color referenced via
    `fa-*` Tailwind class or `var(--fa-*)` resolves to the same value. Use these in raw CSS, inline
    styles, or SVG attributes where Tailwind class names can't reach. */
