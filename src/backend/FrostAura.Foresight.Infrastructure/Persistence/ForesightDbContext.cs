@@ -9,6 +9,7 @@ using FrostAura.Foresight.Domain.Markets;
 using FrostAura.Foresight.Domain.Models;
 using FrostAura.Foresight.Domain.Paper;
 using FrostAura.Foresight.Domain.Positions;
+using FrostAura.Foresight.Domain.Strategies;
 using FrostAura.Foresight.Domain.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -21,6 +22,7 @@ public sealed class ForesightDbContext : DbContext
 {
     public ForesightDbContext(DbContextOptions<ForesightDbContext> options) : base(options) { }
 
+    public DbSet<Strategy> Strategies => Set<Strategy>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Market> Markets => Set<Market>();
     public DbSet<BankrollEntry> Bankrolls => Set<BankrollEntry>();
@@ -44,6 +46,17 @@ public sealed class ForesightDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder mb)
     {
         var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+        mb.Entity<Strategy>(b =>
+        {
+            b.ToTable("strategies");
+            b.HasKey(s => s.Id);
+            b.Property(s => s.Name).HasMaxLength(200).IsRequired();
+            b.Property(s => s.Description).HasMaxLength(2000);
+            b.Property(s => s.Definition).HasColumnType("jsonb");
+            b.Property(s => s.Params).HasColumnType("jsonb");
+            b.HasIndex(s => new { s.TenantId, s.Name }).IsUnique();
+        });
 
         mb.Entity<Tenant>(b =>
         {

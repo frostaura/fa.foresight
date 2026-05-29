@@ -57,6 +57,7 @@ app.MapPaperEndpoints();
 app.MapSessionsEndpoints();
 app.MapModelsEndpoints();
 app.MapBacktestsEndpoints();
+app.MapStrategiesEndpoints();
 app.MapFlowsEndpoints();
 app.MapChaosEndpoints();
 app.MapGoLiveEndpoints();

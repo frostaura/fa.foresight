@@ -4,10 +4,12 @@ using FrostAura.Foresight.Application.Chaos;
 using FrostAura.Foresight.Application.Flow;
 using FrostAura.Foresight.Application.Markets;
 using FrostAura.Foresight.Application.Tenancy;
+using FrostAura.Foresight.Application.Trading;
 using FrostAura.Foresight.Domain.Chaos;
 using FrostAura.Foresight.Domain.MarketData;
 using FrostAura.Foresight.Domain.Ports;
 using FrostAura.Foresight.Domain.Trading;
+using FrostAura.Foresight.Infrastructure.Live;
 using FrostAura.Foresight.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -71,8 +73,8 @@ public sealed class ChaosService : IChaosService
         if (req.InitialBetSize <= 0) throw new InvalidOperationException("InitialBetSize must be > 0.");
 
         foreach (var sid in req.StrategyIds)
-            if (!StakingStrategies.IsKnown(sid))
-                throw new InvalidOperationException($"Unknown strategy '{sid}'.");
+            if (!StakingStrategies.IsKnown(sid) && !Guid.TryParse(sid, out _))
+                throw new InvalidOperationException($"Unknown strategy '{sid}'. Provide a built-in strategy id or a custom DAG strategy Guid.");
 
         // Resolve seed: null ⇒ use 0 (fixed default, fully reproducible).
         var seed = req.Seed ?? 0L;
@@ -173,9 +175,51 @@ public sealed class ChaosService : IChaosService
                 }
 
                 var (candidates, syntheticFraction) = cached;
-                var strategy = StakingStrategies.Resolve(row.StrategyId);
 
-                // ── 2. Generate deterministic start offsets ────────────────────────────────────
+                // ── 2. Resolve the strategy ───────────────────────────────────────────────────
+                // Built-in: use the catalogue directly (fast path, pure math).
+                // Custom DAG: pre-evaluate stakes for ALL candidates ONCE async, then pass the
+                // precomputed array into the sync ReplayWindow loop (keeps ChaosRunner pure).
+                IStakingStrategy strategy;
+                decimal[]? precomputedStakes = null;
+
+                if (StakingStrategies.IsKnown(row.StrategyId))
+                {
+                    strategy = StakingStrategies.Resolve(row.StrategyId);
+                }
+                else
+                {
+                    // DAG strategy: resolve via IStrategyEvaluator.
+                    // We need a temporary IStakingStrategy that uses the precomputed stakes;
+                    // build the precomputed array here async, then pass it to the window replay.
+                    var evaluator = scope.ServiceProvider.GetRequiredService<IStrategyEvaluator>();
+                    var strategyCtx = DagStakingStrategyAdapter.MakeStrategyFlowContext(
+                        tenantId, row.ModelId, row.Symbol, row.Interval);
+
+                    // Pre-evaluate stake for every candidate using a representative StrategyStep.
+                    // For path-dependent sizing (e.g. martingale) this is only approximate since we
+                    // can't know the prior won/balance state without replaying. For DAG strategies
+                    // the sizing is typically edge-based (depends on pUp/yesPrice/noPrice/balance)
+                    // so we use the per-candidate edge inputs and the initial balance as context.
+                    // The precomputed stake is then used verbatim in ReplayWindow (via a wrapper).
+                    // Note: this is a DAG-strategy-specific design choice documented in CLAUDE.md.
+                    precomputedStakes = new decimal[candidates.Length];
+                    var stepForPrecompute = new StrategyStep(req.InitialBetSize, true, req.InitialBetSize, req.InitialBalance, default);
+                    for (var ci = 0; ci < candidates.Length; ci++)
+                    {
+                        var c = candidates[ci];
+                        var edgeStep = stepForPrecompute with
+                        {
+                            Inputs = new StakingInputs(c.PUp, c.YesPrice, c.NoPrice)
+                        };
+                        precomputedStakes[ci] = await evaluator.NextStakeAsync(row.StrategyId, edgeStep, strategyCtx, ct);
+                    }
+                    _logger.LogInformation("Chaos: pre-evaluated {N} DAG strategy stakes for {Strategy}", candidates.Length, row.StrategyId);
+                    // strategy remains null for DAG path — per-window instances are created below.
+                    strategy = null!; // will be overridden per-window using precomputedStakes
+                }
+
+                // ── 3. Generate deterministic start offsets ────────────────────────────────────
                 var offsets = ChaosRunner.GenerateStartOffsets(
                     row.SampleCount, row.WindowLength, candidates.Length, seed);
 
@@ -189,24 +233,31 @@ public sealed class ChaosService : IChaosService
                     continue;
                 }
 
-                // ── 3. Replay windows + collect sample results ────────────────────────────────
+                // ── 4. Replay windows + collect sample results ────────────────────────────────
                 var sampleResults = new ChaosSampleResult[offsets.Count];
                 for (var si = 0; si < offsets.Count; si++)
                 {
+                    // For DAG strategies: create a fresh PrecomputedStakesStrategy per window
+                    // so the internal sequential call index aligns with the window's candidates.
+                    // For built-in strategies: reuse the same instance (stateless pure function).
+                    IStakingStrategy windowStrategy = precomputedStakes is not null
+                        ? new PrecomputedStakesStrategy(row.StrategyId, precomputedStakes, offsets[si])
+                        : strategy;
+
                     sampleResults[si] = ChaosRunner.ReplayWindow(
                         candidates, offsets[si], row.WindowLength,
-                        strategy, req.InitialBalance, req.InitialBetSize, row.AllowBorrow);
+                        windowStrategy, req.InitialBalance, req.InitialBetSize, row.AllowBorrow);
 
                     if (si % 50 == 0)
                         hub.Publish(new ChaosEvent(batchId, ChaosEventKind.Progress, comboIdx + 1, totalCombos, si, offsets.Count, null));
                 }
 
-                // ── 4. Aggregate ──────────────────────────────────────────────────────────────
+                // ── 5. Aggregate ──────────────────────────────────────────────────────────────
                 var agg = ChaosRunner.Aggregate(
                     row.ModelId, row.StrategyId, row.WindowLength,
                     sampleResults, req.InitialBalance, syntheticFraction);
 
-                // ── 5. Persist row + capped samples ───────────────────────────────────────────
+                // ── 6. Persist row + capped samples ───────────────────────────────────────────
                 row.BustRate = (decimal)agg.BustRate;
                 row.ProfitP5 = agg.ProfitP5;
                 row.ProfitP50 = agg.ProfitP50;
@@ -533,5 +584,49 @@ internal sealed class CacheOnlyCandleProvider : IHistoricalCandleProvider
         // Binary-range scan identical to BacktestRunner.SortedRange — O(log n + window).
         var result = BacktestRunner.SortedRange(pool, symbol, startMs, endMs);
         return Task.FromResult<IReadOnlyList<HistoricalCandle>>(result);
+    }
+}
+
+/// <summary>
+/// Adapts a precomputed stake array (evaluated async before the sync chaos loop) behind the
+/// <see cref="IStakingStrategy"/> interface. Used by <see cref="ChaosService"/> for custom DAG
+/// strategies: the stakes are pre-evaluated once per candidate index and served synchronously
+/// inside <see cref="ChaosRunner.ReplayWindow"/> without breaking its pure/deterministic contract.
+///
+/// IMPORTANT: The stake returned here is the EDGE-BASED size for candidate i — it was evaluated with
+/// the initial balance and initial bet size as context (not the running window balance). This is
+/// consistent with how edge-aware strategies like EdgeAwareKellyStakingStrategy work: they size
+/// against the edge (pUp, price) rather than bet history. Path-dependent strategies (Martingale)
+/// should NOT be implemented as DAG strategies since the precomputed array cannot capture the
+/// evolving window state. By convention, DAG strategies are edge-based.
+///
+/// One instance is created per <see cref="ChaosRunner.ReplayWindow"/> call. The instance starts
+/// at the window's <paramref name="startOffset"/> (same index into the candidates array) and
+/// advances sequentially, so the call index is always aligned with the candidate index the window
+/// is currently processing.
+/// </summary>
+internal sealed class PrecomputedStakesStrategy : IStakingStrategy
+{
+    private readonly decimal[] _stakes;
+    private int _nextIndex;
+
+    public string Id { get; }
+    public string Name => $"DAG({Id})";
+    public string Description => "Custom DAG strategy with precomputed stakes.";
+    public bool RequiresEdgeInputs => true;
+
+    public PrecomputedStakesStrategy(string strategyId, decimal[] stakes, int startOffset)
+    {
+        Id = strategyId;
+        _stakes = stakes;
+        _nextIndex = startOffset;
+    }
+
+    public decimal NextBetSize(StrategyStep step)
+    {
+        // ReplayWindow iterates i = start; i < start+windowLen. We advance _nextIndex in lockstep.
+        // If the index overflows (bounded window is always within array; guard for safety), skip.
+        if (_nextIndex >= _stakes.Length) return 0m;
+        return _stakes[_nextIndex++];
     }
 }

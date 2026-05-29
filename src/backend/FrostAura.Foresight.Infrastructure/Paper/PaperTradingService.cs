@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FrostAura.Foresight.Application.Markets;
 using FrostAura.Foresight.Application.Tenancy;
+using FrostAura.Foresight.Application.Trading;
 using FrostAura.Foresight.Domain.Live;
 using FrostAura.Foresight.Domain.Paper;
 using FrostAura.Foresight.Domain.Trading;
@@ -59,6 +60,7 @@ public sealed class PaperTradingService : IPaperTradingService
     private readonly ICalibrationRescaler _calibration;
     private readonly IVenuePriceStore _venuePrices;
     private readonly Live.TradingNotifier _notifier;
+    private readonly IStrategyEvaluator _strategyEvaluator;
     private readonly ILogger<PaperTradingService> _logger;
     private static readonly bool Disable5m = string.Equals(
         Environment.GetEnvironmentVariable("FORESIGHT_5M_PAPER_DISABLED"), "true",
@@ -72,6 +74,7 @@ public sealed class PaperTradingService : IPaperTradingService
         ICalibrationRescaler calibration,
         IVenuePriceStore venuePrices,
         Live.TradingNotifier notifier,
+        IStrategyEvaluator strategyEvaluator,
         ILogger<PaperTradingService> logger)
     {
         _db = db;
@@ -81,6 +84,7 @@ public sealed class PaperTradingService : IPaperTradingService
         _calibration = calibration;
         _venuePrices = venuePrices;
         _notifier = notifier;
+        _strategyEvaluator = strategyEvaluator;
         _logger = logger;
     }
 
@@ -91,9 +95,14 @@ public sealed class PaperTradingService : IPaperTradingService
         if (initialBetSize <= 0 || initialBetSize > initialBalance)
             throw new ArgumentException("initialBetSize must be > 0 and <= initialBalance");
 
-        // Resolve the staking strategy by id. Unknown / missing ids collapse to the catalogue
-        // default (flat) rather than failing the start — same contract as the backtest endpoint.
-        var resolvedStrategy = StakingStrategies.Resolve(strategyId).Id;
+        // Resolve and persist the strategy id. Built-in ids are validated against the catalogue
+        // and collapsed to the default on unknown; custom DAG strategy Guids are accepted as-is
+        // (the evaluator will return 0 / log a warning if the row is missing at placement time).
+        string resolvedStrategy;
+        if (!string.IsNullOrWhiteSpace(strategyId) && Guid.TryParse(strategyId, out _) && !StakingStrategies.IsKnown(strategyId))
+            resolvedStrategy = strategyId!;   // custom DAG strategy — persist Guid as-is
+        else
+            resolvedStrategy = StakingStrategies.Resolve(strategyId).Id;
         label ??= "";
 
         // Enforce the partial-unique-index contract (now keyed by label) at the API boundary too, so a
@@ -338,9 +347,14 @@ public sealed class PaperTradingService : IPaperTradingService
                             var lastStake = lastSettled?.Size ?? tracked.InitialBetSize;
                             var lastWon = lastSettled?.Outcome == "win";
 
-                            // Placement-time sizing using the strategy's NextBetSize.
-                            var strategy = StakingStrategies.Resolve(tracked.StrategyId);
-                            var nextStake = strategy.NextBetSize(new StrategyStep(lastStake, lastWon, tracked.InitialBetSize, tracked.CurrentBalance, entryInputs));
+                            // Placement-time sizing: use IStrategyEvaluator which handles both
+                            // built-in code strategies and custom DAG strategies transparently.
+                            var strategyCtx = DagStakingStrategyAdapter.MakeStrategyFlowContext(
+                                tracked.TenantId, tracked.Id, tracked.Symbol, tracked.Interval);
+                            var nextStake = await _strategyEvaluator.NextStakeAsync(
+                                tracked.StrategyId,
+                                new StrategyStep(lastStake, lastWon, tracked.InitialBetSize, tracked.CurrentBalance, entryInputs),
+                                strategyCtx, ct);
 
                             if (nextStake > 0m)
                             {

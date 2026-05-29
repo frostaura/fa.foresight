@@ -1,4 +1,5 @@
 using FrostAura.Foresight.Application.Backtesting;
+using FrostAura.Foresight.Application.Trading;
 using FrostAura.Foresight.Application.Chaos;
 using FrostAura.Foresight.Application.Flow;
 using FrostAura.Foresight.Application.Flow.Nodes;
@@ -206,6 +207,10 @@ public static class DependencyInjection
 
         // Venue price store — resolves anti-look-ahead entry quotes; falls back to synthetic-flat.
         services.AddScoped<IVenuePriceStore, VenuePriceStore>();
+
+        // Strategy evaluator — unified built-in + custom-DAG path. Scoped because it consumes the
+        // scoped FlowExecutor and ForesightDbContext.
+        services.AddScoped<IStrategyEvaluator, Live.StrategyEvaluator>();
 
         // Backtesting + training services. The runner + trainer are scoped because they consume the
         // executor (scoped) and a per-request historical candle provider scope.

@@ -3,6 +3,7 @@ using FrostAura.Foresight.Application.Backtesting;
 using FrostAura.Foresight.Application.Flow;
 using FrostAura.Foresight.Application.Models;
 using FrostAura.Foresight.Application.Tenancy;
+using FrostAura.Foresight.Application.Trading;
 using FrostAura.Foresight.Domain.Backtesting;
 using FrostAura.Foresight.Domain.MarketData;
 using FrostAura.Foresight.Domain.Trading;
@@ -57,8 +58,9 @@ public sealed class BacktestsService : IBacktestsService
             throw new InvalidOperationException("Backtest range exceeds 730 days; clamp the lookback window.");
         if (req.EndTime <= req.StartTime)
             throw new InvalidOperationException("Backtest endTime must be after startTime.");
-        if (!StakingStrategies.IsKnown(req.StrategyId))
-            throw new InvalidOperationException($"Staking strategy '{req.StrategyId}' is unknown. Allowed: {string.Join(", ", StakingStrategies.All.Select(s => s.Id))}.");
+        // Allow either a known built-in id OR a Guid (custom DAG strategy from the strategies table).
+        if (!StakingStrategies.IsKnown(req.StrategyId) && !Guid.TryParse(req.StrategyId, out _))
+            throw new InvalidOperationException($"Staking strategy '{req.StrategyId}' is unknown. Allowed: built-in ids ({string.Join(", ", StakingStrategies.All.Select(s => s.Id))}) or a custom DAG strategy Guid.");
 
         var model = await _db.Models.AsNoTracking()
             .FirstOrDefaultAsync(m => (m.TenantId == tenantId || m.TenantId == null) && m.Id == req.ModelId, ct)
@@ -158,7 +160,19 @@ public sealed class BacktestsService : IBacktestsService
                     p.CandlesProcessed, p.TotalCandles, p.BetsPlaced, 0, null, null, null));
             });
 
-            var strategy = StakingStrategies.Resolve(strategyId);
+            // Resolve the staking strategy. Built-in ids go through the catalogue directly;
+            // custom DAG strategy Guids use the DagStakingStrategyAdapter which wraps IStrategyEvaluator.
+            IStakingStrategy strategy;
+            if (StakingStrategies.IsKnown(strategyId))
+            {
+                strategy = StakingStrategies.Resolve(strategyId);
+            }
+            else
+            {
+                var evaluator = scope.ServiceProvider.GetRequiredService<IStrategyEvaluator>();
+                var strategyCtx = DagStakingStrategyAdapter.MakeStrategyFlowContext(tenantId, modelId, symbol, interval);
+                strategy = new DagStakingStrategyAdapter(strategyId, evaluator, strategyCtx);
+            }
             var outcome = await runner.RunAsync(
                 flow, trainedState, tenantId, modelId,
                 symbol, interval, startTime, endTime,
@@ -266,7 +280,7 @@ public sealed class BacktestsService : IBacktestsService
             throw new InvalidOperationException($"Symbol '{req.Symbol}' is not supported.");
         if (!SupportedSymbols.IsSupportedInterval(req.Interval))
             throw new InvalidOperationException($"Interval '{req.Interval}' is not supported.");
-        if (!StakingStrategies.IsKnown(req.StrategyId))
+        if (!StakingStrategies.IsKnown(req.StrategyId) && !Guid.TryParse(req.StrategyId, out _))
             throw new InvalidOperationException($"Staking strategy '{req.StrategyId}' is unknown.");
 
         var model = await _db.Models.AsNoTracking()
