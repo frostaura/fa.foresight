@@ -40,3 +40,9 @@ Thumbs.db
 # Live-test artifacts
 shot-*.png
 .playwright-mcp/
+
+# Live-test / Playwright artifacts (never commit)
+wave-*.png
+shot-*.png
+.playwright-mcp/
+src/frontend/.playwright-mcp/
