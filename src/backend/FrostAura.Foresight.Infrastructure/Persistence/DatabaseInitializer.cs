@@ -66,8 +66,6 @@ public static class DatabaseInitializer
                 ADD COLUMN IF NOT EXISTS ""ClosePercentile95"" numeric(20,8) NOT NULL DEFAULT 0;
             ALTER TABLE tenants
                 DROP COLUMN IF EXISTS ""GuardrailConfig"";
-            ALTER TABLE forecasts
-                DROP COLUMN IF EXISTS ""FlowRunId"";
             DROP TABLE IF EXISTS node_runs;
             DROP TABLE IF EXISTS flow_runs;
             DROP TABLE IF EXISTS flow_definitions;
@@ -116,16 +114,6 @@ public static class DatabaseInitializer
                 ON paper_bets (""TenantId"", ""SessionId"", ""Resolved"");
             ALTER TABLE paper_bets
                 ADD COLUMN IF NOT EXISTS ""NotesJson"" jsonb NULL;
-
-            CREATE TABLE IF NOT EXISTS favorites (
-                ""Id"" uuid PRIMARY KEY,
-                ""TenantId"" uuid NOT NULL,
-                ""Symbol"" varchar(20) NOT NULL,
-                ""Interval"" varchar(10) NOT NULL,
-                ""CreatedAt"" timestamptz NOT NULL
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS ix_favorites_tenant_symbol_interval
-                ON favorites (""TenantId"", ""Symbol"", ""Interval"");
 
             -- iter-4: prediction-model system ------------------------------------------------
             CREATE TABLE IF NOT EXISTS models (
@@ -578,8 +566,8 @@ public static class DatabaseInitializer
                 Description = v6Description,
                 Kind = "deterministic",
                 SupportsBacktesting = true,
-                IsBuiltIn = false,
-                IsDefault = false,
+                IsBuiltIn = true,
+                IsDefault = true,   // the deterministic default model (no LLM model exists)
                 Definition = v6Definition,
                 CreatedAt = now,
                 UpdatedAt = now
@@ -613,7 +601,7 @@ public static class DatabaseInitializer
                 Description = v1Description,
                 Kind = "deterministic",
                 SupportsBacktesting = true,
-                IsBuiltIn = false,
+                IsBuiltIn = true,
                 IsDefault = false,
                 Definition = v1Definition,
                 CreatedAt = now,
@@ -648,7 +636,7 @@ public static class DatabaseInitializer
                 Description = ofxDescription,
                 Kind = "deterministic",
                 SupportsBacktesting = true,
-                IsBuiltIn = false,
+                IsBuiltIn = true,
                 IsDefault = false,
                 Definition = ofxDefinition,
                 CreatedAt = now,
@@ -684,7 +672,7 @@ public static class DatabaseInitializer
                 Description = ofx2Description,
                 Kind = "deterministic",
                 SupportsBacktesting = true,
-                IsBuiltIn = false,
+                IsBuiltIn = true,
                 IsDefault = false,
                 Definition = ofx2Definition,
                 CreatedAt = now,
@@ -719,7 +707,7 @@ public static class DatabaseInitializer
                 Description = v2Description,
                 Kind = "deterministic",
                 SupportsBacktesting = true,
-                IsBuiltIn = false,
+                IsBuiltIn = true,
                 IsDefault = false,
                 Definition = v2Definition,
                 CreatedAt = now,

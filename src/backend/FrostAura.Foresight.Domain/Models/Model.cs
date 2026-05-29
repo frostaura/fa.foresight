@@ -20,7 +20,7 @@ public sealed class Model
     /// <summary>"llm" or "deterministic".</summary>
     public required string Kind { get; init; }
     public required bool SupportsBacktesting { get; init; }
-    public bool IsBuiltIn { get; init; }
+    public bool IsBuiltIn { get; set; }
     public bool IsDefault { get; set; }
     /// <summary>Flow DAG JSON — schema in /docs/flow-schema.md (planned).</summary>
     public required string Definition { get; set; }
