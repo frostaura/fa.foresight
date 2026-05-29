@@ -36,3 +36,7 @@ __pycache__/
 
 # OS
 Thumbs.db
+
+# Live-test artifacts
+shot-*.png
+.playwright-mcp/

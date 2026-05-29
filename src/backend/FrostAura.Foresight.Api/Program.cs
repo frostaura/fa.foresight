@@ -54,6 +54,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "fa.foresi
 app.MapTenantEndpoints();
 app.MapLiveEndpoints();
 app.MapPaperEndpoints();
+app.MapSessionsEndpoints();
 app.MapModelsEndpoints();
 app.MapBacktestsEndpoints();
 app.MapFlowsEndpoints();

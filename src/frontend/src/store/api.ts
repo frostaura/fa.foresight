@@ -70,17 +70,19 @@ export const api = createApi({
     listTenants: b.query<TenantInfo[], void>({ query: () => "tenants", providesTags: ["Tenant"] }),
 
     // ── Trading sessions (Status / Live pages) ──────────────────────────────
-    // These endpoints are NOT yet implemented on the backend. The UI calls them
-    // optimistically and degrades gracefully on 404/error.
-    listSessions: b.query<TradingSession[], { kind?: "paper" | "live" }>({
+    listSessions: b.query<NormalizedSession[], { kind?: "paper" | "live"; active?: boolean }>({
       query: (params) => ({ url: "sessions", params }),
       providesTags: ["Session"],
     }),
-    createSession: b.mutation<TradingSession, CreateSessionRequest>({
+    createSession: b.mutation<NormalizedSession, CreateSessionRequest>({
       query: (body) => ({ url: "sessions", method: "POST", body }),
       invalidatesTags: ["Session"],
     }),
-    listChaosRuns: b.query<ChaosRun[], { modelId?: string }>({
+    stopSession: b.mutation<NormalizedSession, string>({
+      query: (id) => ({ url: `sessions/${id}`, method: "DELETE" }),
+      invalidatesTags: ["Session"],
+    }),
+    listChaosRuns: b.query<ChaosRunNormalized[], { batchId?: string }>({
       query: (params) => ({ url: "chaos", params }),
       providesTags: ["Chaos"],
     }),
@@ -90,9 +92,9 @@ export const api = createApi({
       query: (body) => ({ url: "flows/run-node", method: "POST", body }),
     }),
 
-    // ── Strategies catalogue ─────────────────────────────────────────────────
+    // ── Strategies catalogue — delegates to the real /api/staking-strategies endpoint ──
     listStrategies: b.query<Strategy[], void>({
-      query: () => "strategies",
+      query: () => "staking-strategies",
     }),
 
     predictLive: b.mutation<LivePrediction, { symbol: string; interval: string; horizon?: number }>({
@@ -316,42 +318,76 @@ export const {
   // New endpoints for Trading → Status / Live
   useListSessionsQuery,
   useCreateSessionMutation,
+  useStopSessionMutation,
   useListChaosRunsQuery,
   useRunFlowNodeMutation,
   useListStrategiesQuery,
 } = api;
 
-// ── Trading Session types (new; backend pending) ─────────────────────────────
-export interface TradingSession {
+// ── Trading Session types ─────────────────────────────────────────────────────
+
+/** Normalised session shape returned by GET/POST /api/sessions. */
+export interface NormalizedSession {
   id: string;
-  tenantId: string;
-  kind: "paper" | "live";
-  modelId: string;
-  strategyId: string;
+  mode: "paper" | "live";
   symbol: string;
   interval: string;
+  modelId?: string | null;
+  strategyId: string;
+  startedAt: string;
+  stoppedAt?: string | null;
   initialBalance: number;
-  initialBetSize: number;
   currentBalance: number;
+  currentBetSize: number;
   betsPlaced: number;
   betsWon: number;
+  bust: boolean;
+  reservedAmount?: number | null;
+}
+
+/** @deprecated Use NormalizedSession instead — kept for existing consumers during transition. */
+export type TradingSession = NormalizedSession & {
+  kind: "paper" | "live";
+  tenantId: string;
+  initialBetSize: number;
   hitRate?: number | null;
   status: "active" | "paused" | "stopped";
   createdAt: string;
   updatedAt: string;
-}
+};
 
 export interface CreateSessionRequest {
-  kind: "paper" | "live";
-  modelId: string;
-  strategyId: string;
+  mode: "paper" | "live";
   symbol: string;
   interval: string;
   initialBalance: number;
   initialBetSize: number;
-  applyGate: boolean;
+  strategyId?: string | null;
+  gated: boolean;
 }
 
+/** Normalised ChaosRun shape from GET /api/chaos. Fields match the ChaosRun domain entity. */
+export interface ChaosRunNormalized {
+  id: string;
+  tenantId: string;
+  batchId: string;
+  modelId: string;
+  strategyId: string;
+  symbol: string;
+  interval: string;
+  windowLength: number;
+  sampleCount: number;
+  bustRate?: number | null;
+  profitP50?: number | null;
+  worstDrawdown?: number | null;
+  pass: boolean;
+  status: "running" | "complete" | "failed";
+  startedAt: string;
+  completedAt?: string | null;
+  error?: string | null;
+}
+
+/** @deprecated Use ChaosRunNormalized instead. */
 export interface ChaosRun {
   id: string;
   tenantId: string;

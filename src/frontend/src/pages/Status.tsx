@@ -9,7 +9,7 @@ import { Activity, FlaskConical, TrendingUp } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
-import { useListSessionsQuery, useListChaosRunsQuery, type TradingSession } from "../store/api";
+import { useListSessionsQuery, useListChaosRunsQuery, type NormalizedSession } from "../store/api";
 
 function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -21,12 +21,15 @@ function StatTile({ label, value, hint }: { label: string; value: string; hint?:
   );
 }
 
-function SessionRow({ session }: { session: TradingSession }) {
+function SessionRow({ session }: { session: NormalizedSession }) {
   const pnl = session.currentBalance - session.initialBalance;
   const pnlSign = pnl >= 0 ? "+" : "";
   const hitRate = session.betsPlaced > 0
     ? ((session.betsWon / session.betsPlaced) * 100).toFixed(1) + "%"
     : "—";
+  const status = session.stoppedAt
+    ? session.bust ? "bust" : "stopped"
+    : "active";
 
   return (
     <div className="flex items-center gap-4 py-3 px-4 border-b border-fa-edge/50 last:border-0 hover:bg-fa-glass/40 transition">
@@ -35,7 +38,7 @@ function SessionRow({ session }: { session: TradingSession }) {
           {session.symbol} · {session.interval}
         </div>
         <div className="text-[11px] text-fa-frost-dim">
-          {session.modelId} · {session.strategyId}
+          {session.strategyId}
         </div>
       </div>
       <div className="text-right tabular-nums shrink-0">
@@ -49,10 +52,10 @@ function SessionRow({ session }: { session: TradingSession }) {
         <div className="text-[10px] text-fa-frost-dim">{session.betsPlaced} bets</div>
       </div>
       <Badge
-        variant={session.status === "active" ? "success" : session.status === "paused" ? "warning" : "outline"}
+        variant={status === "active" ? "success" : status === "bust" ? "danger" : "outline"}
         className="shrink-0"
       >
-        {session.status}
+        {status}
       </Badge>
     </div>
   );
@@ -67,7 +70,7 @@ function SessionBlock({
 }: {
   title: string;
   icon: React.ElementType;
-  sessions: TradingSession[];
+  sessions: NormalizedSession[];
   isLoading: boolean;
   error: boolean;
 }) {
@@ -105,7 +108,7 @@ function SessionBlock({
         )}
         {error && (
           <div className="px-5 py-6 text-sm text-fa-frost-dim">
-            Sessions API not yet available — check back after backend WS D lands.
+            Unable to load sessions — check backend connectivity.
           </div>
         )}
         {!isLoading && !error && sessions.length === 0 && (
@@ -141,8 +144,8 @@ export default function Status() {
     isError: chaosError,
   } = useListChaosRunsQuery({});
 
-  const liveSessions = (allSessions ?? []).filter((s) => s.kind === "live");
-  const paperSessions = (allSessions ?? []).filter((s) => s.kind === "paper");
+  const liveSessions = (allSessions ?? []).filter((s) => s.mode === "live");
+  const paperSessions = (allSessions ?? []).filter((s) => s.mode === "paper");
 
   const latestChaos = chaosRuns?.[0];
 
@@ -166,7 +169,7 @@ export default function Status() {
             {chaosLoading && <p className="text-sm text-fa-frost-dim">Loading…</p>}
             {chaosError && (
               <p className="text-sm text-fa-frost-dim">
-                Chaos API not yet available — coming with backend WS D.
+                Unable to load chaos runs — check backend connectivity.
               </p>
             )}
             {!chaosLoading && !chaosError && !latestChaos && (
@@ -176,10 +179,22 @@ export default function Status() {
             )}
             {latestChaos && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <StatTile label="Bust rate" value={`${(latestChaos.bustRate * 100).toFixed(1)}%`} hint={`${latestChaos.bustCount}/${latestChaos.runCount} runs`} />
-                <StatTile label="Median profit" value={`${latestChaos.medianProfit >= 0 ? "+" : ""}$${latestChaos.medianProfit.toFixed(2)}`} />
-                <StatTile label="Total runs" value={String(latestChaos.runCount)} />
-                <StatTile label="Status" value={latestChaos.status} />
+                <StatTile
+                  label="Bust rate"
+                  value={latestChaos.bustRate != null ? `${(latestChaos.bustRate * 100).toFixed(1)}%` : "—"}
+                  hint={`${latestChaos.sampleCount} samples`}
+                />
+                <StatTile
+                  label="Median profit"
+                  value={latestChaos.profitP50 != null
+                    ? `${latestChaos.profitP50 >= 0 ? "+" : ""}$${latestChaos.profitP50.toFixed(2)}`
+                    : "—"}
+                />
+                <StatTile label="Window" value={`${latestChaos.windowLength} candles`} hint={`${latestChaos.symbol} ${latestChaos.interval}`} />
+                <StatTile
+                  label="Pass"
+                  value={latestChaos.status === "running" ? "Running…" : latestChaos.pass ? "Yes" : "No"}
+                />
               </div>
             )}
           </CardContent>

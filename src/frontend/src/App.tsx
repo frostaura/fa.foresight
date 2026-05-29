@@ -8,7 +8,7 @@ import Live from "./pages/Live";
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ConfirmProvider>
         <Routes>
           <Route element={<Layout />}>

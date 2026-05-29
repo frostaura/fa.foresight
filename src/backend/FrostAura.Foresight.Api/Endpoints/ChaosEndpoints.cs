@@ -2,6 +2,8 @@ using System.Text.Json;
 using FrostAura.Foresight.Application.Chaos;
 using FrostAura.Foresight.Application.Tenancy;
 using FrostAura.Foresight.Infrastructure.Chaos;
+using FrostAura.Foresight.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace FrostAura.Foresight.Api.Endpoints;
 
@@ -53,6 +55,26 @@ public static class ChaosEndpoints
         {
             if (!tc.IsResolved) return Results.NotFound();
             var rows = await svc.GetSamplesAsync(id, take ?? 500, ct);
+            return Results.Ok(rows);
+        });
+
+        // List recent chaos runs (newest first, capped at 100). Optionally filter by batchId.
+        g.MapGet("/", async (Guid? batchId, ITenantContext tc, IChaosService svc, ForesightDbContext db, CancellationToken ct) =>
+        {
+            if (!tc.IsResolved) return Results.NotFound();
+            var tenantId = tc.TenantId!.Value;
+
+            IQueryable<Domain.Chaos.ChaosRun> query = db.ChaosRuns.AsNoTracking()
+                .Where(r => r.TenantId == tenantId);
+
+            if (batchId.HasValue)
+                query = query.Where(r => r.BatchId == batchId.Value);
+
+            var rows = await query
+                .OrderByDescending(r => r.StartedAt)
+                .Take(100)
+                .ToListAsync(ct);
+
             return Results.Ok(rows);
         });
 

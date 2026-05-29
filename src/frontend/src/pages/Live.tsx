@@ -18,19 +18,22 @@ import {
   useCreateSessionMutation,
   useListModelsQuery,
   useGetStakingStrategiesQuery,
-  type TradingSession,
+  type NormalizedSession,
   type CreateSessionRequest,
 } from "../store/api";
 
 const SYMBOLS = ["BTCUSDT"];
 const INTERVALS = ["5m", "15m", "1m"];
 
-function SessionCard({ session }: { session: TradingSession }) {
+function SessionCard({ session }: { session: NormalizedSession }) {
   const pnl = session.currentBalance - session.initialBalance;
   const pnlSign = pnl >= 0 ? "+" : "";
   const hitRate = session.betsPlaced > 0
     ? ((session.betsWon / session.betsPlaced) * 100).toFixed(1) + "%"
     : "—";
+  const status = session.stoppedAt
+    ? session.bust ? "bust" : "stopped"
+    : "active";
 
   return (
     <Card>
@@ -41,8 +44,8 @@ function SessionCard({ session }: { session: TradingSession }) {
             {session.symbol} · {session.interval}
           </CardTitle>
         </div>
-        <Badge variant={session.status === "active" ? "success" : session.status === "paused" ? "warning" : "outline"}>
-          {session.status}
+        <Badge variant={status === "active" ? "success" : status === "bust" ? "danger" : "outline"}>
+          {status}
         </Badge>
       </CardHeader>
       <CardContent>
@@ -77,15 +80,15 @@ function CreateSessionForm({ onCreated }: { onCreated?: () => void }) {
   const [createSession, { isLoading, error }] = useCreateSessionMutation();
 
   const [form, setForm] = useState<CreateSessionRequest>({
-    kind: "live",
-    modelId: "",
+    mode: "live",
     strategyId: "flat",
     symbol: SYMBOLS[0],
     interval: "5m",
     initialBalance: 1000,
     initialBetSize: 10,
-    applyGate: true,
+    gated: true,
   });
+  const [selectedModelId, setSelectedModelId] = useState("");
 
   const strategies = strategiesResp?.strategies ?? [{ id: "flat", name: "Flat" }];
   const availableModels = models.filter((m) => m.supportsBacktesting);
@@ -93,10 +96,12 @@ function CreateSessionForm({ onCreated }: { onCreated?: () => void }) {
     ? (error.data as { error?: string })?.error ?? "Request failed"
     : error ? "Request failed" : null;
   // 409 = config-hash dedup (same model+strategy+symbol+interval already running)
+  // 422 = disarmed — live trading gate not armed
   const is409 = error && "status" in error && error.status === 409;
+  const is422 = error && "status" in error && error.status === 422;
 
   const submit = async () => {
-    if (!form.modelId) return;
+    if (!selectedModelId) return;
     try {
       await createSession(form).unwrap();
       onCreated?.();
@@ -127,8 +132,8 @@ function CreateSessionForm({ onCreated }: { onCreated?: () => void }) {
           <div className="space-y-1.5">
             <Label>Model</Label>
             <select
-              value={form.modelId}
-              onChange={(e) => setForm((f) => ({ ...f, modelId: e.target.value }))}
+              value={selectedModelId}
+              onChange={(e) => setSelectedModelId(e.target.value)}
               className="fa-input w-full text-sm"
             >
               <option value="">Select model…</option>
@@ -141,7 +146,7 @@ function CreateSessionForm({ onCreated }: { onCreated?: () => void }) {
           <div className="space-y-1.5">
             <Label>Strategy</Label>
             <select
-              value={form.strategyId}
+              value={form.strategyId ?? ""}
               onChange={(e) => setForm((f) => ({ ...f, strategyId: e.target.value }))}
               className="fa-input w-full text-sm"
             >
@@ -205,8 +210,8 @@ function CreateSessionForm({ onCreated }: { onCreated?: () => void }) {
           <label className="inline-flex items-center gap-2 text-sm text-fa-frost-dim cursor-pointer select-none">
             <input
               type="checkbox"
-              checked={form.applyGate}
-              onChange={(e) => setForm((f) => ({ ...f, applyGate: e.target.checked }))}
+              checked={form.gated}
+              onChange={(e) => setForm((f) => ({ ...f, gated: e.target.checked }))}
               className="rounded border-fa-edge bg-fa-glass"
             />
             Apply confidence gate (skip ±2pp no-bet band)
@@ -215,16 +220,21 @@ function CreateSessionForm({ onCreated }: { onCreated?: () => void }) {
 
         {is409 && (
           <p className="text-xs text-fa-warning">
-            A session with this model + strategy + symbol + interval is already active. Modify the configuration to create a new one.
+            A session with this configuration is already active. Stop it first or change the configuration.
           </p>
         )}
-        {errMsg && !is409 && (
+        {is422 && (
+          <p className="text-xs text-fa-warning">
+            Live trading is disarmed. Complete the arm flow at Trading → Live → arm via <code className="font-mono">/api/golive</code> before creating a live session.
+          </p>
+        )}
+        {errMsg && !is409 && !is422 && (
           <p className="text-xs text-fa-danger">{errMsg}</p>
         )}
 
         <Button
           onClick={submit}
-          disabled={isLoading || !form.modelId}
+          disabled={isLoading || !selectedModelId}
           variant="primary"
           size="sm"
         >
@@ -240,9 +250,9 @@ export default function Live() {
     data: allSessions,
     isLoading,
     isError,
-  } = useListSessionsQuery({ kind: "live" });
+  } = useListSessionsQuery({ kind: "live", active: true });
 
-  const liveSessions = allSessions ?? [];
+  const liveSessions = (allSessions ?? []).filter((s) => !s.stoppedAt);
 
   return (
     <div>
@@ -258,8 +268,9 @@ export default function Live() {
         <div className="p-3 rounded-md border border-fa-warning/30 bg-fa-warning/5 flex items-start gap-2 text-sm text-fa-warning">
           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
-            Live trading is gated. The backend Sessions API is not yet implemented — this surface
-            is inert until WS D lands. Form submissions are optimistic and will fail gracefully.
+            Live trading requires the arm flow to be completed first (<code className="font-mono text-fa-frost">POST /api/golive/request-code</code> →{" "}
+            <code className="font-mono text-fa-frost">POST /api/golive/confirm</code>). Keep{" "}
+            <code className="font-mono text-fa-frost">Polymarket__LiveTrading=false</code> until a supervised $1 validation order has been placed.
           </span>
         </div>
 
@@ -275,7 +286,7 @@ export default function Live() {
           )}
           {isError && (
             <p className="text-sm text-fa-frost-dim">
-              Sessions API not available yet.
+              Unable to load sessions — check backend connectivity.
             </p>
           )}
           {!isLoading && !isError && liveSessions.length === 0 && (
