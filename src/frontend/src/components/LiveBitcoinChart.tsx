@@ -653,7 +653,7 @@ export default function LiveBitcoinChart({
           <button
             onClick={() => toggle(symbol, interval)}
             aria-label={favorited ? "Unfavorite timeframe" : "Favorite timeframe"}
-            className={`shrink-0 inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] uppercase tracking-wider transition ${
+            className={`shrink-0 inline-flex items-center gap-1.5 rounded-md border px-2 py-1 fa-overline transition ${
               favorited
                 ? "border-amber-300/40 bg-amber-300/10 text-amber-300 hover:bg-amber-300/15"
                 : "border-fa-edge bg-fa-glass text-fa-frost-dim hover:text-fa-frost-bright hover:border-fa-frost/30"
@@ -697,7 +697,7 @@ export default function LiveBitcoinChart({
             <button
               onClick={toggleGate}
               aria-pressed={gateNoBets}
-              className={`shrink-0 px-2.5 py-1 text-[10px] uppercase tracking-wider rounded-md border transition ${
+              className={`shrink-0 px-2.5 py-1 fa-overline rounded-md border transition ${
                 gateNoBets
                   ? "border-fa-frost/40 bg-fa-frost/20 text-fa-frost-bright"
                   : "border-fa-edge text-fa-frost-dim hover:text-fa-frost-bright"
@@ -711,7 +711,7 @@ export default function LiveBitcoinChart({
               <button
                 key={m}
                 onClick={() => setView(m)}
-                className={`px-2.5 py-0.5 text-[10px] uppercase tracking-wider rounded transition ${
+                className={`px-2.5 py-0.5 fa-overline rounded transition ${
                   view === m
                     ? "bg-fa-frost/20 text-fa-frost-bright"
                     : "text-fa-frost-dim hover:text-fa-frost-bright"
@@ -1048,7 +1048,7 @@ function BetCapsule({ pUp }: { pUp: number }) {
       {opts.map((o) => (
         <span
           key={o.id}
-          className={`px-2.5 py-0.5 text-[10px] tracking-wider rounded transition cursor-help ${o.id === call ? o.activeCls : o.inactiveCls}`}
+          className={`px-2.5 py-0.5 fa-caption tracking-wider rounded transition cursor-help ${o.id === call ? o.activeCls : o.inactiveCls}`}
           title={explain(o.id)}
         >
           {o.id}
@@ -1107,11 +1107,11 @@ function NextCandleAction({
     <div className="mt-3 pt-3 border-t border-fa-edge/60">
       <div className="flex items-center gap-2 mb-2">
         <Sparkles className="h-3 w-3 text-amber-300" />
-        <span className="text-fa-frost-dim text-[10px] uppercase tracking-wider">Next candle</span>
+        <span className="fa-overline text-fa-frost-dim">Next candle</span>
         {showLive && <LivePulse />}
         {msToNextCandle != null && (
           <span
-            className={`ml-auto tabular-nums text-[10px] ${cdWarm ? "text-amber-300" : "text-fa-frost-dim"}`}
+            className={`ml-auto tabular-nums fa-caption ${cdWarm ? "text-amber-300" : "text-fa-frost-dim"}`}
             title="Time until the current candle closes (next betting round)"
           >
             opens in {formatCountdown(cdMs)}
@@ -1161,7 +1161,7 @@ function NextCandleAction({
             and hit-rate text. items-center because the capsule has its own bordered box; baseline
             alignment would push it visually below the text chips. */}
         {(prediction || tradeSignal || accuracy) && (
-          <div className="flex items-center gap-x-2 text-[11px] sm:text-xs tabular-nums leading-none ml-auto whitespace-nowrap">
+          <div className="flex items-center gap-x-2 fa-caption sm:text-xs tabular-nums ml-auto whitespace-nowrap">
             {prediction && <BetCapsule pUp={probUp} />}
             {prediction && (tradeSignal || accuracy) && <span className="text-fa-frost-dim/50" aria-hidden>·</span>}
             {tradeSignal && (
@@ -1260,7 +1260,7 @@ function RecapStrip({
     if (lean === "winning") {
       chip = (
         <span
-          className="fa-pending-shimmer inline-flex items-center gap-1 rounded-sm border border-emerald-300/50 bg-emerald-300/10 px-1.5 py-0.5 text-emerald-300/90 text-[10px] uppercase tracking-wider"
+          className="fa-pending-shimmer inline-flex items-center gap-1 rounded-sm border border-emerald-300/50 bg-emerald-300/10 px-1.5 py-0.5 text-emerald-300/90 fa-overline"
           title="Bet would resolve as HIT at the current price"
         >
           <ArrowUp className="h-2.5 w-2.5" strokeWidth={2.5} />
@@ -1270,7 +1270,7 @@ function RecapStrip({
     } else if (lean === "losing") {
       chip = (
         <span
-          className="fa-pending-shimmer inline-flex items-center gap-1 rounded-sm border border-rose-300/50 bg-rose-300/10 px-1.5 py-0.5 text-rose-300/90 text-[10px] uppercase tracking-wider"
+          className="fa-pending-shimmer inline-flex items-center gap-1 rounded-sm border border-rose-300/50 bg-rose-300/10 px-1.5 py-0.5 text-rose-300/90 fa-overline"
           title="Bet would resolve as MISS at the current price"
         >
           <ArrowDown className="h-2.5 w-2.5" strokeWidth={2.5} />
@@ -1279,7 +1279,7 @@ function RecapStrip({
       );
     } else {
       chip = (
-        <span className="fa-pending-shimmer inline-flex items-center gap-1 rounded-sm border border-amber-300/40 bg-amber-300/10 px-1.5 py-0.5 text-amber-300 text-[10px] uppercase tracking-wider">
+        <span className="fa-pending-shimmer inline-flex items-center gap-1 rounded-sm border border-amber-300/40 bg-amber-300/10 px-1.5 py-0.5 text-amber-300 fa-overline">
           pending
         </span>
       );
@@ -1291,11 +1291,11 @@ function RecapStrip({
     // See [[feedback_hitmiss_from_chart_candles]] + [[feedback_candle_color_direction]].
     const hit = predictionMarkerStateForCandles(prediction, closeByOpenTime, intervalMs) === "hit";
     chip = hit ? (
-      <span className="inline-flex items-center gap-1 rounded-sm border border-emerald-300/40 bg-emerald-300/10 px-1.5 py-0.5 text-emerald-300 text-[10px] uppercase tracking-wider">
+      <span className="inline-flex items-center gap-1 rounded-sm border border-emerald-300/40 bg-emerald-300/10 px-1.5 py-0.5 text-emerald-300 fa-overline">
         ✓ hit
       </span>
     ) : (
-      <span className="inline-flex items-center gap-1 rounded-sm border border-rose-300/40 bg-rose-300/10 px-1.5 py-0.5 text-rose-300 text-[10px] uppercase tracking-wider">
+      <span className="inline-flex items-center gap-1 rounded-sm border border-rose-300/40 bg-rose-300/10 px-1.5 py-0.5 text-rose-300 fa-overline">
         ✗ miss
       </span>
     );
@@ -1303,10 +1303,10 @@ function RecapStrip({
 
   return (
     <div
-      className="mt-1.5 flex items-baseline gap-x-2 text-[11px] tabular-nums leading-none"
+      className="mt-1.5 flex items-baseline gap-x-2 fa-caption tabular-nums"
       title={prediction.reasoning ?? undefined}
     >
-      <span className="text-fa-frost-dim/50 uppercase tracking-wider text-[9px]">{label}</span>
+      <span className="fa-overline text-fa-frost-dim/50">{label}</span>
       <span className={`inline-flex items-baseline gap-1 ${dirColor}`}>
         {up
           ? <ArrowUp className="inline h-3 w-3 -translate-y-[1px]" strokeWidth={2.25} />
@@ -1421,7 +1421,7 @@ function CandleTable({ rows, nextPrediction, nextTargetTime, predictions }: {
 
   return (
     <div className="h-full overflow-auto fa-scroll">
-      <table className="fa-table-bordered w-full text-[11px] tabular-nums">
+      <table className="fa-table-bordered w-full fa-caption tabular-nums">
         <thead className="sticky top-0 bg-fa-ink-2/95 backdrop-blur text-fa-frost-dim">
           <tr className="text-left">
             <th className="px-2 py-1 font-normal"><SortHeader<CandleKey> {...headerProps("time")}>Time</SortHeader></th>
@@ -1548,8 +1548,8 @@ function CandleTable({ rows, nextPrediction, nextTargetTime, predictions }: {
                     const actColor = actUp == null ? "text-fa-frost-dim/40" : actUp ? "text-emerald-300/60" : "text-rose-300/60";
                     return (
                       <span className="inline-flex items-center gap-1" title={pred.reasoning ?? undefined}>
-                        <span className={`text-[10px] ${sideColor}`}>{predUp ? "↑" : "↓"}</span>
-                        {actUp != null && <span className={`text-[10px] ${actColor}`}>{actUp ? "↑" : "↓"}</span>}
+                        <span className={`fa-caption ${sideColor}`}>{predUp ? "↑" : "↓"}</span>
+                        {actUp != null && <span className={`fa-caption ${actColor}`}>{actUp ? "↑" : "↓"}</span>}
                         <span className={resultState === "hit" ? "text-emerald-300" : "text-rose-300"}>
                           {resultState === "hit" ? "hit" : "miss"}
                         </span>
@@ -1590,7 +1590,7 @@ function renderTooltip(
     return (
       <div className="rounded-md border border-fa-edge bg-fa-ink/95 px-4 py-3 text-xs shadow-lg backdrop-blur-sm">
         <div className="mb-2">
-          <span className="inline-flex items-center rounded-md border border-fa-edge bg-fa-glass px-1.5 py-0.5 text-[10px] uppercase tracking-wider tabular-nums text-fa-frost-dim">
+          <span className="inline-flex items-center rounded-md border border-fa-edge bg-fa-glass px-1.5 py-0.5 fa-overline tabular-nums text-fa-frost-dim">
             {formatTick(labelMs)}
           </span>
         </div>
@@ -1713,7 +1713,7 @@ function ModelPicker({ symbol, interval, grow = false, status = "idle" }:
           onClick={() => setOpen((o) => !o)}
           aria-label="Model"
           aria-expanded={open}
-          className={`h-6 w-full flex items-center gap-1.5 px-2 rounded-md border bg-fa-glass text-fa-frost-bright text-[10px] transition ${
+          className={`h-6 w-full flex items-center gap-1.5 px-2 rounded-md border bg-fa-glass text-fa-frost-bright fa-caption transition ${
             status === "live" ? "border-emerald-400/40 ring-1 ring-emerald-400/20" : "border-fa-edge hover:border-fa-frost/30"
           }`}
         >
@@ -1740,7 +1740,7 @@ function ModelPicker({ symbol, interval, grow = false, status = "idle" }:
                   if (needsTraining && !(await ensureTrained(m))) return;
                   setActive({ symbol, interval, modelId: m.id });
                 }}
-                className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-[11px] text-left transition ${
+                className={`w-full flex items-center gap-2 px-2.5 py-1.5 fa-caption text-left transition ${
                   selected ? "bg-emerald-400/10 text-fa-frost-bright" : "text-fa-frost-dim hover:bg-fa-frost/10 hover:text-fa-frost-bright"
                 }`}
               >
@@ -1751,7 +1751,7 @@ function ModelPicker({ symbol, interval, grow = false, status = "idle" }:
                 </span>
                 <span className="flex-1 truncate">{m.name}</span>
                 {needsTraining ? (
-                  <span className="shrink-0 text-[9px] font-medium text-amber-200 bg-amber-400/10 border border-amber-400/30 rounded px-1 py-0.5">Train</span>
+                  <span className="shrink-0 fa-caption font-medium text-amber-200 bg-amber-400/10 border border-amber-400/30 rounded px-1 py-0.5">Train</span>
                 ) : selected ? (
                   <svg className="h-3 w-3 shrink-0 text-emerald-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M3.5 8.5l3 3 6-7" strokeLinecap="round" strokeLinejoin="round" />

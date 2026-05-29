@@ -109,7 +109,7 @@ export default function PaperTrading() {
         <div className="fa-card px-4 sm:px-6 py-4 flex flex-wrap items-stretch gap-x-5 gap-y-4">
           {/* Asset picker */}
           <div className="flex flex-col justify-between shrink-0">
-            <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider mb-2">Asset</div>
+            <div className="fa-overline text-fa-frost-dim mb-2">Asset</div>
             <SymbolPicker
               symbols={ASSETS.map((a) => a.symbol)}
               value={symbol}
@@ -124,9 +124,9 @@ export default function PaperTrading() {
 
           {/* Last price */}
           <div className="flex flex-col justify-between shrink-0">
-            <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider mb-2">Last price</div>
+            <div className="fa-overline text-fa-frost-dim mb-2">Last price</div>
             <div
-              className={`text-2xl font-light tabular-nums leading-none transition-colors duration-200 ${
+              className={`fa-metric leading-none transition-colors duration-200 ${
                 flash === "up" ? "text-emerald-300" : flash === "down" ? "text-rose-300" : "text-fa-frost-bright"
               }`}
             >
@@ -141,7 +141,7 @@ export default function PaperTrading() {
           {/* Visible candles slider — takes remaining horizontal space, minimum 200px */}
           <div className="flex flex-col justify-between flex-1 min-w-[200px]">
             <div className="flex items-baseline justify-between mb-2">
-              <span className="text-fa-frost-dim text-[10px] uppercase tracking-wider">Visible candles</span>
+              <span className="fa-overline text-fa-frost-dim">Visible candles</span>
               <span className="text-fa-frost-bright text-xs tabular-nums">{visibleCount}</span>
             </div>
             <input
@@ -158,7 +158,7 @@ export default function PaperTrading() {
               }}
               aria-label="Visible candles"
             />
-            <div className="flex justify-between text-[10px] text-fa-frost-dim tabular-nums mt-0.5">
+            <div className="flex justify-between fa-caption text-fa-frost-dim tabular-nums mt-0.5">
               <span>{MIN_VISIBLE}</span>
               <span>{MAX_VISIBLE}</span>
             </div>
@@ -168,7 +168,7 @@ export default function PaperTrading() {
 
           {/* Chart type */}
           <div className="flex flex-col justify-between shrink-0">
-            <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider mb-2">Chart type</div>
+            <div className="fa-overline text-fa-frost-dim mb-2">Chart type</div>
             <div className="flex gap-1 rounded-md border border-fa-edge p-0.5">
               {CHART_KINDS.map((k) => (
                 <button
@@ -216,7 +216,7 @@ export default function PaperTrading() {
                 />
               )}
               {t.label}
-              <span className="text-[10px] text-fa-frost-dim tabular-nums">{t.count}</span>
+              <span className="fa-caption text-fa-frost-dim tabular-nums">{t.count}</span>
             </button>
           ))}
         </div>

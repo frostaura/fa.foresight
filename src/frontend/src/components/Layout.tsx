@@ -185,7 +185,7 @@ export default function Layout() {
                 />
               )}
               {(!collapsed || isDrawer) && (
-                <div className="px-3 pb-1 pt-2 text-[10px] uppercase tracking-[0.14em] text-fa-frost-dim/60 font-medium">
+                <div className="px-3 pb-1 pt-2 fa-overline text-fa-frost-dim/60">
                   {group.groupLabel}
                 </div>
               )}
@@ -215,7 +215,7 @@ export default function Layout() {
 
         {(!collapsed || isDrawer) && (
           <div className="p-3 border-t border-fa-edge">
-            <div className="pb-1 text-center text-[10px] uppercase tracking-wider text-fa-frost-dim/70">
+            <div className="pb-1 text-center fa-overline text-fa-frost-dim/70">
               FrostAura Technologies
             </div>
           </div>

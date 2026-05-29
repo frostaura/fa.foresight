@@ -63,19 +63,19 @@ export default function CreateModelDialog({ onClose }: { onClose: () => void }) 
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="block">
-            <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider mb-1">Name</div>
+            <div className="fa-overline text-fa-frost-dim mb-1">Name</div>
             <input value={name} onChange={(e) => setName(e.target.value)} maxLength={200}
               className="w-full bg-fa-glass border border-fa-edge rounded-md px-2 py-1.5 text-fa-frost-bright text-sm" placeholder="e.g. RSI + EMA logistic" />
           </label>
           <label className="block">
-            <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider mb-1">Description (optional)</div>
+            <div className="fa-overline text-fa-frost-dim mb-1">Description (optional)</div>
             <input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000}
               className="w-full bg-fa-glass border border-fa-edge rounded-md px-2 py-1.5 text-fa-frost-bright text-sm" placeholder="Short summary" />
           </label>
         </div>
 
         <div>
-          <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider mb-2">Seed template</div>
+          <div className="fa-overline text-fa-frost-dim mb-2">Seed template</div>
           <div className="flex flex-wrap gap-2">
             {(Object.keys(TEMPLATES) as TemplateId[]).map((id) => (
               <button key={id} onClick={() => applyTemplate(id)}
@@ -92,11 +92,11 @@ export default function CreateModelDialog({ onClose }: { onClose: () => void }) 
         </div>
 
         <div>
-          <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider mb-1">Flow JSON</div>
+          <div className="fa-overline text-fa-frost-dim mb-1">Flow JSON</div>
           <textarea value={definition} onChange={(e) => setDefinition(e.target.value)} rows={16}
             spellCheck={false}
-            className="w-full font-mono text-[11px] bg-fa-glass border border-fa-edge rounded-md p-3 text-fa-frost-bright resize-y" />
-          <p className="text-fa-frost-dim/70 text-[10px] mt-1">
+            className="w-full font-mono fa-caption bg-fa-glass border border-fa-edge rounded-md p-3 text-fa-frost-bright resize-y" />
+          <p className="text-fa-frost-dim/70 fa-caption mt-1">
             Validated server-side on save (DAG check, port type-tags, backtest-source restriction).
           </p>
         </div>

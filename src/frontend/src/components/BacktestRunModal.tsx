@@ -81,7 +81,7 @@ export default function BacktestRunModal({ run, modelName, onClose }: { run: Bac
       <div className="flex flex-col h-full">
         <div className="px-5 py-4 border-b border-fa-edge flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-fa-frost-bright text-sm font-medium truncate">{modelName}</div>
+            <div className="fa-section-title truncate">{modelName}</div>
             <div className="text-fa-frost-dim text-xs truncate">
               {run.symbol} · {run.interval} · {fmtTime(run.startTime)} → {fmtTime(run.endTime)} · {run.strategyId}
             </div>
@@ -113,7 +113,7 @@ export default function BacktestRunModal({ run, modelName, onClose }: { run: Bac
 
           {/* Price + balance + dots */}
           <div className="fa-card p-3">
-            <div className="text-fa-frost-dim text-[11px] mb-2 flex items-center gap-4">
+            <div className="text-fa-frost-dim fa-caption mb-2 flex items-center gap-4">
               <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: PRICE }} />Price</span>
               <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: BAL }} />Bank balance</span>
               <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: UP }} />Hit</span>

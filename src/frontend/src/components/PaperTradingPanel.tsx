@@ -94,7 +94,7 @@ export default function PaperTradingPanel({ symbol, interval, closeByOpenTime, i
           />
         ) : (
           <div className="flex items-center justify-between gap-3">
-            <span className="text-fa-frost-dim text-[10px] uppercase tracking-wider inline-flex items-center gap-1.5">
+            <span className="text-fa-frost-dim fa-overline inline-flex items-center gap-1.5">
               <CircleDollarSign className="h-3 w-3" />
               Paper trading
             </span>
@@ -145,7 +145,7 @@ function StartDialog({
   return (
     <div className="flex flex-wrap items-end gap-3">
       <div>
-        <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider mb-1">Balance ($)</div>
+        <div className="text-fa-frost-dim fa-overline mb-1">Balance ($)</div>
         <input
           type="number" min={1} step={1} value={balance}
           onChange={(e) => onBalance(Number(e.target.value) || 0)}
@@ -153,7 +153,7 @@ function StartDialog({
         />
       </div>
       <div>
-        <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider mb-1">Initial bet ($)</div>
+        <div className="text-fa-frost-dim fa-overline mb-1">Initial bet ($)</div>
         <input
           type="number" min={1} step={1} value={initialBet}
           onChange={(e) => onInitialBet(Number(e.target.value) || 0)}
@@ -161,7 +161,7 @@ function StartDialog({
         />
       </div>
       <div>
-        <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider mb-1">Strategy</div>
+        <div className="text-fa-frost-dim fa-overline mb-1">Strategy</div>
         {/* Pill selector mirroring the Backtesting tab so the two surfaces stay visually
             consistent. Tooltip on each pill carries the strategy's catalogue description. */}
         <div className="flex flex-wrap gap-1.5">
@@ -188,7 +188,7 @@ function StartDialog({
         </div>
       </div>
       <div>
-        <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider mb-1">Confidence gate</div>
+        <div className="text-fa-frost-dim fa-overline mb-1">Confidence gate</div>
         <Tooltip content="On: skip low-conviction candles (pUp within 48–52%) instead of betting every candle — the same gate the backtest + chart use. Off: bet every candle (baseline). Lets you compare whether sitting out the coin-flips improves live P&L.">
           <button
             type="button"
@@ -223,7 +223,7 @@ function StartDialog({
         </button>
       </div>
       {error && (
-        <div className="basis-full text-rose-300 text-[10px] -mt-1">{error}</div>
+        <div className="basis-full text-rose-300 fa-caption -mt-1">{error}</div>
       )}
     </div>
   );
@@ -269,7 +269,7 @@ function ActiveSession({
   if (session.bust) {
     return (
       <div className="mt-3 pt-3 border-t border-rose-300/30">
-        <div className="flex items-center justify-between gap-x-3 text-[10px] tabular-nums">
+        <div className="flex items-center justify-between gap-x-3 fa-caption tabular-nums">
           <span className="text-rose-300 uppercase tracking-wider inline-flex items-center gap-1 font-semibold">
             <CircleDollarSign className="h-3 w-3" />
             Bankrupt · <span className="text-rose-300/70 normal-case tracking-normal font-normal">{prettifyStrategyId(session.strategyId)}</span>
@@ -277,7 +277,7 @@ function ActiveSession({
           <span className="text-fa-frost-bright">${session.currentBalance.toFixed(2)}</span>
           <PnLDisplay pnl={pnl} pnlPct={pnlPct} pnlUp={false} />
         </div>
-        <div className="mt-1.5 flex items-center gap-3 text-[10px] tabular-nums">
+        <div className="mt-1.5 flex items-center gap-3 fa-caption tabular-nums">
           <div className="ml-auto flex items-center gap-3 shrink-0">
             <LedgerButton session={session} />
             <button
@@ -299,7 +299,7 @@ function ActiveSession({
       {/* Row 1 — data only. Fans across the full content width via justify-between so the leftmost
           item hugs the card edge and the rightmost item ends at the right edge — aligning with the
           Stop button on row 2 below. */}
-      <div className="flex items-center justify-between gap-x-3 text-[10px] tabular-nums">
+      <div className="flex items-center justify-between gap-x-3 fa-caption tabular-nums">
         <span className="text-fa-frost-dim uppercase tracking-wider inline-flex items-center gap-1">
           <CircleDollarSign className="h-3 w-3 fa-paper-pulse" aria-label="Paper trading is active" />
           Paper · <span className="text-fa-frost normal-case tracking-normal">{prettifyStrategyId(session.strategyId)}</span>
@@ -333,7 +333,7 @@ function ActiveSession({
       {/* Row 2 — open-bet status (left, optional) and the action buttons (right, always present).
           Buttons share this row with the betting text per design; when no bet is live, the left
           side is empty and the buttons sit alone at the right. */}
-      <div className="mt-1.5 flex items-center gap-3 text-[10px] tabular-nums">
+      <div className="mt-1.5 flex items-center gap-3 fa-caption tabular-nums">
         {openBet && (
           <span className="text-amber-300">
             betting ${openBet.size.toFixed(2)} on price {openBet.side === "UP" ? "↑" : "↓"}
@@ -460,11 +460,11 @@ function LedgerButton({ session }: { session: PaperSession }) {
       {open && pos && createPortal(
         <div
           style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
-          className="w-[min(460px,90vw)] rounded-md border border-fa-edge bg-fa-ink/95 backdrop-blur p-3 shadow-2xl text-[11px] tabular-nums"
+          className="w-[min(460px,90vw)] rounded-md border border-fa-edge bg-fa-ink/95 backdrop-blur p-3 shadow-2xl fa-caption tabular-nums"
           onMouseEnter={showPopover}
           onMouseLeave={scheduleClose}
         >
-          <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider mb-2">
+          <div className="text-fa-frost-dim fa-overline mb-2">
             Bet ledger · {session.bets.length} total
           </div>
           {recentBets.length === 0 ? (

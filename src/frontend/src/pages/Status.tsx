@@ -13,8 +13,8 @@ import { useListSessionsQuery, useListChaosRunsQuery, type NormalizedSession } f
 function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="fa-card p-4 space-y-1">
-      <div className="text-[10px] uppercase tracking-widest text-fa-frost-dim">{label}</div>
-      <div className="text-2xl font-light text-fa-frost-bright tabular-nums">{value}</div>
+      <div className="fa-overline text-fa-frost-dim">{label}</div>
+      <div className="fa-metric text-fa-frost-bright">{value}</div>
       {hint && <div className="text-xs text-fa-frost-dim/80">{hint}</div>}
     </div>
   );
@@ -36,7 +36,7 @@ function SessionRow({ session }: { session: NormalizedSession }) {
         <div className="text-sm text-fa-frost-bright font-medium">
           {session.symbol} · {session.interval}
         </div>
-        <div className="text-[11px] text-fa-frost-dim">
+        <div className="fa-caption text-fa-frost-dim">
           {session.strategyId}
         </div>
       </div>
@@ -48,7 +48,7 @@ function SessionRow({ session }: { session: NormalizedSession }) {
       </div>
       <div className="text-right tabular-nums shrink-0 w-14">
         <div className="text-sm text-fa-frost">{hitRate}</div>
-        <div className="text-[10px] text-fa-frost-dim">{session.betsPlaced} bets</div>
+        <div className="fa-caption text-fa-frost-dim">{session.betsPlaced} bets</div>
       </div>
       <Badge
         variant={status === "active" ? "success" : status === "bust" ? "danger" : "outline"}

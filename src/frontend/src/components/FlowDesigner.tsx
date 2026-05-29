@@ -280,7 +280,7 @@ function DesignerInner({
           <div className="min-w-0 flex-1">
             <h2 className="text-fa-frost-bright text-sm sm:text-base font-light truncate">{title}</h2>
             {isBuiltIn && (
-              <div className="text-fa-frost-dim text-[10px] sm:text-[11px] hidden sm:block">
+              <div className="text-fa-frost-dim fa-caption hidden sm:block">
                 read-only (built-in; duplicate to edit)
               </div>
             )}
@@ -471,10 +471,10 @@ function NodePalette({ catalogue }: { catalogue: Record<string, NodeCatalogueEnt
 
   return (
     <div className="w-[220px] shrink-0 border-r border-fa-edge bg-fa-ink-2/40 overflow-y-auto p-3 space-y-3">
-      <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider">Palette</div>
+      <div className="fa-overline text-fa-frost-dim">Palette</div>
       {order.filter((c) => grouped[c]).map((category) => (
         <div key={category}>
-          <div className="text-fa-frost-bright text-[11px] uppercase tracking-wider mb-1">{category}</div>
+          <div className="fa-overline text-fa-frost-bright mb-1">{category}</div>
           <div className="space-y-1">
             {grouped[category].map(([typeId]) => (
               <div
@@ -484,7 +484,7 @@ function NodePalette({ catalogue }: { catalogue: Record<string, NodeCatalogueEnt
                   e.dataTransfer.setData("application/reactflow", typeId);
                   e.dataTransfer.effectAllowed = "move";
                 }}
-                className="px-2 py-1.5 rounded-md border border-fa-edge bg-fa-glass text-fa-frost-bright text-[11px] cursor-grab active:cursor-grabbing hover:border-fa-frost/30 hover:bg-fa-glass-strong transition"
+                className="px-2 py-1.5 rounded-md border border-fa-edge bg-fa-glass text-fa-frost-bright fa-caption cursor-grab active:cursor-grabbing hover:border-fa-frost/30 hover:bg-fa-glass-strong transition"
                 title="Drag onto the canvas"
               >
                 {typeId}
@@ -526,14 +526,14 @@ function FlowNodeComponent({ data, selected }: { data: FaNodeData; selected: boo
   return (
     <div className={cn("rounded-lg border-2 text-fa-frost-bright transition-shadow", palette.card)}
          style={{ minWidth: 210, boxShadow: shadow }}>
-      <div className={cn("px-3 py-1.5 rounded-t-md text-[10px] uppercase tracking-wider font-semibold flex items-center gap-1", palette.header)}>
+      <div className={cn("px-3 py-1.5 rounded-t-md fa-overline font-semibold flex items-center gap-1", palette.header)}>
         {spec.category}
       </div>
       <div className="px-3 py-2 text-xs font-medium border-b border-white/10 text-white">{data.typeId}</div>
       <div className="py-2 grid grid-cols-2 gap-x-3">
         <div className="space-y-1">
           {spec.inputs.map((p) => (
-            <div key={p.name} className="relative flex items-center text-[10px] text-white/85 pl-2 pr-1 py-0.5">
+            <div key={p.name} className="relative flex items-center fa-caption text-white/85 pl-2 pr-1 py-0.5">
               <Handle
                 type="target"
                 position={Position.Left}
@@ -544,7 +544,7 @@ function FlowNodeComponent({ data, selected }: { data: FaNodeData; selected: boo
             </div>
           ))}
           {data.dynamicInputs.map((name) => (
-            <div key={`dyn-${name}`} className="relative flex items-center text-[10px] text-white/70 pl-2 pr-1 py-0.5">
+            <div key={`dyn-${name}`} className="relative flex items-center fa-caption text-white/70 pl-2 pr-1 py-0.5">
               <Handle
                 type="target"
                 position={Position.Left}
@@ -557,7 +557,7 @@ function FlowNodeComponent({ data, selected }: { data: FaNodeData; selected: boo
         </div>
         <div className="space-y-1">
           {spec.outputs.map((p) => (
-            <div key={p.name} className="relative flex items-center justify-end text-[10px] text-white/85 pr-2 pl-1 py-0.5">
+            <div key={p.name} className="relative flex items-center justify-end fa-caption text-white/85 pr-2 pl-1 py-0.5">
               <span className="mr-1 truncate" title={`${p.name} (${p.typeTag})`}>{p.name}</span>
               <Handle
                 type="source"
@@ -606,15 +606,15 @@ function NodeInspector({ node, catalogue, onChange, onDelete, disabled }:
     <div className="p-4 space-y-3">
       <div>
         <div className="text-fa-frost-bright text-sm">{typeId}</div>
-        <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider">{spec.category}</div>
+        <div className="fa-overline text-fa-frost-dim">{spec.category}</div>
       </div>
       {Object.entries(spec.params).length === 0 && (
         <div className="text-fa-frost-dim text-xs">No params for this node type.</div>
       )}
       {Object.entries(spec.params).map(([k, def]) => (
         <label key={k} className="block">
-          <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider mb-1">
-            {k} <span className="normal-case text-[10px] text-fa-frost-dim/70">({def.typeTag})</span>
+          <div className="fa-overline text-fa-frost-dim mb-1">
+            {k} <span className="normal-case fa-caption text-fa-frost-dim/70">({def.typeTag})</span>
           </div>
           <input
             disabled={disabled}
@@ -627,7 +627,7 @@ function NodeInspector({ node, catalogue, onChange, onDelete, disabled }:
             }}
             className="w-full bg-fa-glass border border-fa-edge rounded-md px-2 py-1 text-fa-frost-bright text-xs font-mono disabled:opacity-50"
           />
-          {def.description && <div className="text-fa-frost-dim/70 text-[10px] mt-0.5">{def.description}</div>}
+          {def.description && <div className="text-fa-frost-dim/70 fa-caption mt-0.5">{def.description}</div>}
         </label>
       ))}
       {deleteButton && <div className="pt-1 border-t border-fa-edge">{deleteButton}</div>}
@@ -658,23 +658,23 @@ function RunInspectPanel({
           onClick={onRun}
           disabled={isRunning || !selectedNode}
           title={selectedNode ? `Run ${selectedNode.data.typeId}` : "Select a node to run it"}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-fa-frost-bright/15 hover:bg-fa-frost-bright/25 text-fa-frost-bright text-[11px] border border-fa-frost-bright/30 disabled:opacity-40 disabled:cursor-not-allowed transition"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-fa-frost-bright/15 hover:bg-fa-frost-bright/25 text-fa-frost-bright fa-caption border border-fa-frost-bright/30 disabled:opacity-40 disabled:cursor-not-allowed transition"
         >
           {isRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
           {isRunning ? "Running…" : "Run node"}
         </button>
       </div>
       {!selectedNode && (
-        <div className="text-fa-frost-dim text-[11px]">Select a node on the canvas to run it through the sandbox.</div>
+        <div className="text-fa-frost-dim fa-caption">Select a node on the canvas to run it through the sandbox.</div>
       )}
       {selectedNode && !output && !isRunning && (
-        <div className="text-fa-frost-dim text-[11px]">
+        <div className="text-fa-frost-dim fa-caption">
           Node: <span className="text-fa-frost-bright font-mono">{selectedNode.data.typeId}</span>
           <br />Click "Run node" to execute through the sandbox sidecar.
         </div>
       )}
       {output && (
-        <pre className="text-[10px] font-mono text-fa-frost bg-fa-ink rounded-md p-2 overflow-auto max-h-28 whitespace-pre-wrap leading-relaxed">
+        <pre className="fa-caption font-mono text-fa-frost bg-fa-ink rounded-md p-2 overflow-auto max-h-28 whitespace-pre-wrap">
           {output}
         </pre>
       )}

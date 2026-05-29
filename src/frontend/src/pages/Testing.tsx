@@ -221,7 +221,7 @@ function windowCandlesToDays(windowLength: number, interval: string): number {
 function Field({ label, info, children }: { label: string; info?: { title: string; body: React.ReactNode }; children: React.ReactNode }) {
   return (
     <label className="block">
-      <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider mb-1 flex items-center gap-1">
+      <div className="fa-overline text-fa-frost-dim mb-1 flex items-center gap-1">
         <span>{label}</span>
         {info && (
           <InfoTip width={280} content={<TipBody title={info.title}>{info.body}</TipBody>}>
@@ -257,9 +257,9 @@ function RailMetric({
     : "text-fa-frost-bright";
   return (
     <div className="min-w-0" title={tooltip}>
-      <div className="text-[10px] uppercase tracking-wider text-fa-frost-dim">{label}</div>
-      <div className={cn("text-lg tabular-nums leading-tight mt-0.5", toneColor)}>{value}</div>
-      {sub && <div className="text-[10px] text-fa-frost-dim/70 mt-0.5 tabular-nums">{sub}</div>}
+      <div className="fa-overline text-fa-frost-dim">{label}</div>
+      <div className={cn("fa-metric-sm mt-0.5", toneColor)}>{value}</div>
+      {sub && <div className="fa-caption text-fa-frost-dim/70 mt-0.5 tabular-nums">{sub}</div>}
     </div>
   );
 }
@@ -328,7 +328,7 @@ function RiskPreview({
             <span className={cn("transition-transform inline-block text-fa-frost-dim group-hover:text-fa-frost-bright", expanded ? "rotate-90" : "")}>▸</span>
             Risk preview
           </div>
-          <div className="text-fa-frost-dim text-[11px]">
+          <div className="text-fa-frost-dim fa-caption">
             {modelName ? <><span className="text-fa-frost-bright">{modelName}</span> · </> : null}
             <span className="font-mono">{interval}</span> · {hitRate.toFixed(1)}% hit rate
             <span className="text-fa-frost-dim/60"> ({sourceCaveat})</span>
@@ -344,10 +344,10 @@ function RiskPreview({
           "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border tabular-nums shrink-0",
           toneClass,
         )}>
-          <span className="text-[9px]">●</span>
+          <span className="fa-caption">●</span>
           {metrics.verdict.label}
           {source !== "default" && metrics.p > 0.5 && (
-            <span className="text-[10px] opacity-70">· {(metrics.pRuin * 100).toFixed(metrics.pRuin < 0.001 ? 4 : metrics.pRuin < 0.01 ? 3 : 2)}% bust</span>
+            <span className="fa-caption opacity-70">· {(metrics.pRuin * 100).toFixed(metrics.pRuin < 0.001 ? 4 : metrics.pRuin < 0.01 ? 3 : 2)}% bust</span>
           )}
         </span>
       </button>
@@ -418,7 +418,7 @@ function RiskPreview({
             </div>
           </div>
 
-          <div className="space-y-1.5 text-[11px]">
+          <div className="space-y-1.5 fa-caption">
             {metrics.p > 0.5 && safeBet1pct != null && (
               <div className="text-fa-frost-dim">
                 <span className="text-fa-frost-bright">For &lt; 1% bust risk</span> at {hitRate.toFixed(1)}% hit rate with ${bankroll.toLocaleString()} bankroll, bet ≤ <span className="text-emerald-300 tabular-nums">${safeBet1pct.toFixed(2)}</span>.
@@ -436,7 +436,7 @@ function RiskPreview({
             )}
           </div>
 
-          <div className="text-[11px] text-fa-frost-dim leading-relaxed space-y-2 max-w-3xl border-l-2 border-fa-edge pl-3">
+          <div className="fa-caption text-fa-frost-dim space-y-2 max-w-3xl border-l-2 border-fa-edge pl-3">
             <p>
               <span className="text-fa-frost-bright">Lives</span> = bankroll ÷ bet. It's how many consecutive losses you can take from a cold start before the bankroll can't fund the next bet. With ${bankroll.toLocaleString()} and a ${bet} flat bet that's{" "}
               <span className="text-fa-frost-bright">{metrics.lives}</span> lives.
@@ -461,8 +461,8 @@ function RiskPreview({
 function Stat({ label, value, valueClass, hint }: { label: string; value: string; valueClass?: string; hint?: string }) {
   return (
     <div title={hint}>
-      <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider">{label}</div>
-      <div className={cn("text-fa-frost-bright text-lg font-light tabular-nums", valueClass)}>{value}</div>
+      <div className="fa-overline text-fa-frost-dim">{label}</div>
+      <div className={cn("fa-metric-sm text-fa-frost-bright", valueClass)}>{value}</div>
     </div>
   );
 }
@@ -480,7 +480,7 @@ function BacktestReport({ bt, models }: { bt: Backtest; models: Model[] }) {
           </div>
           <div className="text-fa-frost-dim text-xs">
             {new Date(bt.startTime).toLocaleDateString()} → {new Date(bt.endTime).toLocaleDateString()} ·{" "}
-            <span className={cn("uppercase text-[10px] tracking-wider",
+            <span className={cn("fa-overline",
               bt.status === "complete" ? "text-emerald-300" :
               bt.status === "running" ? "text-amber-300" : "text-rose-300")}>
               {bt.status}
@@ -648,7 +648,7 @@ function BacktestHistory({ rows, models, runningProgress }:
   return (
     <div className="fa-card px-5 py-4 flex-1 min-h-0 flex flex-col">
       <div className="flex items-center justify-between mb-3 shrink-0">
-        <div className="text-fa-frost-bright text-sm font-medium">Recent runs</div>
+        <div className="fa-section-title">Recent runs</div>
         <button onClick={onClear} disabled={isClearing}
           className="inline-flex items-center gap-1.5 text-xs text-fa-frost-dim hover:text-rose-300 transition disabled:opacity-50"
           title="Delete every backtest run shown in the table">
@@ -671,7 +671,7 @@ function BacktestHistory({ rows, models, runningProgress }:
               <th className="font-normal pb-2 pr-4 text-center"><SortHeader<RunKey> {...headerProps("hitRate")}>Hit rate</SortHeader></th>
               <th className="font-normal pb-2 pr-4 text-right"><SortHeader<RunKey> {...headerProps("finalBalance")} align="right">Balance</SortHeader></th>
               <th className="font-normal pb-2 pr-4 text-right"><SortHeader<RunKey> {...headerProps("finalPct")} align="right">Δ %</SortHeader></th>
-              <th className="font-normal pb-2 pr-4 text-center" aria-label="Peak bet multiplier vs initial"><SortHeader<RunKey> {...headerProps("maxMartingale")}><span className="text-[10px] opacity-60">×</span></SortHeader></th>
+              <th className="font-normal pb-2 pr-4 text-center" aria-label="Peak bet multiplier vs initial"><SortHeader<RunKey> {...headerProps("maxMartingale")}><span className="fa-caption opacity-60">×</span></SortHeader></th>
             </tr>
           </thead>
           <tbody>
@@ -708,8 +708,8 @@ function BacktestHistory({ rows, models, runningProgress }:
                   <td className="py-1.5 pr-4 text-fa-frost-dim" title={new Date(r.startedAt).toLocaleString()}>{fmtRunTime(r.startedAt)}</td>
                   <td className="py-1.5 pr-4 text-fa-frost-bright text-center"><SymbolIcon symbol={r.symbol} className="h-5 w-5" /></td>
                   <td className="py-1.5 pr-4 tabular-nums leading-tight">
-                    <div className="text-fa-frost-bright text-[12px]">from {fmtRunDate(r.startTime)}</div>
-                    <div className="text-fa-frost-dim text-[10px]">to {fmtRunDate(r.endTime)}</div>
+                    <div className="text-fa-frost-bright text-xs">from {fmtRunDate(r.startTime)}</div>
+                    <div className="text-fa-frost-dim fa-caption">to {fmtRunDate(r.endTime)}</div>
                   </td>
                   <td className="py-1.5 pr-4 text-center text-fa-frost-bright tabular-nums">
                     {sweep ? `1–${sweep.maxDay} d` : `${Math.round((r.endTime - r.startTime) / 86_400_000)} d`}
@@ -720,16 +720,16 @@ function BacktestHistory({ rows, models, runningProgress }:
                       {isBustBatch && sweep ? (() => {
                         const n = sweep.rungs;
                         if (sweep.pending) {
-                          return <span className="ml-1.5 text-[9px] uppercase tracking-wider rounded-full px-1.5 py-0.5 border text-cyan-300 bg-cyan-300/10 border-cyan-300/30" title={`Bust test in progress — running ${sweep.done} of ${n} windows.`}>bust test · running {sweep.done}/{n}</span>;
+                          return <span className="ml-1.5 fa-overline rounded-full px-1.5 py-0.5 border text-cyan-300 bg-cyan-300/10 border-cyan-300/30" title={`Bust test in progress — running ${sweep.done} of ${n} windows.`}>bust test · running {sweep.done}/{n}</span>;
                         }
                         const survived = !sweep.anyBust;
                         const verdict = survived ? `no bust ≤ ${n}d` : `bust @ day ${sweep.firstBustDay}`;
                         const cls = survived ? "text-emerald-300 bg-emerald-300/10 border-emerald-300/30" : "text-rose-300 bg-rose-300/10 border-rose-300/30";
-                        return <span className={cn("ml-1.5 text-[9px] uppercase tracking-wider rounded-full px-1.5 py-0.5 border", cls)} title={`Bust test: ${n} backtest${n === 1 ? "" : "s"} over the last 1…${n} days. Click to open the full per-window report.`}>bust test · {verdict}</span>;
+                        return <span className={cn("ml-1.5 fa-overline rounded-full px-1.5 py-0.5 border", cls)} title={`Bust test: ${n} backtest${n === 1 ? "" : "s"} over the last 1…${n} days. Click to open the full per-window report.`}>bust test · {verdict}</span>;
                       })() : !isRunningRow ? (() => {
                         const cls = isNoBets ? "text-amber-300 bg-amber-300/10 border-amber-300/30" : isBust ? "text-rose-300 bg-rose-300/10 border-rose-300/30" : "text-emerald-300 bg-emerald-300/10 border-emerald-300/30";
                         const label = isNoBets ? "no bets" : isBust ? "went bust" : "survived";
-                        return <span className={cn("text-[9px] uppercase tracking-wider rounded-full px-1.5 py-0.5 border whitespace-nowrap", cls)}>{label}</span>;
+                        return <span className={cn("fa-overline rounded-full px-1.5 py-0.5 border whitespace-nowrap", cls)}>{label}</span>;
                       })() : null}
                     </div>
                   </td>
@@ -918,7 +918,7 @@ function BacktestTab({ models, eligible }: { models: Model[]; eligible: Model[] 
     <div className="flex-1 min-h-0 flex flex-col gap-4">
       <div className="fa-card px-5 py-4 shrink-0">
         <div className="flex items-center justify-between mb-4">
-          <div className="text-fa-frost-bright text-sm font-medium inline-flex items-center gap-1.5">
+          <div className="fa-section-title inline-flex items-center gap-1.5">
             Run a new backtest
             <InfoTip width={320} content={<TipBody title="Backtest">Backtest replays the selected staking strategy against historical candles. With Allow borrow on, balance can dip negative; with strict-bust on, the run halts the moment the next sized bet would exceed the bankroll. A/B mode posts one run per model × strategy in parallel, grouped by batch id.</TipBody>}>
               <button type="button" aria-label="About backtests" className="text-fa-frost-dim/70 hover:text-fa-frost-bright transition leading-none">
@@ -927,7 +927,7 @@ function BacktestTab({ models, eligible }: { models: Model[]; eligible: Model[] 
             </InfoTip>
           </div>
           {isABMode && (
-            <span className="text-[10px] uppercase tracking-wider text-amber-300 bg-amber-300/10 border border-amber-300/30 rounded-full px-2 py-0.5">
+            <span className="fa-overline text-amber-300 bg-amber-300/10 border border-amber-300/30 rounded-full px-2 py-0.5">
               A/B · {fanout.length} runs · {modelIds.length}m × {strategyIds.length}s
             </span>
           )}
@@ -1037,7 +1037,7 @@ function BacktestTab({ models, eligible }: { models: Model[]; eligible: Model[] 
           </div>
         </div>
         {isABMode && (
-          <p className="text-fa-frost-dim/70 text-[11px] mt-3">
+          <p className="text-fa-frost-dim/70 fa-caption mt-3">
             A/B mode posts {fanout.length} runs in parallel ({modelIds.length} model{modelIds.length > 1 ? "s" : ""} × {strategyIds.length} strateg{strategyIds.length > 1 ? "ies" : "y"}), grouped by batch id.
           </p>
         )}
@@ -1256,7 +1256,7 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
     <div className="flex-1 min-h-0 flex flex-col gap-4">
       {/* Launch form */}
       <div className="fa-card px-5 py-4 shrink-0">
-        <div className="text-fa-frost-bright text-sm font-medium mb-4 inline-flex items-center gap-1.5">
+        <div className="fa-section-title mb-4 inline-flex items-center gap-1.5">
           Run a chaos test
           <InfoTip width={360} content={<TipBody title="Chaos test">A chaos test draws many random windows from history and replays each one for the selected model + strategy. It reports how often the strategy busts (bust rate), the spread of profit outcomes (P5/P50/P95), the worst drawdown seen, and a Pass verdict (bust rate 0 AND median profit &gt; 0). It answers "does this survive random starting points?" rather than a single fixed window.</TipBody>}>
             <button type="button" aria-label="About chaos tests" className="text-fa-frost-dim/70 hover:text-fa-frost-bright transition leading-none">
@@ -1352,7 +1352,7 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
           the Run chaos test button above. Each row drills into its per-window samples. */}
       {sortedChaos.length > 0 ? (
         <div className="fa-card px-5 py-4 flex-1 min-h-0 flex flex-col">
-          <div className="text-fa-frost-bright text-sm font-medium mb-3 shrink-0">Chaos run history</div>
+          <div className="fa-section-title mb-3 shrink-0">Chaos run history</div>
           <div className="flex-1 min-h-0 overflow-auto">
             <table className="fa-table-bordered min-w-full text-xs [&_th]:whitespace-nowrap [&_td]:whitespace-nowrap">
               <thead className="text-fa-frost-dim sticky top-0 z-10 bg-fa-ink/95 backdrop-blur">
@@ -1402,7 +1402,7 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
                         {cr.worstDrawdown == null ? "—" : cr.worstDrawdown === 0 ? "$0.00" : `-$${cr.worstDrawdown.toFixed(2)}`}
                       </td>
                       <td className="pr-4 text-center">
-                        <span className={cn("text-[9px] uppercase tracking-wider rounded-full px-1.5 py-0.5 border",
+                        <span className={cn("fa-overline rounded-full px-1.5 py-0.5 border",
                           isRunningCr ? "text-cyan-300 bg-cyan-300/10 border-cyan-300/30" :
                           cr.pass ? "text-emerald-300 bg-emerald-300/10 border-emerald-300/30" : "text-rose-300 bg-rose-300/10 border-rose-300/30")}>
                           {isRunningCr ? "running" : cr.pass ? "pass" : "fail"}

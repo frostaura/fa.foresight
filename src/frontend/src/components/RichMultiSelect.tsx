@@ -138,7 +138,7 @@ export default function RichMultiSelect({
           {selectedOptions.map((o) => (
             <span
               key={o.value}
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-fa-glass border border-fa-edge text-fa-frost-bright text-[11px] shrink-0 max-w-[120px] truncate"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-fa-glass border border-fa-edge text-fa-frost-bright fa-caption shrink-0 max-w-[120px] truncate"
             >
               {o.label}
             </span>
@@ -151,7 +151,7 @@ export default function RichMultiSelect({
         <span className="text-fa-frost-bright text-xs tabular-nums shrink-0">
           {selectedOptions.length} selected
         </span>
-        <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-fa-glass border border-fa-edge text-fa-frost-bright text-[11px] shrink-0 max-w-[100px] truncate">
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-fa-glass border border-fa-edge text-fa-frost-bright fa-caption shrink-0 max-w-[100px] truncate">
           {selectedOptions[0].label}
         </span>
       </span>
@@ -161,7 +161,7 @@ export default function RichMultiSelect({
   return (
     <div ref={containerRef} className={cn("relative", className)}>
       {label && (
-        <div className="text-fa-frost-dim text-[10px] uppercase tracking-wider mb-1">
+        <div className="fa-overline text-fa-frost-dim mb-1">
           {label}
         </div>
       )}
@@ -344,7 +344,7 @@ export default function RichMultiSelect({
                         {opt.label}
                       </span>
                       {opt.sublabel && (
-                        <span className="block truncate text-fa-frost-dim text-[10px] leading-tight mt-0.5">
+                        <span className="block truncate text-fa-frost-dim fa-caption mt-0.5">
                           {opt.sublabel}
                         </span>
                       )}
@@ -352,11 +352,11 @@ export default function RichMultiSelect({
 
                     {/* Right side — action pill for locked rows, otherwise the stat chip */}
                     {isLocked ? (
-                      <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-medium text-amber-200 bg-amber-400/10 border border-amber-400/30 rounded px-1.5 py-0.5">
+                      <span className="shrink-0 inline-flex items-center gap-1 fa-caption font-medium text-amber-200 bg-amber-400/10 border border-amber-400/30 rounded px-1.5 py-0.5">
                         {opt.actionLabel ?? "Action"}
                       </span>
                     ) : opt.stat ? (
-                      <span className="shrink-0 text-[10px] tabular-nums text-fa-frost-dim bg-fa-glass border border-fa-edge rounded px-1.5 py-0.5">
+                      <span className="shrink-0 fa-caption tabular-nums text-fa-frost-dim bg-fa-glass border border-fa-edge rounded px-1.5 py-0.5">
                         {opt.stat}
                       </span>
                     ) : null}

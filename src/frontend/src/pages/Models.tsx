@@ -201,7 +201,7 @@ function DefinitionsTab({
         <div className="flex flex-wrap items-center gap-2 ml-auto">
           {/* Active | Archived segmented switch */}
           <div
-            className="inline-flex items-center rounded-md border border-fa-edge bg-fa-glass overflow-hidden text-[11px]"
+            className="inline-flex items-center rounded-md border border-fa-edge bg-fa-glass overflow-hidden fa-caption"
             title="Switch between active models and archived models."
           >
             {(["active", "archived"] as ArchiveView[]).map((view) => {
@@ -230,7 +230,7 @@ function DefinitionsTab({
           {/* Description mode — Simple | Data-scientist segmented control (active view only) */}
           {archiveView === "active" && (
             <div
-              className="inline-flex items-center rounded-md border border-fa-edge bg-fa-glass overflow-hidden text-[11px]"
+              className="inline-flex items-center rounded-md border border-fa-edge bg-fa-glass overflow-hidden fa-caption"
               title="Switch the AI-generated description shown on each row between plain-language (Simple) and technical (Data-scientist). Falls back to the static description when the AI variant is not yet available."
             >
               {(["simple", "technical"] as DescriptionMode[]).map((mode) => {
@@ -258,7 +258,7 @@ function DefinitionsTab({
           )}
 
           {/* Sort picker */}
-          <div className="inline-flex items-center gap-1 text-[11px] text-fa-frost-dim">
+          <div className="inline-flex items-center gap-1 fa-caption text-fa-frost-dim">
             <span className="uppercase tracking-wider">Sort</span>
             {(["score", "name"] as const).map((k) => {
               const active = sortKey === k;
@@ -276,7 +276,7 @@ function DefinitionsTab({
                   )}
                 >
                   <span className="capitalize">{k}</span>
-                  {arrow && <span className="text-[10px] leading-none">{arrow}</span>}
+                  {arrow && <span className="fa-caption">{arrow}</span>}
                 </button>
               );
             })}
@@ -372,8 +372,8 @@ function TopPerformersTicker({ models }: { models: Model[] }) {
       out.push({
         key: `leader-${iv}`,
         content: (
-          <span className="inline-flex items-baseline gap-2 text-[12px]">
-            <span className="font-mono text-fa-frost-dim text-[10px] uppercase tracking-widest">
+          <span className="inline-flex items-baseline gap-2 text-xs">
+            <span className="font-mono fa-overline text-fa-frost-dim">
               {iv}
             </span>
             <span className="text-fa-frost-bright">{leader.m.name}</span>
@@ -391,9 +391,9 @@ function TopPerformersTicker({ models }: { models: Model[] }) {
       out.push({
         key: `model-${m.id}`,
         content: (
-          <span className="inline-flex items-baseline gap-1.5 text-[12px]">
+          <span className="inline-flex items-baseline gap-1.5 text-xs">
             <span className="text-fa-frost/80 truncate max-w-[140px]">{m.name}</span>
-            <span className={cn("tabular-nums text-[11px]", hueClass)}>{scoreStr}</span>
+            <span className={cn("tabular-nums fa-caption", hueClass)}>{scoreStr}</span>
           </span>
         ),
       });
@@ -403,7 +403,7 @@ function TopPerformersTicker({ models }: { models: Model[] }) {
       out.push({
         key: "no-data-hint",
         content: (
-          <span className="text-[11px] text-fa-frost-dim/70 italic">
+          <span className="fa-caption text-fa-frost-dim/70 italic">
             Run a backtest to populate the leaderboard
           </span>
         ),
@@ -419,7 +419,7 @@ function TopPerformersTicker({ models }: { models: Model[] }) {
       style={{ height: "2.25rem" }}
       title="Top performers — best model per interval (hit rate) and all scored models. ~ = walk-forward estimate; plain % = backtest out-of-sample."
     >
-      <span className="text-[9px] uppercase tracking-[0.14em] text-fa-frost-dim shrink-0 select-none">
+      <span className="fa-overline text-fa-frost-dim shrink-0 select-none">
         Top performers
       </span>
       <div className="flex-1 min-w-0 overflow-hidden">
@@ -527,7 +527,7 @@ function ModelRow({
           {/* Title line */}
           <div className="flex items-center gap-2 flex-wrap">
             <KindIcon className="h-4 w-4 text-fa-frost-bright shrink-0" />
-            <span className="text-fa-frost-bright text-sm font-medium" title={model.name}>
+            <span className="fa-section-title" title={model.name}>
               {model.name}
             </span>
             {model.isBuiltIn && (
@@ -538,7 +538,7 @@ function ModelRow({
             )}
             {/* Default badge */}
             {!isArchivedView && isEffectiveDefault && (
-              <span className="text-amber-300 flex items-center gap-1 text-[10px] uppercase tracking-wider">
+              <span className="text-amber-300 flex items-center gap-1 fa-overline">
                 <Star className="h-3 w-3 fill-amber-300" /> Default
               </span>
             )}
@@ -552,14 +552,14 @@ function ModelRow({
           )}
 
           {/* Stats row */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-fa-frost-dim pt-0.5">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 fa-caption text-fa-frost-dim pt-0.5">
             <div>
-              <span className="uppercase tracking-wider text-[10px]">Kind</span>
+              <span className="fa-overline">Kind</span>
               <span className="text-fa-frost-bright ml-1.5">{model.kind === "llm" ? "LLM" : "Deterministic"}</span>
             </div>
             {["1m", "5m", "15m"].map((iv) => (
               <div key={iv} title={`Walk-forward validation accuracy of the ${iv} variant.`}>
-                <span className="uppercase tracking-wider text-[10px]">{iv.toUpperCase()}</span>
+                <span className="fa-overline">{iv.toUpperCase()}</span>
                 <span className="text-fa-frost-bright tabular-nums ml-1.5">
                   {intervalAccs[iv] == null ? "—" : `${(intervalAccs[iv] * 100).toFixed(1)}%`}
                 </span>
@@ -572,7 +572,7 @@ function ModelRow({
                 : "Arithmetic mean of the per-interval walk-forward accuracies shown above.";
               return (
                 <div title={tooltip}>
-                  <span className="uppercase tracking-wider text-[10px]">Score</span>
+                  <span className="fa-overline">Score</span>
                   <span className={cn("tabular-nums ml-1.5", score == null ? "text-fa-frost-dim" : pnlClass(score - 50))}>
                     {score == null ? "—" : `${score.toFixed(1)}%`}
                   </span>
@@ -583,21 +583,21 @@ function ModelRow({
 
           {/* Training range / status footnotes */}
           {hasTrainingRange && (
-            <div className="text-[10px] text-fa-frost-dim/70 break-words" title="The candle range the model was trained on.">
+            <div className="fa-caption text-fa-frost-dim/70 break-words" title="The candle range the model was trained on.">
               Trained {model.trainSymbol}/{model.trainInterval} · {fmtRunDate(new Date(model.trainStartMs as number))} → {fmtRunDate(new Date(model.trainEndMs as number))}
             </div>
           )}
           {isTrainingNow && (
-            <div className="text-[10px] text-fa-frost-dim/70" title="Training runs on the server and keeps going if you close this page.">
+            <div className="fa-caption text-fa-frost-dim/70" title="Training runs on the server and keeps going if you close this page.">
               Training in progress (server-side){model.trainingStartedAt ? ` · started ${fmtRunDate(new Date(model.trainingStartedAt))}` : ""} — safe to leave this page.
             </div>
           )}
           {!isTrainingNow && model.trainingStatus === "failed" && (
-            <div className="text-rose-300 text-[11px]" title={model.trainingError ?? undefined}>
+            <div className="text-rose-300 fa-caption" title={model.trainingError ?? undefined}>
               Last training failed: {model.trainingError ?? "unknown error"}
             </div>
           )}
-          {error && <div className="text-rose-300 text-[11px]">{error}</div>}
+          {error && <div className="text-rose-300 fa-caption">{error}</div>}
         </div>
 
         {/* ── Actions cluster ── */}
@@ -621,7 +621,7 @@ function ModelRow({
             <button
               onClick={onTrain}
               disabled={isTrainingNow}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-bright text-[11px] transition disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-bright fa-caption transition disabled:opacity-50"
             >
               {isTrainingNow ? <Loader2 className="h-3 w-3 animate-spin" /> : <Cpu className="h-3 w-3" />}
               {isTrainingNow ? "Training…" : "Train"}
@@ -633,7 +633,7 @@ function ModelRow({
             <button
               onClick={onUnarchive}
               disabled={isUnarchiving}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-bright text-[11px] transition disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-bright fa-caption transition disabled:opacity-50"
             >
               {isUnarchiving ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArchiveRestore className="h-3 w-3" />}
               Unarchive
@@ -642,7 +642,7 @@ function ModelRow({
             <button
               onClick={onArchive}
               disabled={isArchiving}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-dim hover:text-fa-frost-bright text-[11px] transition disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-fa-glass-strong text-fa-frost-dim hover:text-fa-frost-bright fa-caption transition disabled:opacity-50"
             >
               {isArchiving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Archive className="h-3 w-3" />}
               Archive
@@ -653,7 +653,7 @@ function ModelRow({
           {!isArchivedView && !model.isBuiltIn && (
             <button
               onClick={onDelete}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-rose-300/10 hover:border-rose-300/30 text-fa-frost-dim hover:text-rose-300 text-[11px] transition"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-fa-edge bg-fa-glass hover:bg-rose-300/10 hover:border-rose-300/30 text-fa-frost-dim hover:text-rose-300 fa-caption transition"
             >
               <Trash2 className="h-3 w-3" />
               Delete

@@ -50,21 +50,21 @@ function SessionCard({ session }: { session: NormalizedSession }) {
       <CardContent>
         <div className="grid grid-cols-3 gap-3 text-center">
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-fa-frost-dim">Balance</div>
+            <div className="fa-overline text-fa-frost-dim">Balance</div>
             <div className="text-sm font-medium text-fa-frost-bright tabular-nums">
               ${session.currentBalance.toFixed(2)}
             </div>
-            <div className={`text-[10px] tabular-nums ${pnl >= 0 ? "text-fa-success" : "text-fa-danger"}`}>
+            <div className={`fa-caption tabular-nums ${pnl >= 0 ? "text-fa-success" : "text-fa-danger"}`}>
               {pnlSign}{pnl.toFixed(2)}
             </div>
           </div>
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-fa-frost-dim">Hit rate</div>
+            <div className="fa-overline text-fa-frost-dim">Hit rate</div>
             <div className="text-sm font-medium text-fa-frost tabular-nums">{hitRate}</div>
-            <div className="text-[10px] text-fa-frost-dim">{session.betsPlaced} bets</div>
+            <div className="fa-caption text-fa-frost-dim">{session.betsPlaced} bets</div>
           </div>
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-fa-frost-dim">Strategy</div>
+            <div className="fa-overline text-fa-frost-dim">Strategy</div>
             <div className="text-sm font-medium text-fa-frost truncate">{session.strategyId}</div>
           </div>
         </div>

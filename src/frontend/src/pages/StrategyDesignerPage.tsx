@@ -118,7 +118,7 @@ export default function StrategyDesignerPage() {
               {strategy.technicalDescription &&
                 strategy.technicalDescription !== displayDescription && (
                   <div className="border-t border-fa-edge pt-3">
-                    <div className="text-[10px] uppercase tracking-wider text-fa-frost-dim/60 mb-1">
+                    <div className="fa-overline text-fa-frost-dim/60 mb-1">
                       Technical detail
                     </div>
                     <p className="text-fa-frost-dim text-sm leading-relaxed">
@@ -140,13 +140,13 @@ export default function StrategyDesignerPage() {
               (strategy.scoresByInterval &&
                 Object.keys(strategy.scoresByInterval).length > 0)) && (
               <div className="fa-card px-5 py-4 flex flex-col gap-3">
-                <div className="text-[10px] uppercase tracking-wider text-fa-frost-dim/60">
+                <div className="fa-overline text-fa-frost-dim/60">
                   Performance
                 </div>
-                <div className="flex flex-wrap gap-x-6 gap-y-3 text-[11px] text-fa-frost-dim">
+                <div className="flex flex-wrap gap-x-6 gap-y-3 fa-caption text-fa-frost-dim">
                   {strategy.averageScore != null && (
                     <div>
-                      <div className="uppercase tracking-wider text-[10px]">Avg score</div>
+                      <div className="fa-overline">Avg score</div>
                       <div className="text-fa-frost-bright tabular-nums">
                         {strategy.averageScore.toFixed(1)}%
                       </div>
@@ -154,14 +154,14 @@ export default function StrategyDesignerPage() {
                   )}
                   {strategy.backtestsRun != null && strategy.backtestsRun > 0 && (
                     <div>
-                      <div className="uppercase tracking-wider text-[10px]">Backtests</div>
+                      <div className="fa-overline">Backtests</div>
                       <div className="text-fa-frost-bright">{strategy.backtestsRun}</div>
                     </div>
                   )}
                   {strategy.scoresByInterval &&
                     Object.entries(strategy.scoresByInterval).map(([iv, score]) => (
                       <div key={iv}>
-                        <div className="uppercase tracking-wider text-[10px]">{iv.toUpperCase()}</div>
+                        <div className="fa-overline">{iv.toUpperCase()}</div>
                         <div className="text-fa-frost-bright tabular-nums">
                           {score.toFixed(1)}%
                         </div>

@@ -102,7 +102,7 @@ export default function InfoTip({ content, children, width = 264 }: { content: R
           <div
             role="tooltip"
             style={{ position: "fixed", left: pos.left, top: pos.top, bottom: pos.bottom, width }}
-            className="z-[100] pointer-events-none rounded-lg border border-fa-edge bg-fa-ink-2/95 px-3 py-2 text-[11px] leading-relaxed text-fa-frost shadow-2xl shadow-fa-ink/80 backdrop-blur-md"
+            className="z-[100] pointer-events-none rounded-lg border border-fa-edge bg-fa-ink-2/95 px-3 py-2 fa-caption text-fa-frost shadow-2xl shadow-fa-ink/80 backdrop-blur-md"
           >
             {content}
           </div>,

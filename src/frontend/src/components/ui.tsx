@@ -118,7 +118,7 @@ Checkbox.displayName = "Checkbox";
 export function LivePulse({ label = "Live", title }: { label?: string; title?: string }) {
   return (
     <span
-      className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-fa-success"
+      className="inline-flex items-center gap-1 fa-overline text-fa-success"
       title={title ?? "Live — auto-refreshing"}
     >
       <span className="relative inline-flex h-2 w-2">
@@ -162,7 +162,7 @@ export function Tooltip({
           role="tooltip"
           className={cn(
             "absolute left-1/2 -translate-x-1/2 w-64 rounded-md border border-fa-edge",
-            "bg-fa-ink/95 backdrop-blur px-2.5 py-1.5 text-[11px] text-fa-frost",
+            "bg-fa-ink/95 backdrop-blur px-2.5 py-1.5 fa-caption text-fa-frost",
             "normal-case tracking-normal shadow-2xl z-50 pointer-events-none leading-snug",
             side === "top" ? "bottom-full mb-2" : "top-full mt-2"
           )}
@@ -176,7 +176,7 @@ export function Tooltip({
 
 export function ConnectingPulse({ label = "Connecting" }: { label?: string }) {
   return (
-    <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-fa-frost-dim">
+    <span className="inline-flex items-center gap-1 fa-overline text-fa-frost-dim">
       <span className="h-2 w-2 rounded-full border border-fa-frost-dim border-t-transparent animate-spin" />
       {label}
     </span>

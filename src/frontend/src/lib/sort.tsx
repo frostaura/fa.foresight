@@ -113,7 +113,7 @@ export function SortHeader<Key extends string>(props: {
       style={{ flexDirection: props.align === "right" ? "row-reverse" : "row" }}
     >
       <span>{props.children}</span>
-      {arrow && <span className="text-[10px] leading-none">{arrow}</span>}
+      {arrow && <span className="fa-caption">{arrow}</span>}
     </button>
   );
 }

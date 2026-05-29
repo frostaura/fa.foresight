@@ -108,11 +108,45 @@ body {
   .fa-link {
     @apply text-fa-frost-bright hover:underline underline-offset-4;
   }
+  /* ── Typography system ──────────────────────────────────────────────────────
+     Single source of truth for app type. The owned scale is Tailwind's standard
+     steps — text-xs (12) · text-sm (14) · text-base (16) · text-lg (18) ·
+     text-xl (20) · text-2xl (24) — plus the semantic roles below for the two
+     sub-12px sizes and the recurring bundled patterns. DO NOT introduce
+     arbitrary text-[..px] sizes in components; pick a role here or a scale step.
+     This keeps type aligned across the app and changes propagate from one place. */
+
+  /* Tiny uppercase label — field labels, stat captions, column micro-labels. */
+  .fa-overline {
+    @apply text-[10px] leading-none font-medium uppercase tracking-[0.07em];
+  }
+  /* Tiny sentence-case secondary text — hints, dense metadata, small badges. */
+  .fa-caption {
+    @apply text-[11px] leading-[1.35];
+  }
+  /* Body copy — the default readable size. */
+  .fa-body {
+    @apply text-sm leading-normal;
+  }
+  /* Card / section header. */
+  .fa-section-title {
+    @apply text-sm font-medium text-fa-frost-bright;
+  }
+  /* Primary stat number. */
+  .fa-metric {
+    @apply text-2xl font-light leading-tight tabular-nums;
+  }
+  /* Secondary / inline stat number. */
+  .fa-metric-sm {
+    @apply text-lg font-light leading-tight tabular-nums;
+  }
+
+  /* Back-compat aliases — defined in terms of the roles above (no duplication). */
   .fa-stat-label {
-    @apply uppercase tracking-widest text-[10px] text-fa-frost-dim;
+    @apply fa-overline text-fa-frost-dim;
   }
   .fa-stat-value {
-    @apply text-2xl font-light text-fa-frost-bright;
+    @apply fa-metric text-fa-frost-bright;
   }
 }
 
