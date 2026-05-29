@@ -6,6 +6,9 @@ import ModelDesignerPage from "./pages/ModelDesignerPage";
 import PaperTrading from "./pages/PaperTrading";
 import Status from "./pages/Status";
 import Live from "./pages/Live";
+import Testing from "./pages/Testing";
+import Strategies from "./pages/Strategies";
+import StrategyDesignerPage from "./pages/StrategyDesignerPage";
 
 export default function App() {
   return (
@@ -24,13 +27,20 @@ export default function App() {
               <Route path="paper" element={<PaperTrading />} />
             </Route>
 
-            {/* Models + Backtesting — kept at /models; the ?view=backtesting param
-                drives the sub-tab, matching the existing Models page pattern. */}
+            {/* Models — collection only (no sub-tabs). Flow designer stays at /:modelId/designer. */}
             <Route path="models" element={<Models />} />
-            {/* Alias so the nav link /models/backtesting opens models with backtesting tab pre-selected */}
-            <Route path="models/backtesting" element={<Navigate to="/models?view=backtesting" replace />} />
             {/* Per-model flow designer — renders inside the Layout shell so the sidebar stays visible */}
             <Route path="models/:modelId/designer" element={<ModelDesignerPage />} />
+            {/* Legacy alias — redirect old backtesting sub-tab URL to Testing page */}
+            <Route path="models/backtesting" element={<Navigate to="/testing?tab=backtest" replace />} />
+
+            {/* Strategies — collection */}
+            <Route path="strategies" element={<Strategies />} />
+            {/* Per-strategy flow designer — renders inside Layout shell */}
+            <Route path="strategies/:strategyId/designer" element={<StrategyDesignerPage />} />
+
+            {/* Testing — backtesting + chaos/bust testing */}
+            <Route path="testing" element={<Testing />} />
 
             {/* Legacy redirect — paper-trading used to be the root route */}
             <Route path="paper-trading" element={<Navigate to="/trading/paper" replace />} />

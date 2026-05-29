@@ -64,7 +64,7 @@ export const api = createApi({
       return headers;
     }
   }),
-  tagTypes: ["Tenant", "LivePrediction", "Model", "ActiveModel", "Backtest", "Session", "Chaos"],
+  tagTypes: ["Tenant", "LivePrediction", "Model", "ActiveModel", "Backtest", "Session", "Chaos", "Strategy"],
   endpoints: (b) => ({
     getMe: b.query<TenantInfo, void>({ query: () => "tenants/me", providesTags: ["Tenant"] }),
     listTenants: b.query<TenantInfo[], void>({ query: () => "tenants", providesTags: ["Tenant"] }),
@@ -95,6 +95,28 @@ export const api = createApi({
     // ── Strategies catalogue — delegates to the real /api/staking-strategies endpoint ──
     listStrategies: b.query<Strategy[], void>({
       query: () => "staking-strategies",
+    }),
+
+    // ── Strategies CRUD — /api/strategies (enriched StrategyDetail list) ──────────────────
+    getStrategies: b.query<StrategyDetail[], void>({
+      query: () => "strategies",
+      providesTags: ["Strategy"],
+    }),
+    getStrategy: b.query<StrategyDetail, string>({
+      query: (id) => `strategies/${id}`,
+      providesTags: (_r, _e, id) => [{ type: "Strategy", id }],
+    }),
+    createStrategy: b.mutation<StrategyDetail, { name: string; description?: string | null; definition?: string | null; params?: Record<string, unknown> | null }>({
+      query: (body) => ({ url: "strategies", method: "POST", body }),
+      invalidatesTags: ["Strategy"],
+    }),
+    updateStrategy: b.mutation<StrategyDetail, { id: string; body: { name?: string; description?: string | null; definition?: string | null; params?: Record<string, unknown> | null } }>({
+      query: ({ id, body }) => ({ url: `strategies/${id}`, method: "PUT", body }),
+      invalidatesTags: (_r, _e, arg) => ["Strategy", { type: "Strategy", id: arg.id }],
+    }),
+    deleteStrategy: b.mutation<void, string>({
+      query: (id) => ({ url: `strategies/${id}`, method: "DELETE" }),
+      invalidatesTags: ["Strategy"],
     }),
 
     predictLive: b.mutation<LivePrediction, { symbol: string; interval: string; horizon?: number }>({
@@ -135,8 +157,11 @@ export const api = createApi({
     }),
 
     // iter-4 — prediction models CRUD.
-    listModels: b.query<Model[], void>({
-      query: () => "models",
+    listModels: b.query<Model[], { includeArchived?: boolean } | void>({
+      query: (arg) => {
+        const params = arg && (arg as { includeArchived?: boolean }).includeArchived ? "?includeArchived=true" : "";
+        return `models${params}`;
+      },
       providesTags: ["Model"]
     }),
     getModel: b.query<Model, string>({
@@ -159,7 +184,7 @@ export const api = createApi({
       // (FK constraint, race, network), we undo the patch and the card pops back in.
       onQueryStarted: async (id, { dispatch, queryFulfilled }) => {
         const patch = dispatch(
-          api.util.updateQueryData("listModels", undefined, (draft) => {
+          api.util.updateQueryData("listModels", void 0, (draft) => {
             const idx = draft.findIndex((m) => m.id === id);
             if (idx >= 0) draft.splice(idx, 1);
           })
@@ -174,6 +199,14 @@ export const api = createApi({
     }),
     setDefaultModel: b.mutation<Model, string>({
       query: (id) => ({ url: `models/${id}/set-default`, method: "POST" }),
+      invalidatesTags: ["Model"]
+    }),
+    archiveModel: b.mutation<void, string>({
+      query: (id) => ({ url: `models/${id}/archive`, method: "POST" }),
+      invalidatesTags: ["Model"]
+    }),
+    unarchiveModel: b.mutation<void, string>({
+      query: (id) => ({ url: `models/${id}/unarchive`, method: "POST" }),
       invalidatesTags: ["Model"]
     }),
     // Leakage-aware backtest. Server picks a window strictly outside the model's training range
@@ -298,6 +331,8 @@ export const {
   useDeleteModelMutation,
   useDuplicateModelMutation,
   useSetDefaultModelMutation,
+  useArchiveModelMutation,
+  useUnarchiveModelMutation,
   useHonestBacktestMutation,
   useGetNodeCatalogueQuery,
   useListActiveModelsQuery,
@@ -322,6 +357,11 @@ export const {
   useListChaosRunsQuery,
   useRunFlowNodeMutation,
   useListStrategiesQuery,
+  useGetStrategiesQuery,
+  useGetStrategyQuery,
+  useCreateStrategyMutation,
+  useUpdateStrategyMutation,
+  useDeleteStrategyMutation,
 } = api;
 
 // ── Trading Session types ─────────────────────────────────────────────────────
@@ -421,6 +461,31 @@ export interface Strategy {
   description: string;
 }
 
+/** Enriched strategy DTO returned by GET /api/strategies and GET /api/strategies/{id}. */
+export interface StrategyDetail {
+  id: string;
+  name: string;
+  description?: string | null;
+  isBuiltIn: boolean;
+  kind: "code" | "dag";
+  /** DAG definition JSON (FlowDefinition). null for built-in code-defined strategies. */
+  definition?: string | null;
+  params?: Record<string, unknown> | null;
+  tenantId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** AI-generated plain-language description. */
+  simpleDescription?: string | null;
+  /** AI-generated technical description. */
+  technicalDescription?: string | null;
+  /** Per-interval hit-rate (0–100) from the most-recent completed backtest. */
+  scoresByInterval?: Record<string, number>;
+  /** Mean of scoresByInterval across intervals that have a completed backtest. */
+  averageScore?: number | null;
+  /** Total number of backtests run against this strategy. */
+  backtestsRun?: number | null;
+}
+
 export interface AssistantReply {
   rawContent: string | null;
   rationale: string;
@@ -500,6 +565,7 @@ export interface Model {
   // Mean of scoresByInterval over intervals that HAVE a completed backtest. Null when none.
   // Renders as the per-card Score badge; the per-interval leaderboard uses scoresByInterval directly.
   averageScore?: number | null;
+  isArchived?: boolean;
   createdAt: string;
   updatedAt: string;
 }

@@ -7,6 +7,7 @@ import {
   ChevronRight,
   FlaskConical,
   Gauge,
+  Layers,
   Menu,
   Workflow,
   X,
@@ -16,13 +17,14 @@ import foresightMark from "../assets/brand/foresight-mark.svg";
 
 // ── Navigation structure ────────────────────────────────────────────────────────────────────────
 //
-// Trading (group header — not a link)
+// TRADING (group header — not a link)
 //   Status      /trading/status
 //   Live        /trading/live
 //   Paper       /trading/paper
 // ── divider ──
-// Models        /models
-// Backtesting   /models/backtesting
+// DATA (group header — not a link)
+//   Models      /models
+//   Testing     /testing
 
 type NavGroup = {
   groupLabel: string;
@@ -43,11 +45,14 @@ const navGroups: NavGroup[] = [
       { to: "/trading/paper", label: "Paper", icon: BarChart2 },
     ],
   },
-];
-
-const navBottom: NavItem[] = [
-  { to: "/models", label: "Models", icon: Workflow },
-  { to: "/models/backtesting", label: "Backtesting", icon: FlaskConical },
+  {
+    groupLabel: "Data",
+    items: [
+      { to: "/models", label: "Models", icon: Workflow },
+      { to: "/strategies", label: "Strategies", icon: Layers },
+      { to: "/testing", label: "Testing", icon: FlaskConical },
+    ],
+  },
 ];
 
 const STORAGE_KEY = "fa.foresight.sidebar.collapsed";
@@ -160,15 +165,25 @@ export default function Layout() {
           </Link>
         </div>
 
-        {/* Nav groups */}
+        {/* Nav groups — rendered uniformly with a divider between groups */}
         <nav
           className={cn(
             "flex-1 space-y-0.5 overflow-y-auto",
             collapsed && !isDrawer ? "p-2" : "p-3"
           )}
         >
-          {navGroups.map((group) => (
+          {navGroups.map((group, groupIdx) => (
             <div key={group.groupLabel}>
+              {/* Divider between groups (not before the first) */}
+              {groupIdx > 0 && (
+                <div
+                  className={cn(
+                    "h-px bg-fa-edge",
+                    collapsed && !isDrawer ? "my-2 mx-1" : "my-2 mx-2"
+                  )}
+                  aria-hidden
+                />
+              )}
               {(!collapsed || isDrawer) && (
                 <div className="px-3 pb-1 pt-2 text-[10px] uppercase tracking-[0.14em] text-fa-frost-dim/60 font-medium">
                   {group.groupLabel}
@@ -196,37 +211,6 @@ export default function Layout() {
               ))}
             </div>
           ))}
-
-          {/* Divider */}
-          <div
-            className={cn(
-              "h-px bg-fa-edge",
-              collapsed && !isDrawer ? "my-2 mx-1" : "my-2 mx-2"
-            )}
-            aria-hidden
-          />
-
-          {/* Models / Backtesting */}
-          {navBottom.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={linkClass}
-              title={collapsed && !isDrawer ? item.label : undefined}
-              onClick={isDrawer ? closeDrawer : undefined}
-            >
-              {({ isActive }) => (
-                <>
-                  <item.icon className="h-4 w-4 shrink-0" />
-                  {(!collapsed || isDrawer) && (
-                    <span className={isActive ? "fa-nav-shimmer" : ""}>
-                      {item.label}
-                    </span>
-                  )}
-                </>
-              )}
-            </NavLink>
-          ))}
         </nav>
 
         {(!collapsed || isDrawer) && (
@@ -249,7 +233,7 @@ export default function Layout() {
             "relative shrink-0 h-screen border-r border-fa-edge bg-fa-ink-2/40 backdrop-blur flex flex-col transition-[width] duration-[var(--fa-duration)]"
           )}
           style={{
-            width: collapsed ? "4rem" : "15rem",
+            width: collapsed ? "4rem" : "12rem",
             transitionTimingFunction: "var(--fa-ease)",
           }}
         >
