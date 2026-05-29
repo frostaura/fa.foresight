@@ -6,6 +6,7 @@ using FrostAura.Foresight.Application.Tenancy;
 using FrostAura.Foresight.Application.Trading;
 using FrostAura.Foresight.Domain.Backtesting;
 using FrostAura.Foresight.Domain.MarketData;
+using FrostAura.Foresight.Domain.Ports;
 using FrostAura.Foresight.Domain.Trading;
 using FrostAura.Foresight.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -594,6 +595,68 @@ public sealed class ModelTrainingService : IModelTrainingService
         _ => 90,
     };
 
+    private static long IntervalMs(string interval) => interval switch
+    {
+        "1m"  => 60_000L,
+        "5m"  => 300_000L,
+        "15m" => 900_000L,
+        _ => throw new ArgumentException($"Unsupported interval '{interval}'.", nameof(interval)),
+    };
+
+    /// <summary>
+    /// True when the flow reads order-flow microstructure — i.e. it carries a
+    /// <c>source.microstructure.orderflow</c> node. Such flows need the microstructure cache hydrated
+    /// (and any on-demand backfill error surfaced) before fitting; candle-only flows do not.
+    /// </summary>
+    internal static bool FlowUsesMicrostructure(FlowDefinition flow) =>
+        flow.Nodes.Any(n => n.Type == "source.microstructure.orderflow");
+
+    /// <summary>
+    /// Pre-fetches every historical window the trainer will read for one interval, BEFORE the fit, so
+    /// the trainer's own fetches hit a warm cache and produce real rows. Mirrors the trainer's window
+    /// math exactly (target-tf warmup, off-tf extended warmup, micro warmup).
+    ///
+    /// Failure policy matches the trainer's faithfulness contract:
+    /// <list type="bullet">
+    ///   <item>Target-tf candles: required — let a fetch error propagate (no usable model without them).</item>
+    ///   <item>Off-tf candles: best-effort — legitimately sparse for some symbols; log + continue.</item>
+    ///   <item>Microstructure (only when the flow uses it): NOT swallowed — if the adapter throws its
+    ///   actionable cap/availability error, it propagates and becomes the training failure, instead of
+    ///   silently leaving an empty pool that the trainer would later report as zero rows.</item>
+    /// </list>
+    /// </summary>
+    internal static async Task HydrateTrainingDataAsync(
+        FlowDefinition flow,
+        IHistoricalCandleProvider candleProvider,
+        IHistoricalMicrostructureProvider? microProvider,
+        string symbol,
+        string interval,
+        long startMs,
+        long endMs,
+        CancellationToken ct,
+        ILogger? logger = null)
+    {
+        var warmupMs = (long)flow.WarmupCandles * IntervalMs(interval);
+
+        // Target-interval candles — the spine of the training window. Required.
+        await candleProvider.GetRangeAsync(symbol, interval, startMs - warmupMs, endMs, ct);
+
+        // Off-tf candles for every other supported interval (e.g. 15m regime feeding a 5m model).
+        // These may legitimately be sparse — never fail the whole train on an off-tf miss.
+        foreach (var otherTf in FrostAura.Foresight.Domain.MarketData.SupportedSymbols.Intervals)
+        {
+            if (otherTf == interval) continue;
+            var offWarmupMs = Math.Max(warmupMs, 60L * IntervalMs(otherTf));
+            try { await candleProvider.GetRangeAsync(symbol, otherTf, startMs - offWarmupMs, endMs, ct); }
+            catch (Exception ex) { logger?.LogWarning(ex, "Off-tf hydration miss for {Symbol}/{OtherTf} (continuing)", symbol, otherTf); }
+        }
+
+        // Microstructure — only when the flow actually reads order-flow. Do NOT swallow: a cap /
+        // availability error here is the REAL, actionable training failure we want surfaced.
+        if (microProvider is not null && FlowUsesMicrostructure(flow))
+            await microProvider.GetRangeAsync(symbol, interval, startMs - warmupMs, endMs, ct);
+    }
+
     public async Task<ModelTrainResult> TrainAsync(Guid modelId, string symbol, int holdoutDays, string? interval, CancellationToken ct)
     {
         if (!_tenant.IsResolved) throw new InvalidOperationException("Tenant context not resolved.");
@@ -644,6 +707,16 @@ public sealed class ModelTrainingService : IModelTrainingService
                 var startMs = endMs - lookbackMs;
                 await using var scope = _scopes.CreateAsyncScope();
                 var trainer = scope.ServiceProvider.GetRequiredService<ModelTrainer>();
+                // Pre-training data hydration: fetch (and, for on-demand adapters, backfill) the exact
+                // windows the trainer will read BEFORE fitting. This turns the trainer's own fetches into
+                // warm-cache hits — so a model never dies with the cryptic "Not enough training rows (0)
+                // after warmup" because a swallowed download timeout left an empty pool. Critically, when
+                // the flow needs order-flow microstructure we DON'T swallow the hydration error: if the
+                // dump-cap / availability error fires, it propagates and becomes the (actionable) training
+                // failure stored in TrainingError, instead of being masked as a zero-row count later.
+                var candleProvider = scope.ServiceProvider.GetRequiredService<IHistoricalCandleProvider>();
+                var microProvider = scope.ServiceProvider.GetService<IHistoricalMicrostructureProvider>();
+                await HydrateTrainingDataAsync(flow, candleProvider, microProvider, symbol, iv, startMs, endMs, ct, _logger);
                 _logger.LogInformation("Training variant {Symbol}/{Interval} on {Days}d", symbol, iv, LookbackDaysFor(iv));
                 var result = await trainer.TrainAsync(flow, tenantId, modelId, symbol, iv, startMs, endMs, ct);
                 _logger.LogInformation("Variant {Symbol}/{Interval} fit complete — WF accuracy {Pct:P2}", symbol, iv, result.ValidationAccuracy);
