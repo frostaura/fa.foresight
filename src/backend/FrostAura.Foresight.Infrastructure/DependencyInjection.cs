@@ -13,6 +13,8 @@ using FrostAura.Foresight.Infrastructure.Live;
 using FrostAura.Foresight.Infrastructure.Markets;
 using FrostAura.Foresight.Infrastructure.Paper;
 using FrostAura.Foresight.Infrastructure.Persistence;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -39,31 +41,32 @@ public static class DependencyInjection
 
         services.AddHttpClient<IPredictionMarketProvider, PolymarketProvider>();
 
-        // Key custody: a real Nethereum signer when a private key is configured, else the throwing stub.
+        // Key custody (wallet-balance read path / AccountLedger): a real Nethereum signer when a
+        // private key is bootstrap-configured, else the throwing stub. NOTE: live ORDER execution no
+        // longer consumes this global singleton — it builds a per-tenant signer in the connector
+        // factory from the tenant's stored connection. This registration stays only for the on-chain
+        // pUSD balance read (AccountLedger), which is not yet per-tenant-ized.
         var hasWalletKey = !string.IsNullOrWhiteSpace(config.GetSection("KeyVault")["PrivateKey"]);
         if (hasWalletKey)
             services.AddSingleton<IKeyVault, NethereumKeyVault>();
         else
             services.AddSingleton<IKeyVault, LocalKeyVault>();
 
-        // Execution: live Polymarket CLOB only when LiveTrading=true AND a wallet key is present.
-        // Any other configuration stays in shadow (NullExecutionProvider logs [SHADOW]). This is the
-        // hard config gate beneath the /golive runtime confirmation.
-        var liveTrading = string.Equals(config.GetSection("Polymarket")["LiveTrading"], "true", StringComparison.OrdinalIgnoreCase);
-        if (liveTrading && hasWalletKey)
-        {
-            services.AddHttpClient("polymarket-clob");
-            services.AddSingleton<IExecutionProvider>(sp => new PolymarketExecutionProvider(
-                sp.GetRequiredService<IHttpClientFactory>().CreateClient("polymarket-clob"),
-                sp.GetRequiredService<IKeyVault>(),
-                sp.GetRequiredService<IOptions<PolymarketExecutionOptions>>(),
-                sp.GetRequiredService<IOptions<KeyVaultOptions>>(),
-                sp.GetRequiredService<ILogger<PolymarketExecutionProvider>>()));
-        }
-        else
-        {
-            services.AddSingleton<IExecutionProvider, NullExecutionProvider>();
-        }
+        // Secret-at-rest protection for platform-connection secrets. Keys are DB-persisted via
+        // ForesightDbContext (IDataProtectionKeyContext) so ciphertext written on one boot is still
+        // decryptable after a restart — without this, stored wallet keys become unreadable.
+        services.AddDataProtection()
+            .PersistKeysToDbContext<ForesightDbContext>();
+        services.AddSingleton<Security.ISecretProtector, Security.SecretProtector>();
+
+        // Per-tenant platform connection: config now lives in platform_connections (secrets encrypted),
+        // resolved + decrypted per request, and turned into a connector by the factory. The old global
+        // "if (LiveTrading && hasWalletKey)" execution-provider gate is gone — LiveTrading is per tenant.
+        // The factory returns a live PolymarketExecutionProvider only when the tenant's connection has a
+        // usable key AND LiveTrading=true; otherwise it returns the shadow NullExecutionProvider.
+        services.AddHttpClient("polymarket-clob");
+        services.AddScoped<Platform.IPlatformConnectionResolver, Platform.PlatformConnectionResolver>();
+        services.AddSingleton<Platform.IPlatformConnectorFactory, Platform.PlatformConnectorFactory>();
 
         // Trading arm (Phase 2). Runs in shadow while NullExecutionProvider is the registered
         // execution adapter; the same wiring carries live trades once a real adapter lands.

@@ -5,12 +5,12 @@ using Microsoft.Extensions.Options;
 namespace FrostAura.Foresight.Infrastructure.Adapters;
 
 /// <summary>Logs orders, never executes. Default for Phase 0–4 (shadow mode).</summary>
-public sealed class NullExecutionProvider : IExecutionProvider
+public sealed class NullExecutionProvider : IPlatformConnector
 {
     private readonly ILogger<NullExecutionProvider> _logger;
     public NullExecutionProvider(ILogger<NullExecutionProvider> logger) { _logger = logger; }
 
-    public string ProviderId => "null-execution";
+    public string ConnectorId => "null-execution";
 
     public Task<OrderReceipt> PlaceOrderAsync(OrderRequest request, CancellationToken ct)
     {

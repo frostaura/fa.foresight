@@ -4,6 +4,7 @@ using FrostAura.Foresight.Domain.Ports;
 using FrostAura.Foresight.Domain.Positions;
 using FrostAura.Foresight.Domain.Sizing;
 using FrostAura.Foresight.Infrastructure.Persistence;
+using FrostAura.Foresight.Infrastructure.Platform;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -18,8 +19,9 @@ public sealed record TradeOutcome(bool Traded, string Message, Guid? PositionId 
 /// trade decision and its safety rails can never diverge between the two paths. Scoped — owns a
 /// DbContext for the duration of one trade decision.
 ///
-/// Execution mode (Shadow vs Live) is derived from the registered <see cref="IExecutionProvider"/>:
-/// the NullExecutionProvider yields Shadow positions; a real venue adapter (Phase 3) yields Live.
+/// Execution mode (Shadow vs Live) is derived from the per-tenant <see cref="IPlatformConnector"/>
+/// resolved via <see cref="IPlatformConnectorFactory"/>: the NullExecutionProvider yields Shadow
+/// positions; a live venue connector yields Live.
 ///
 /// NOTE: LLM forecasting removed. The pYes/pNo inputs must be supplied by the caller (e.g. from
 /// the Polymarket market provider or a deterministic signal). The Forecast entity and its DB table
@@ -29,7 +31,7 @@ public sealed class MarketTradeExecutor
 {
     private readonly ForesightDbContext _db;
     private readonly IPositionSizer _sizer;
-    private readonly IExecutionProvider _exec;
+    private readonly IPlatformConnectorFactory _connectorFactory;
     private readonly IChannelAdapter _channel;
     private readonly ILiveTradingArm _arm;
     private readonly TradingGuardrailOptions _opts;
@@ -38,7 +40,7 @@ public sealed class MarketTradeExecutor
     public MarketTradeExecutor(
         ForesightDbContext db,
         IPositionSizer sizer,
-        IExecutionProvider exec,
+        IPlatformConnectorFactory connectorFactory,
         IChannelAdapter channel,
         ILiveTradingArm arm,
         IOptions<TradingGuardrailOptions> opts,
@@ -46,14 +48,14 @@ public sealed class MarketTradeExecutor
     {
         _db = db;
         _sizer = sizer;
-        _exec = exec;
+        _connectorFactory = connectorFactory;
         _channel = channel;
         _arm = arm;
         _opts = opts.Value;
         _logger = logger;
     }
 
-    private bool IsShadow => _exec.ProviderId == "null-execution";
+    private static bool IsShadow(IPlatformConnector connector) => connector.ConnectorId == "null-execution";
 
     /// <summary>Upsert a provider-discovered market into the markets table, returning the persisted
     /// row (stable Id) so a Position can reference it.</summary>
@@ -90,6 +92,9 @@ public sealed class MarketTradeExecutor
 
     public async Task<TradeOutcome> TradeMarketAsync(Guid tenantId, Market market, decimal pYes, decimal yesPrice, decimal noPrice, bool manual, CancellationToken ct)
     {
+        // Resolve the tenant's connector (live Polymarket when key+LiveTrading present, else shadow).
+        var connector = await _connectorFactory.GetForTenantAsync(tenantId, ct);
+        var isShadow   = IsShadow(connector);
         var providerId = market.ProviderId;
         var bankroll = await GetOrSeedBankrollAsync(tenantId, providerId, ct);
 
@@ -139,11 +144,11 @@ public sealed class MarketTradeExecutor
 
         // Live safety arm: even when a real execution provider is wired, refuse to place a live order
         // until the operator has explicitly armed it via /golive. Shadow never needs arming.
-        if (!IsShadow && !_arm.IsArmed(tenantId))
+        if (!isShadow && !_arm.IsArmed(tenantId))
             return new TradeOutcome(false, "Live execution is configured but NOT armed — send /golive to arm before real orders place.");
 
         var orderSide = sizing.Side == PositionSide.Yes ? OrderSide.Yes : OrderSide.No;
-        var receipt = await _exec.PlaceOrderAsync(new OrderRequest(market.ExternalId, orderSide, shares, sizing.LimitPrice, tenantId), ct);
+        var receipt = await connector.PlaceOrderAsync(new OrderRequest(market.ExternalId, orderSide, shares, sizing.LimitPrice, tenantId), ct);
 
         var position = new Position
         {
@@ -151,7 +156,7 @@ public sealed class MarketTradeExecutor
             TenantId = tenantId,
             MarketId = market.Id,
             ForecastId = null,
-            Mode = IsShadow ? PositionMode.Shadow : PositionMode.Live,
+            Mode = isShadow ? PositionMode.Shadow : PositionMode.Live,
             Side = sizing.Side,
             Shares = shares,
             AverageEntryPrice = sizing.LimitPrice,
@@ -174,7 +179,7 @@ public sealed class MarketTradeExecutor
         });
         await _db.SaveChangesAsync(ct);
 
-        var modeTag = IsShadow ? "SHADOW" : "LIVE";
+        var modeTag = isShadow ? "SHADOW" : "LIVE";
         var q = Trim(market.Question, 120);
         var body = FormattableString.Invariant(
             $"[{modeTag}] {sizing.Side} {shares:0.##} @ {sizing.LimitPrice:0.###} (${stake:0.00})\n{q}\np_yes {pYes:0.###} vs price {yesPrice:0.###} · edge {sizing.Edge:0.###}");

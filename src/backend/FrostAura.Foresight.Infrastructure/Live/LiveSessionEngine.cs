@@ -9,6 +9,7 @@ using FrostAura.Foresight.Domain.Trading;
 using FrostAura.Foresight.Infrastructure.Adapters;
 using FrostAura.Foresight.Infrastructure.Ledger;
 using FrostAura.Foresight.Infrastructure.Persistence;
+using FrostAura.Foresight.Infrastructure.Platform;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -19,13 +20,15 @@ namespace FrostAura.Foresight.Infrastructure.Live;
 /// Live session lifecycle and per-tick engine.
 ///
 /// Start/Stop/Query for live sessions. ProcessAsync drives one session tick: settle resolved bets
-/// (against the MARKET's own resolution, not the Binance candle) → place the next bet via
-/// IExecutionProvider → recompute the ledger.
+/// (against the MARKET's own resolution, not the Binance candle) → place the next bet via the
+/// per-tenant IPlatformConnector → recompute the ledger.
 ///
 /// Key constraints:
-///  - All live placement is REFUSED unless LiveTradingArm.IsArmed AND LiveTrading config gate=true.
-///    This is belt-and-suspenders — the config gate is enforced by DI (only PolymarketExecutionProvider
-///    is registered when LiveTrading=true). The arm check is the second layer.
+///  - All live placement is REFUSED unless LiveTradingArm.IsArmed AND the tenant connection's
+///    LiveTrading gate=true. This is belt-and-suspenders — the config gate is enforced by the
+///    connector factory (it returns a live PolymarketExecutionProvider only when the tenant
+///    connection has a usable key AND LiveTrading=true; otherwise the shadow NullExecutionProvider).
+///    The arm check is the second layer.
 ///  - ConfigHash is computed over {venue,symbol,interval,modelId,strategyId,params,initialBalance,
 ///    initialBetSize} EXCLUDING mode. A live session with the same config as an active paper session
 ///    (or another live session) is rejected → 409.
@@ -55,7 +58,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
 
     private readonly ForesightDbContext _db;
     private readonly ITenantContext     _tenant;
-    private readonly IExecutionProvider _exec;
+    private readonly IPlatformConnectorFactory _connectorFactory;
     private readonly ILiveTradingArm    _arm;
     private readonly IAccountLedger     _ledger;
     private readonly ICalibrationRescaler _calibration;
@@ -67,7 +70,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
     public LiveSessionEngine(
         ForesightDbContext db,
         ITenantContext tenant,
-        IExecutionProvider exec,
+        IPlatformConnectorFactory connectorFactory,
         ILiveTradingArm arm,
         IAccountLedger ledger,
         ICalibrationRescaler calibration,
@@ -78,7 +81,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
     {
         _db          = db;
         _tenant      = tenant;
-        _exec        = exec;
+        _connectorFactory = connectorFactory;
         _arm         = arm;
         _ledger      = ledger;
         _calibration = calibration;
@@ -195,12 +198,14 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
     {
         if (session.StoppedAt is not null || session.Bust) return session;
 
-        // Arm check: live execution only when the arm is confirmed AND LiveTrading config is true.
-        // Even in paper-shadow mode this method may be called for paper sessions routed through this
-        // engine — the IExecutionProvider will be NullExecutionProvider in that case.
+        // Arm check: live execution only when the arm is confirmed AND the tenant connection's
+        // LiveTrading gate is true. Even in paper-shadow mode this method may be called for paper
+        // sessions routed through this engine — the connector will be NullExecutionProvider when the
+        // tenant has no usable key or LiveTrading=false.
         var tenantId = session.TenantId;
         var isLive   = session.Mode == "live";
-        if (isLive && _exec.ProviderId != "null-execution" && !_arm.IsArmed(tenantId))
+        var connector = await _connectorFactory.GetForTenantAsync(tenantId, ct);
+        if (isLive && connector.ConnectorId != "null-execution" && !_arm.IsArmed(tenantId))
         {
             _logger.LogInformation("Live session {SessionId} skipped — arm not confirmed", session.Id);
             return session;
@@ -239,7 +244,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
             if (candleClosed && openBet.ExternalOrderId is not null)
             {
                 // Poll the CLOB for fill status.
-                var orderState = await _exec.GetOrderStateAsync(openBet.ExternalOrderId, ct);
+                var orderState = await connector.GetOrderStateAsync(openBet.ExternalOrderId, ct);
                 if (orderState.Status == OrderStatus.Filled || orderState.Status == OrderStatus.Cancelled)
                 {
                     // Query the market's own resolution outcome (not the Binance candle).
@@ -247,7 +252,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                     bool? marketOutcomeUp = null;
                     if (openBet.MarketExternalId is not null)
                     {
-                        var resolution = await _exec.GetMarketResolutionAsync(openBet.MarketExternalId, ct);
+                        var resolution = await connector.GetMarketResolutionAsync(openBet.MarketExternalId, ct);
                         if (resolution is { Resolved: true })
                         {
                             marketOutcomeUp = resolution.YesWon; // true=Yes won, false=No won
@@ -392,12 +397,12 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                                     tracked.CurrentBetSize = nextStake;
 
                                     string? externalOrderId = null;
-                                    if (isLive && _arm.IsArmed(tenantId) && _exec.ProviderId != "null-execution")
+                                    if (isLive && _arm.IsArmed(tenantId) && connector.ConnectorId != "null-execution")
                                     {
                                         try
                                         {
                                             var orderSide = side == "UP" ? OrderSide.Yes : OrderSide.No;
-                                            var receipt   = await _exec.PlaceOrderAsync(
+                                            var receipt   = await connector.PlaceOrderAsync(
                                                 new OrderRequest(entryQuote.MarketExternalId ?? "", orderSide, shares, entryPrice, tenantId), ct);
                                             externalOrderId = receipt.OrderId;
                                             _logger.LogInformation("Live bet placed: {OrderId} {Side} {Shares}@{Price}", externalOrderId, side, shares, entryPrice);

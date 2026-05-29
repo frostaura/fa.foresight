@@ -1,13 +1,14 @@
 namespace FrostAura.Foresight.Domain.Ports;
 
 /// <summary>
-/// Write-side port for placing trades against a prediction-market venue.
-/// One adapter per venue; lifecycle separated from <see cref="IPredictionMarketProvider"/>
+/// Write-side port for placing trades against a prediction-market venue / trading platform.
+/// One implementation per platform; lifecycle separated from <see cref="IPredictionMarketProvider"/>
 /// so trading code can ship without read code and vice versa.
+/// Built per-tenant by <c>IPlatformConnectorFactory</c> from the tenant's stored connection config.
 /// </summary>
-public interface IExecutionProvider
+public interface IPlatformConnector
 {
-    string ProviderId { get; }
+    string ConnectorId { get; }
 
     Task<OrderReceipt> PlaceOrderAsync(OrderRequest request, CancellationToken ct);
 

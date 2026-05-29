@@ -5,7 +5,7 @@ namespace FrostAura.Foresight.Domain.Ports;
 
 /// <summary>
 /// Read-side port for a prediction-market venue. Adapters: Polymarket, Kalshi, Manifold, Augur.
-/// Execution lives behind <see cref="IExecutionProvider"/>; this port is read-only.
+/// Execution lives behind <see cref="IPlatformConnector"/>; this port is read-only.
 /// </summary>
 public interface IPredictionMarketProvider
 {

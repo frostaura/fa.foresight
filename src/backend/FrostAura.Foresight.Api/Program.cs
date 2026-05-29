@@ -61,6 +61,7 @@ app.MapStrategiesEndpoints();
 app.MapFlowsEndpoints();
 app.MapChaosEndpoints();
 app.MapGoLiveEndpoints();
+app.MapPlatformConnectionsEndpoints();
 
 app.Run();
 

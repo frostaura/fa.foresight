@@ -39,7 +39,7 @@ public sealed class PolymarketExecutionOptions
 /// wallet). Before trusting it: enable with a single $1 supervised order and confirm the fill, then
 /// ramp. All live placement is guarded by the LiveTrading config gate + ILiveTradingArm.IsArmed check.
 /// </summary>
-public sealed class PolymarketExecutionProvider : IExecutionProvider
+public sealed class PolymarketExecutionProvider : IPlatformConnector
 {
     private readonly HttpClient _http;
     private readonly IKeyVault  _vault;
@@ -51,7 +51,7 @@ public sealed class PolymarketExecutionProvider : IExecutionProvider
     private ApiCreds? _creds;
     private string?   _address;
 
-    public string ProviderId => "polymarket-clob";
+    public string ConnectorId => "polymarket-clob";
 
     public PolymarketExecutionProvider(
         HttpClient http,
@@ -68,7 +68,7 @@ public sealed class PolymarketExecutionProvider : IExecutionProvider
         _http.BaseAddress = new Uri(_opts.ClobBaseUrl.TrimEnd('/') + "/");
     }
 
-    // ── IExecutionProvider ───────────────────────────────────────────────────────
+    // ── IPlatformConnector ───────────────────────────────────────────────────────
 
     public async Task<OrderReceipt> PlaceOrderAsync(OrderRequest request, CancellationToken ct)
     {

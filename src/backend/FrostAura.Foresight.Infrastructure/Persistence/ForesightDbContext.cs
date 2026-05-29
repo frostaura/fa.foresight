@@ -8,9 +8,11 @@ using FrostAura.Foresight.Domain.MarketData;
 using FrostAura.Foresight.Domain.Markets;
 using FrostAura.Foresight.Domain.Models;
 using FrostAura.Foresight.Domain.Paper;
+using FrostAura.Foresight.Domain.Platform;
 using FrostAura.Foresight.Domain.Positions;
 using FrostAura.Foresight.Domain.Strategies;
 using FrostAura.Foresight.Domain.Tenancy;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
@@ -18,12 +20,15 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace FrostAura.Foresight.Infrastructure.Persistence;
 
-public sealed class ForesightDbContext : DbContext
+public sealed class ForesightDbContext : DbContext, IDataProtectionKeyContext
 {
     public ForesightDbContext(DbContextOptions<ForesightDbContext> options) : base(options) { }
 
     public DbSet<Strategy> Strategies => Set<Strategy>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<PlatformConnection> PlatformConnections => Set<PlatformConnection>();
+    /// <summary>Data Protection key ring — DB-persisted so encrypted secrets survive restarts.</summary>
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
     public DbSet<Market> Markets => Set<Market>();
     public DbSet<BankrollEntry> Bankrolls => Set<BankrollEntry>();
     public DbSet<Position> Positions => Set<Position>();
@@ -73,6 +78,25 @@ public sealed class ForesightDbContext : DbContext
                 v => JsonSerializer.Deserialize<TenantSettings>(v, jsonOptions) ?? new TenantSettings())
                 .HasColumnType("jsonb");
         });
+
+        mb.Entity<PlatformConnection>(b =>
+        {
+            b.ToTable("platform_connections");
+            b.HasKey(c => c.Id);
+            b.Property(c => c.ConnectorId).HasMaxLength(60).IsRequired();
+            b.Property(c => c.PrivateKeyEncrypted);
+            b.Property(c => c.ApiSecretEncrypted);
+            b.Property(c => c.WalletAddress).HasMaxLength(64);
+            b.Property(c => c.Funder).HasMaxLength(64);
+            b.Property(c => c.ClobBaseUrl).HasMaxLength(300).IsRequired();
+            b.Property(c => c.GammaBaseUrl).HasMaxLength(300).IsRequired();
+            b.Property(c => c.MaxTradeUsd).HasColumnType("numeric(20,4)");
+            // One connection per (tenant, connector); the IsDefault row is the active connector.
+            b.HasIndex(c => new { c.TenantId, c.ConnectorId }).IsUnique();
+        });
+
+        // Data Protection key ring — let the package configure its own entity shape.
+        mb.Entity<DataProtectionKey>(b => b.ToTable("data_protection_keys"));
 
         mb.Entity<Market>(b =>
         {
