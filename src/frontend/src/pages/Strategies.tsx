@@ -13,15 +13,30 @@ import {
   type StrategyDetail,
 } from "../store/api";
 
-// ── Minimal default DAG skeleton used when creating a new custom strategy ─────────────────────
+// ── Starter DAG for a new custom strategy ─────────────────────────────────────────────────────
+// A new strategy must be a VALID flow on create (the backend FlowValidator requires
+// definitionKind="strategy" + exactly one output.stake node with its required input connected),
+// so we seed an editable copy of the edge-aware-Kelly DAG rather than an empty canvas. The user
+// edits/deletes nodes from there. Positions are omitted — the designer auto-lays-out on load.
 
-const DEFAULT_DAG_SKELETON = JSON.stringify({
+const DEFAULT_STRATEGY_STARTER = JSON.stringify({
   schemaVersion: 1,
-  modelKind: "deterministic",
-  supportsBacktesting: true,
+  definitionKind: "strategy",
+  modelKind: "strategy",
+  supportsBacktesting: false,
   warmupCandles: 0,
-  nodes: [],
-  edges: [],
+  nodes: [
+    { id: "eak", type: "strategy.edge_aware_kelly", params: {} },
+    { id: "cr", type: "strategy.clamp_round", params: {} },
+    { id: "gate", type: "strategy.gate", params: {} },
+    { id: "out", type: "output.stake", params: {} },
+  ],
+  edges: [
+    { from: "eak.stake", to: "cr.stake" },
+    { from: "cr.stake", to: "gate.stake" },
+    { from: "eak.stake", to: "gate.pUp" },
+    { from: "gate.stake", to: "out.stake" },
+  ],
 });
 
 // ── Types ─────────────────────────────────────────────────────────────────────────────────────
@@ -39,6 +54,7 @@ export default function Strategies() {
   const { data: strategies, isLoading } = useGetStrategiesQuery();
   const [descMode, setDescMode] = useLocalStorageState<DescriptionMode>("fa.strategies.descMode", "simple");
   const [createStrategy, { isLoading: isCreating }] = useCreateStrategyMutation();
+  const [createError, setCreateError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const ordered = [...(strategies ?? [])].sort((a, b) => {
@@ -48,16 +64,18 @@ export default function Strategies() {
   });
 
   const handleNew = async () => {
+    setCreateError(null);
     try {
       const created = await createStrategy({
         name: "Untitled strategy",
         description: null,
-        definition: DEFAULT_DAG_SKELETON,
+        definition: DEFAULT_STRATEGY_STARTER,
         params: null,
       }).unwrap();
       navigate(`/strategies/${created.id}/designer`);
-    } catch {
-      // silently fail — user can retry
+    } catch (e: unknown) {
+      const err = e as { data?: { error?: string }; message?: string };
+      setCreateError(err.data?.error ?? err.message ?? "Could not create strategy. Please try again.");
     }
   };
 
@@ -120,6 +138,12 @@ export default function Strategies() {
               </button>
             </div>
           </div>
+
+          {createError && (
+            <div className="rounded-md border border-rose-300/30 bg-rose-300/5 text-rose-300 text-xs px-3 py-2">
+              {createError}
+            </div>
+          )}
 
           {/* Empty state */}
           {!isLoading && ordered.length === 0 && (

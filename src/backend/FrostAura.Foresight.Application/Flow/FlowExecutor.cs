@@ -54,7 +54,7 @@ public sealed class FlowExecutor : IFlowExecutor
             {
                 var def = byId[nodeId];
                 var node = _registry.Get(def.Type);
-                var inputs = BuildInputBag(incoming[nodeId], outputs);
+                var inputs = BuildInputBag(incoming[nodeId], outputs, node.Spec, ctx.AmbientInputs);
                 try
                 {
                     var portOutputs = await node.ExecuteAsync(inputs, def.Params, ctx, ct);
@@ -109,15 +109,33 @@ public sealed class FlowExecutor : IFlowExecutor
 
     private static IReadOnlyDictionary<string, object?> BuildInputBag(
         List<EdgeDefinition> edges,
-        Dictionary<(string nodeId, string port), object?> outputs)
+        Dictionary<(string nodeId, string port), object?> outputs,
+        NodePortSpec spec,
+        IReadOnlyDictionary<string, object?>? ambientInputs)
     {
         var bag = new Dictionary<string, object?>(StringComparer.Ordinal);
+
+        // 1. Wire edge-driven inputs first — these always take precedence.
         foreach (var e in edges)
         {
             var (fromNode, fromPort) = e.From.SplitEndpoint();
             var (_,        toPort)   = e.To.SplitEndpoint();
             bag[toPort] = outputs.TryGetValue((fromNode, fromPort), out var val) ? val : null;
         }
+
+        // 2. For any declared input port that was NOT satisfied by an edge, fall back to the
+        //    ambient-inputs dictionary when present. This lets strategy nodes (e.g. edge_aware_kelly)
+        //    read pUp/balance/etc. injected by StrategyEvaluator without requiring upstream wires.
+        //    Edge-wired values set in step 1 are never overwritten here.
+        if (ambientInputs is not null)
+        {
+            foreach (var portDef in spec.Inputs)
+            {
+                if (!bag.ContainsKey(portDef.Name) && ambientInputs.TryGetValue(portDef.Name, out var ambient))
+                    bag[portDef.Name] = ambient;
+            }
+        }
+
         return bag;
     }
 }

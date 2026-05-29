@@ -87,11 +87,14 @@ public sealed class StrategyEvaluator : IStrategyEvaluator
         }
 
         // Execute the strategy DAG. Strategy nodes (edge_aware_kelly, clamp_round, gate, etc.) are
-        // pure functions of their declared input ports wired by the DAG edges. The FlowContext
-        // carries metadata but strategy nodes don't read historical candles or trained state.
+        // pure functions of their declared input ports. Ports in the StrategyContextPorts set are
+        // injected via FlowContext.AmbientInputs rather than requiring upstream edges — this matches
+        // the validator exemption so the same set drives both creation and execution.
+        var ambientInputs = BuildAmbientInputs(step);
+        var strategyCtx = flowCtx with { AmbientInputs = ambientInputs };
         try
         {
-            var result = await _executor.ExecuteAsync(flow, flowCtx, ct);
+            var result = await _executor.ExecuteAsync(flow, strategyCtx, ct);
 
             // Pull the terminal output.stake value.
             if (result.OutputPrediction.TryGetValue("stake", out var stakeObj) && stakeObj is decimal stakeDecimal)
@@ -111,5 +114,32 @@ public sealed class StrategyEvaluator : IStrategyEvaluator
             return 0m;
         }
     }
+
+    /// <summary>
+    /// Builds the ambient-inputs dictionary from a <see cref="StrategyStep"/> so that strategy
+    /// DAG nodes can read their context ports without requiring upstream edges. Port names are the
+    /// EXACT names declared in <see cref="FlowValidator.StrategyContextPorts"/> — this is the
+    /// single mapping that keeps execution and validation in sync.
+    ///
+    /// Mapping:
+    ///   pUp        ← step.Inputs.PUp          (calibrated up-probability)
+    ///   yesPrice   ← step.Inputs.YesPrice      (Polymarket YES price)
+    ///   noPrice    ← step.Inputs.NoPrice        (Polymarket NO price)
+    ///   balance    ← step.NextBankroll          (post-settlement bankroll)
+    ///   currentBet ← step.CurrentBetSize        (size of the just-settled bet)
+    ///   initialBet ← step.InitialBetSize        (session initial-bet size)
+    ///   lastOutcome← step.Won                   (true = last bet won)
+    /// </summary>
+    private static IReadOnlyDictionary<string, object?> BuildAmbientInputs(StrategyStep step) =>
+        new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["pUp"]         = step.Inputs.PUp,
+            ["yesPrice"]    = step.Inputs.YesPrice,
+            ["noPrice"]     = step.Inputs.NoPrice,
+            ["balance"]     = step.NextBankroll,
+            ["currentBet"]  = step.CurrentBetSize,
+            ["initialBet"]  = step.InitialBetSize,
+            ["lastOutcome"] = step.Won,
+        };
 }
 

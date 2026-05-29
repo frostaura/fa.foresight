@@ -22,6 +22,19 @@ public sealed class FlowValidator
 {
     private readonly NodeRegistry _registry;
 
+    /// <summary>
+    /// The set of input-port names that are runtime-injected by the strategy evaluator as ambient
+    /// context (from <see cref="FrostAura.Foresight.Domain.Trading.StrategyStep"/> and the current
+    /// market prices). For strategy flows (<c>definitionKind == "strategy"</c>), ports in this set
+    /// are treated as satisfied by the required-input check even without an incoming edge, because
+    /// they are fulfilled at runtime via <see cref="FlowContext.AmbientInputs"/>. This set is the
+    /// single source of truth shared with <c>StrategyEvaluator.BuildAmbientInputs</c>.
+    /// </summary>
+    public static readonly IReadOnlySet<string> StrategyContextPorts = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "pUp", "yesPrice", "noPrice", "balance", "currentBet", "initialBet", "lastOutcome",
+    };
+
     public FlowValidator(NodeRegistry registry) => _registry = registry;
 
     public ValidationResult Validate(FlowDefinition flow)
@@ -70,6 +83,9 @@ public sealed class FlowValidator
         }
 
         // 4. Required input ports satisfied
+        // For strategy flows, ports in the StrategyContextPorts set are fulfilled at runtime via
+        // FlowContext.AmbientInputs — they do not need an incoming edge and are skipped here.
+        var isStrategyFlow = string.Equals(flow.DefinitionKind, "strategy", StringComparison.Ordinal);
         var incomingByNodePort = flow.Edges
             .Select(e => e.To.SplitEndpoint())
             .ToHashSet();
@@ -78,6 +94,9 @@ public sealed class FlowValidator
             var spec = nodesByType[n.Id];
             foreach (var p in spec.Inputs.Where(p => p.Required))
             {
+                // Strategy context ports are runtime-injected — skip the edge check for them.
+                if (isStrategyFlow && StrategyContextPorts.Contains(p.Name)) continue;
+
                 if (!incomingByNodePort.Contains((n.Id, p.Name)))
                     return Err($"Required input port '{p.Name}' on node '{n.Id}' is not connected.");
             }

@@ -517,7 +517,10 @@ export interface FlowEdge {
 
 export interface FlowDefinition {
   schemaVersion: number;
-  modelKind: "llm" | "deterministic";
+  // "strategy" applies to staking-strategy DAGs; "llm"/"deterministic" to model DAGs.
+  modelKind: "llm" | "deterministic" | "strategy";
+  // Terminal-node + endpoint validation key: "model" → output.prediction, "strategy" → output.stake.
+  definitionKind?: "model" | "strategy";
   supportsBacktesting: boolean;
   warmupCandles: number;
   nodes: FlowNode[];
