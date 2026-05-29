@@ -118,9 +118,13 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
         if (activeLiveCount >= _guardrails.MaxConcurrentLiveSessions)
             throw new InvalidOperationException($"Max concurrent live sessions ({_guardrails.MaxConcurrentLiveSessions}) reached.");
 
-        // Reservation check.
-        await _ledger.ReserveAsync(_tenant.TenantId!.Value, Guid.Empty /* placeholder, replaced below */, request.InitialBalance, ct);
-        // The above will throw InsufficientPusdException if not enough free balance.
+        // Pre-flight affordability check BEFORE creating the session.
+        // GetFreeAsync queries Σ(active live session current_balance WHERE stopped_at IS NULL AND mode='live').
+        // We must check BEFORE saving so the new session does not appear in that sum yet — otherwise a
+        // subsequent ReserveAsync would double-count the reservation and falsely fail.
+        var free = await _ledger.GetFreeAsync(_tenant.TenantId!.Value, ct);
+        if (request.InitialBalance > free)
+            throw new InsufficientPusdException(request.InitialBalance, free);
 
         var session = new LiveSession
         {
@@ -143,8 +147,12 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
         _db.LiveSessions.Add(session);
         await _db.SaveChangesAsync(ct);
 
-        // Re-reserve with the real session id (we needed the id to exist first).
-        await _ledger.ReserveAsync(_tenant.TenantId!.Value, session.Id, request.InitialBalance, ct);
+        // Write the reservation audit row for session.Id exactly once.
+        // The pre-flight check above already confirmed affordability; the session is now saved, so
+        // its current_balance is included in Σactive — calling IAccountLedger.ReserveAsync again
+        // would double-count and falsely fail.  WriteReserveAuditAsync writes only the observability
+        // row, without re-running the free-balance check.
+        await _ledger.WriteReserveAuditAsync(_tenant.TenantId!.Value, session.Id, request.InitialBalance, ct);
 
         _logger.LogInformation("Live session started: {SessionId} {Venue} {Symbol} {Interval} balance={Balance}",
             session.Id, request.Venue, request.Symbol, request.Interval, request.InitialBalance);
@@ -248,16 +256,31 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                         }
                         else
                         {
-                            _logger.LogDebug("Live bet {BetId}: market {Market} not yet resolved — falling back to candle proxy",
+                            _logger.LogDebug("Live bet {BetId}: market {Market} not yet resolved",
                                 openBet.Id, openBet.MarketExternalId);
                         }
                     }
 
+                    // FIX: for LIVE sessions, do NOT settle until the market has actually resolved.
+                    // The old optimistic proxy (assume the model was right) inflated live P&L until
+                    // real resolution arrived. Paper/backtest sessions keep the candle-direction proxy.
+                    if (isLive && !marketOutcomeUp.HasValue)
+                    {
+                        // Market not yet resolved — leave the bet open and return. The placement
+                        // guard (openBet is null) will keep us from placing a new bet this tick.
+                        _logger.LogDebug("Live session {SessionId}: bet {BetId} awaiting market resolution — skipping settlement this tick",
+                            tracked.Id, openBet.Id);
+                        tracked.LastProcessedAt = DateTimeOffset.UtcNow;
+                        try { await _db.SaveChangesAsync(ct); }
+                        catch (DbUpdateConcurrencyException ex)
+                        { _logger.LogDebug(ex, "Heartbeat save concurrency loss for live session {SessionId}", tracked.Id); }
+                        return tracked;
+                    }
+
                     var entryPrice = openBet.EntryPrice ?? 0.5m;
-                    // If the market resolved, use that; else use the candle-direction proxy (anchor-close comparison).
-                    // The proxy is: bet side "UP" means we predicted UP, so the win condition is price went up.
-                    // With the proxy we assume our prediction was correct — an approximation until market resolution is live.
-                    var outcomeUp = marketOutcomeUp ?? (openBet.Side == "UP"); // market outcome or optimistic proxy
+                    // For live: marketOutcomeUp is guaranteed non-null here (guarded above).
+                    // For paper/backtest: use the candle-direction proxy (bet side "UP" means model predicted UP).
+                    var outcomeUp = marketOutcomeUp ?? (openBet.Side == "UP"); // live: real outcome; paper: proxy
                     var step = StakingEngine.Settle(
                         side: openBet.Side,
                         entryPrice: entryPrice,

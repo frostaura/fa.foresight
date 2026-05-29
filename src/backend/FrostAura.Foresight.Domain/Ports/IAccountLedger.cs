@@ -29,6 +29,16 @@ public interface IAccountLedger
     Task ReserveAsync(Guid tenantId, Guid sessionId, decimal amount, CancellationToken ct);
 
     /// <summary>
+    /// Write a reservation audit row for <paramref name="sessionId"/> WITHOUT re-running the
+    /// free-balance check. Use this after a session has already been saved to the database so its
+    /// current_balance is already included in the Σactive sum — calling ReserveAsync at that point
+    /// would double-count and falsely fail when walletPusd ≈ InitialBalance + otherActive.
+    /// The caller is responsible for verifying affordability before saving the session (via
+    /// GetFreeAsync) and calling this method exactly once per session start.
+    /// </summary>
+    Task WriteReserveAuditAsync(Guid tenantId, Guid sessionId, decimal amount, CancellationToken ct);
+
+    /// <summary>
     /// Update the denormalised reserved_amount display cache for a session after each settle.
     /// <paramref name="currentBalance"/> is the session's post-settle balance (= its current
     /// reservation footprint in the free query).

@@ -178,22 +178,32 @@ EIP-712 domain: name="Polymarket CTF Exchange", version="2", chainId=137. verify
 
 The following will NOT fire until the supervised $1 order passes and the arm is confirmed:
 
-- Real `PlaceOrderAsync` calls to the CLOB (the arm check in `LiveSessionEngine.ProcessAsync` blocks them)
+- Real `PlaceOrderAsync` calls to the CLOB (gated by four independent layers: `LiveTrading=false` → `NullExecutionProvider`; the DI gate; the early-exit arm check in `LiveSessionEngine.ProcessAsync`; and the placement-time arm check). All four must pass before any order fires.
 - Any pUSD leaving the wallet
-- The reservation ledger (GetFreeAsync returns 0 until the wallet balance is wired to the real on-chain pUSD balance query)
 
 The following is active and safe in shadow/disarmed mode:
 
 - Full predict → size → guardrail evaluation pipeline
 - Paper bets placed and resolved identically to real orders
 - SSE events, session tracking, ledger audit entries
-- All 105 tests (including the offline signing suite)
+- All 171 tests (including the offline EIP-712/HMAC signing suite, arm state machine, and reservation invariants)
 
 ---
 
-## Deferred / Post-$1 Items
+## Implemented since first draft (verified in audit, 2026-05-29)
 
-1. **On-chain pUSD balance query**: `AccountLedger.GetWalletPusdAsync` is stubbed at 0. Wire to the pUSD ERC-20 `balanceOf(walletAddress)` call via the Polygon RPC.
-2. **Market resolution from CLOB**: `LiveSessionEngine.ProcessAsync` uses an optimistic proxy for settlement outcome (assumes the side was correct). Wire `GetMarketResolutionAsync` against the CLOB market endpoint to get the real outcome, then record any divergence in `live_bets.divergence_note`.
-3. **SELL order support**: the adapter places BUY orders only. Selling/closing positions is a follow-up workstream.
-4. **Reconcile loop**: `AccountLedger.ReconcileAsync` should be called periodically from a background service (or manually) once live sessions are running.
+The items below were originally deferred but are now in code and covered by tests:
+
+1. **On-chain pUSD balance** — `AccountLedger.GetWalletPusdAsync` makes a real `eth_call` to `balanceOf(wallet)` on the Polygon RPC (`PolygonOptions.RpcUrl`, default `https://polygon-rpc.com`) and scales by 1e6. Returns 0 when no wallet key is configured (shadow mode).
+2. **Market resolution from CLOB** — `GetMarketResolutionAsync` queries `GET /markets/{conditionId}` for the real `resolved`/`outcome`. This is the primary settlement path; **a live bet now stays open until the market actually resolves** (no optimistic proxy). Divergence between model side and market outcome is recorded in `live_bets.divergence_note`. (Paper/backtest still settle via the candle-direction proxy by design.)
+3. **SELL order support** — `PolymarketExecutionProvider.SellAsync` is implemented and gated by the same `LiveTrading` flag. See "Known limitations" for lifecycle status.
+4. **Reconcile loop** — `AccountReconciliationService` (a hosted background service) calls `ReconcileAsync` every 60s (`FORESIGHT_RECONCILE_INTERVAL_SECONDS`) for tenants with active live sessions; non-zero drift is logged and notified.
+
+---
+
+## Known limitations (acceptable for the $1 validation; track for scale-up)
+
+- **Early exit / SELL is not wired into the live session lifecycle.** `SellAsync` exists in the adapter but the engine never calls it — live bets are held to market resolution. This is intentional for BTC up/down (a binary that resolves at expiry); a discretionary close flow is a future workstream.
+- **Open positions are not reconciled against the CLOB** — positions are tracked in the local DB only (`GetOpenPositionsAsync` returns empty). The pUSD-balance reconcile loop covers collateral drift; position-level reconciliation is a scale-up item.
+- **Arm state is in-memory** — a backend restart silently disarms (safe: no orders fire), and an armed live session will pause with "skipped — arm not confirmed" until re-armed. Re-arm after any restart.
+- **Validate on the $1 order, not before:** (a) the EIP-712 `chainId` is serialized as the string `"137"` — Nethereum coerces it to `uint256` and the ecrecover round-trip passes offline, but only a real accepted order confirms the CLOB verifier agrees; (b) confirm the pUSD address `0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB` reflects your funded Polymarket collateral on Polygon mainnet.

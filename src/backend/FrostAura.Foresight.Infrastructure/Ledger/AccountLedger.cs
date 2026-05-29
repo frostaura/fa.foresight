@@ -196,6 +196,36 @@ public sealed class AccountLedger : IAccountLedger
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Writes a "reserve" audit entry for the given session WITHOUT re-running the free-balance
+    /// affordability check. The caller must have already verified <c>GetFreeAsync &gt;= amount</c>
+    /// before persisting the session. Because the session is already saved, its current_balance is
+    /// already included in Σactive and a full ReserveAsync call would double-count it.
+    /// </remarks>
+    public async Task WriteReserveAuditAsync(Guid tenantId, Guid sessionId, decimal amount, CancellationToken ct)
+    {
+        var walletPusd = await GetWalletPusdAsync(tenantId, ct);
+        var free       = await GetFreeAsync(tenantId, ct); // free already reflects the saved session
+
+        _db.AccountLedger.Add(new AccountLedgerEntry
+        {
+            Id         = Guid.NewGuid(),
+            TenantId   = tenantId,
+            Venue      = Venue,
+            EntryKind  = "reserve",
+            SessionId  = sessionId,
+            Amount     = amount,
+            WalletPusd = walletPusd,
+            FreeAfter  = free, // correct: session already in sum, no additional deduction needed
+            Note       = JsonSerializer.Serialize(new { sessionId, amount, auditOnly = true }),
+            CreatedAt  = DateTimeOffset.UtcNow
+        });
+        await _db.SaveChangesAsync(ct);
+        _logger.LogInformation("Ledger reserve (audit-only): tenant {Tenant} session {Session} amount {Amount} free-after {Free}",
+            tenantId, sessionId, amount, free);
+    }
+
+    /// <inheritdoc/>
     public async Task RecomputeAsync(Guid tenantId, Guid sessionId, decimal currentBalance, CancellationToken ct)
     {
         // The session's current_balance already reflects the new value (caller updated it before calling us).
