@@ -81,7 +81,10 @@ export default defineConfig({
     watch: { usePolling: true, interval: 500 },
     proxy: {
       "/api": {
-        target: process.env.VITE_API_TARGET ?? "http://localhost:5000",
+        // 127.0.0.1 (not "localhost") on purpose: on macOS "localhost" resolves to IPv6 ::1 first,
+        // where the AirPlay Receiver squats on port 5000 and returns 403. Forcing IPv4 hits the
+        // backend's 127.0.0.1 bind. Override with VITE_API_TARGET for non-local backends.
+        target: process.env.VITE_API_TARGET ?? "http://127.0.0.1:5000",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, "/api")
       }

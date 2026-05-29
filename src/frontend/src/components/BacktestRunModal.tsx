@@ -17,7 +17,7 @@ interface Row { t: number; price: number; balance: number; dotY: number; state: 
 
 function fmtTime(ms: number) {
   const d = new Date(ms);
-  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 }
 
 /**

@@ -137,14 +137,22 @@ export default function RichMultiSelect({
         </div>
       )}
 
-      {/* Trigger */}
-      <button
-        type="button"
+      {/* Trigger — a div (not a button) so the inner Clear button is valid HTML
+          (a <button> cannot be nested inside another <button>). */}
+      <div
+        role="button"
+        tabIndex={0}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => { setOpen((o) => !o); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen((o) => !o);
+          }
+        }}
         className={cn(
-          "w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md",
+          "w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md cursor-pointer",
           "border border-fa-edge bg-fa-ink-2 text-sm",
           "hover:bg-fa-glass transition-colors",
           "focus:outline-none focus-visible:ring-1 focus-visible:ring-fa-frost-bright/40",
@@ -178,7 +186,7 @@ export default function RichMultiSelect({
             open && "rotate-180"
           )}
         />
-      </button>
+      </div>
 
       {/* Panel */}
       {open && (

@@ -3,12 +3,12 @@
  * stays in lib/pnl.ts; this module owns dates only.
  */
 
-/** Same calendar day (locale) → "10:38 PM"; otherwise → "09 May 2026". */
+/** Same calendar day (locale) → "22:38" (24h); otherwise → "09 May 2026". */
 export function fmtRunTime(iso: string | Date): string {
   const d = typeof iso === "string" ? new Date(iso) : iso;
   const now = new Date();
   if (d.toDateString() === now.toDateString())
-    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   return fmtRunDate(d);
 }
 

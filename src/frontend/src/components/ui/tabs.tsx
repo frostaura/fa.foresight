@@ -47,7 +47,11 @@ const TabsContent = React.forwardRef<
   <TabsPrimitive.Content
     ref={ref}
     className={cn(
-      "mt-0 focus-visible:outline-none",
+      // Radix keeps inactive panels mounted with a `hidden` attribute. When callers add a
+      // `flex` display class, `display:flex` overrides the UA `[hidden]{display:none}`, leaving the
+      // inactive panel laid out and consuming space. This variant re-hides it with later cascade
+      // priority so inactive panels never reserve layout height.
+      "mt-0 focus-visible:outline-none data-[state=inactive]:hidden",
       className
     )}
     {...props}

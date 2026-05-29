@@ -69,8 +69,11 @@ export default function StrategyDesignerPage() {
     );
   }
 
-  // ── Built-in (code-defined) strategy — read-only info panel ───────────────
-  if (strategy.isBuiltIn || strategy.definition == null) {
+  // ── Code-defined strategy (no DAG) — read-only info panel ─────────────────
+  // Only strategies WITHOUT a flow definition (the built-in staking strategies, which live in
+  // server-side code) get the text panel. A built-in that DOES have a DAG (e.g. the demo) renders
+  // the real canvas in read-only mode so the graph + Design|Code views are visible.
+  if (strategy.definition == null) {
     const displayDescription =
       strategy.simpleDescription ?? strategy.technicalDescription ?? strategy.description ?? null;
 
@@ -182,13 +185,13 @@ export default function StrategyDesignerPage() {
     );
   }
 
-  // ── Custom DAG strategy — full FlowDesigner ────────────────────────────────
+  // ── DAG strategy — full FlowDesigner (read-only when built-in) ─────────────
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <FlowDesigner
         title={strategy.name}
         definitionJson={strategy.definition ?? EMPTY_DAG}
-        isBuiltIn={false}
+        isBuiltIn={strategy.isBuiltIn}
         catalogue={catalogue ?? {}}
         entityKind="strategy"
         onSave={async (defJson) => {

@@ -556,7 +556,7 @@ export default function LiveBitcoinChart({
         } else {
           state = "open";
         }
-        const placedAt = new Date(bet.placedAt).toLocaleTimeString();
+        const placedAt = new Date(bet.placedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
         const sizeStr = `$${bet.size.toFixed(2)}`;
         const tooltip = state === "open"
           ? `${bet.side} · open · placed ${placedAt} · ${sizeStr}`

@@ -507,7 +507,7 @@ function LedgerRow({ bet }: { bet: PaperBet }) {
                              "bg-fa-frost-dim/50 animate-pulse";
   const dotTitle = bet.outcome ?? "open";
   const placedAt = new Date(bet.placedAt);
-  const placedStr = placedAt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const placedStr = placedAt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
   return (
     <tr className="border-t border-fa-edge/40">
       <td className="py-0.5 pr-3 text-fa-frost-dim" title={placedAt.toLocaleString()}>{placedStr}</td>
