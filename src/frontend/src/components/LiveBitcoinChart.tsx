@@ -651,11 +651,11 @@ export default function LiveBitcoinChart({
       ? "fixed inset-0 z-50 bg-fa-ink border border-fa-edge flex flex-col p-4"
       : "fa-card p-4 flex flex-col"
     }>
-      {/* Row 1 — context strip: favorited timeframe pill, model selector, controls.
-          On narrow cards (mobile) this wraps into two rows: pill + expand on the first row,
-          model selector + gate + view toggle on the second. On sm+ everything sits on one row. */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-        {/* Title / interval pill — always visible, anchors the first row on mobile */}
+      {/* Header — two compact rows that hold regardless of card width (these cards live in a
+          responsive grid, so a viewport-keyed breakpoint can't tell how wide the card actually is).
+          Row 1: favorite/interval pill (left) + full-screen (right). Row 2: model selector + gate +
+          view toggle. Two clean lines, never three. */}
+      <div className="flex items-center gap-2">
         <InfoTip
           content={
             <TipBody title="Favorite timeframe">
@@ -679,25 +679,21 @@ export default function LiveBitcoinChart({
           </button>
         </InfoTip>
 
-        {/* Full-screen toggle — pinned after the title pill on mobile so it stays in the first
-            row and never overflows. Pushed to the far right by the spacer on sm+. */}
         <button
           onClick={() => setFullscreen((v) => !v)}
           aria-label={fullscreen ? "Exit full screen" : "Full screen"}
           title={fullscreen ? "Exit full screen (Esc)" : "Full screen"}
-          className="shrink-0 p-1.5 rounded-md border border-fa-edge text-fa-frost-dim hover:text-fa-frost-bright hover:bg-fa-glass transition sm:order-last sm:ml-auto"
+          className="shrink-0 ml-auto p-1.5 rounded-md border border-fa-edge text-fa-frost-dim hover:text-fa-frost-bright hover:bg-fa-glass transition"
           onKeyDown={(e) => { if (e.key === "Escape") setFullscreen(false); }}
         >
           {fullscreen
             ? <Minimize2 className="h-3.5 w-3.5" />
             : <Maximize2 className="h-3.5 w-3.5" />}
         </button>
+      </div>
 
-        {/* Controls row: model selector (flex-1, shrinks) + gate + view toggle.
-            On mobile these wrap below the pill; on sm+ they appear inline after the pill. */}
-        {/* Price + delta intentionally removed here — the live price already renders prominently
-            above this card, so the model selector takes the freed width (flex-1) instead. */}
-        <div className="flex flex-1 items-center gap-2 min-w-0 basis-full sm:basis-auto sm:order-none order-last">
+      {/* Row 2 — model selector (flex-1, shrinks) + gate + view toggle. */}
+      <div className="flex items-center gap-2 min-w-0 mt-1.5">
           {!hidePaperPanel && <ModelPicker symbol={symbol} interval={interval} grow status={modelStatus} />}
           <InfoTip
             content={
@@ -737,7 +733,6 @@ export default function LiveBitcoinChart({
             ))}
           </div>
         </div>
-      </div>
 
       {/* Row 2 — next-candle band: direction, conf, countdown, trade signal, accuracy. Separated
           from row 1 by a hairline divider inside the component, not a nested tinted box. */}
@@ -1141,11 +1136,11 @@ function NextCandleAction({
           translate-y keeps everything sharing the same visible baseline so "UP" and "54%" line up
           cleanly regardless of font size. items-baseline alone would pick the SVG's bottom edge
           on the larger span and shove the smaller percentage down. */}
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <div className="flex items-baseline gap-2">
           {prediction ? (
             <>
-              <span className={`text-2xl font-light leading-none ${dirColor}`}>
+              <span className={`text-xl font-light leading-none ${dirColor}`}>
                 {up
                   ? <ArrowUp className="inline h-5 w-5 -translate-y-[3px] mr-0.5" strokeWidth={2.25} />
                   : <ArrowDown className="inline h-5 w-5 -translate-y-[3px] mr-0.5" strokeWidth={2.25} />
@@ -1179,7 +1174,7 @@ function NextCandleAction({
             and hit-rate text. items-center because the capsule has its own bordered box; baseline
             alignment would push it visually below the text chips. */}
         {(prediction || tradeSignal || accuracy) && (
-          <div className="flex items-center gap-x-2 fa-caption sm:text-xs tabular-nums ml-auto whitespace-nowrap">
+          <div className="flex items-center gap-x-2 fa-caption sm:text-xs tabular-nums whitespace-nowrap">
             {prediction && <BetCapsule pUp={probUp} />}
             {prediction && (tradeSignal || accuracy) && <span className="text-fa-frost-dim/50" aria-hidden>·</span>}
             {tradeSignal && (
