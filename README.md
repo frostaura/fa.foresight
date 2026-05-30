@@ -1,95 +1,105 @@
 <p align="center">
-  <img src="https://github.com/frostaura/ai.toolkit.gaia/blob/main/README.icon.png?raw=true" alt="Gaia" width="300" />
+  <img src="./README.icon.png" alt="FrostAura Foresight" width="220" />
 </p>
 
-<h1 align="center"><b>Gaia</b></h1>
-<h3 align="center">full-stack apps. enterprise-grade. maintainable. customizable.</h3>
-<p align="center"><i>A team of AI agents, available as a plugin for GitHub Copilot and Claude Code.</i></p>
+<h1 align="center"><b>FrostAura Foresight</b></h1>
+<h3 align="center">predict the next candle. size the bet. trade it automatically.</h3>
+<p align="center"><i>A lean, automated directional-trading platform for short-horizon BTC up/down on Polymarket.</i></p>
 
 ---
 
-[![Version 9](https://img.shields.io/badge/Version-9-purple.svg)]()
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub Copilot](https://img.shields.io/badge/GitHub-Copilot-blue.svg)]()
-[![Claude Code](https://img.shields.io/badge/Claude-Code-orange.svg)]()
+<p align="center">
+  <a href="https://github.com/frostaura/fa.foresight/actions/workflows/ci.yml"><img src="https://github.com/frostaura/fa.foresight/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <img src="https://img.shields.io/badge/.NET-10-512BD4.svg" alt=".NET 10" />
+  <img src="https://img.shields.io/badge/React-19-61DAFB.svg" alt="React 19" />
+  <img src="https://img.shields.io/badge/Postgres-16-336791.svg" alt="PostgreSQL 16" />
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+</p>
 
 ---
 
-## What is Gaia?
+## What is Foresight?
 
-Gaia is a **team of AI agents** that builds and evolves software using **spec-driven development**. You describe your goal; Gaia coordinates architecture, planning, implementation, testing, and release.
+FrostAura Foresight is an **automated directional-trading platform** — a cash engine, not a research toy.
 
-The workflow contract lives in [`AGENTS.md`](./AGENTS.md).
+Deterministic ML models (logistic and gradient-boosted-tree families) predict short-horizon **BTC up/down on 5m and 15m intervals**. A strategy layer then sizes each bet against **real Polymarket CLOB V2 odds** using edge-aware true Kelly, alongside four baseline strategies for comparison.
+
+The system runs on its own: proven first in a faithful **paper simulation** and a **chaos/bust test**, then armed to trade **live against Polymarket's on-chain CLOB**. First instrument: BTC up/down, 5m and 15m.
 
 ---
 
-## Install
+## How it works
 
-### GitHub Copilot
-
-```bash
-copilot plugin marketplace add frostaura/ai.toolkit.gaia
-
-copilot plugin install gaia-foundation@frostaura
+```
+  market data ──▶ model DAG ──▶ direction + confidence ──▶ strategy DAG ──▶ sized order ──▶ Polymarket CLOB V2
+                    │                                          │
+                    └──────────── sandboxed Python nodes ──────┘
+                            (pure · network-isolated · deterministic)
 ```
 
-### Claude Code
-
-```bash
-/plugin marketplace add frostaura/ai.toolkit.gaia
-
-/plugin install gaia-foundation@frostaura
-```
+- **Dual-view DAG authoring.** Models and strategies are built on a Logic-Apps-style surface that round-trips losslessly between a **design view** and a **code view** — drag the graph or edit the code, never lose either.
+- **Sandboxed execution.** Executable Python nodes run in a **network-isolated sidecar** that enforces purity: the same definition and inputs produce identical output in live trading, step-through debugging, and the bust test. This faithfulness guarantee is non-negotiable.
+- **Edge-aware sizing.** True Kelly sizes each position against live order-book odds, with four baseline strategies for honest benchmarking.
+- **Prove before you arm.** Live trading stays disarmed (`Polymarket__LiveTrading=false`) until a supervised $1 validation order passes. Paper and chaos tests gate everything upstream.
 
 ---
 
-## Use it
+## Stack
 
-Open any project and prompt your assistant:
+| Layer | Technology |
+| --- | --- |
+| **Backend** | .NET 10 · ASP.NET Core (Minimal APIs + SSE) · EF Core 10 · hexagonal architecture |
+| **Frontend** | React 19 · TypeScript · Redux Toolkit (RTK Query) · Tailwind CSS · shadcn/ui · Vite · PWA |
+| **Sandbox** | Python 3.12 · FastAPI · uvicorn · containerized & network-isolated |
+| **Data** | PostgreSQL 16 |
+| **Deploy** | Docker Compose → GitHub Actions → multi-arch Docker Hub → Portainer → Cloudflared |
 
-> **"Create a REST API for a blog with posts and comments."**
+Multi-tenant data scaffolding is in place from day one (every entity is tenant-scoped) for B2B optionality, but the MVP runs single-user.
 
-Gaia will refine the request, draft architecture into `docs/`, plan the work, implement it, test it, and validate release gates — automatically.
+---
 
-### Headless (Copilot CLI)
+## Quick start
 
 ```bash
-copilot -p "Create a REST API for a blog with posts and comments" --yolo
+# clone
+git clone https://github.com/frostaura/fa.foresight.git
+cd fa.foresight
+
+# configure
+cp .env.example .env   # then fill in the required values
+
+# run the full stack (backend + frontend + sandbox + postgres + gateway)
+docker compose up --build
 ```
+
+The gateway is exposed on **http://localhost:8088** by default. The backend listens on port `5000` internally; the sandbox sits on a network-isolated bridge and cannot reach the internet.
+
+Going live on Polymarket CLOB V2 is a deliberate, gated process — see [`docs/live-setup.md`](./docs/live-setup.md).
+
+---
+
+## Repository layout
+
+```
+src/backend    .NET 10 API — domain core, ports, adapters
+src/frontend   React 19 PWA — DAG authoring, charts, session control
+src/sandbox    Python execution sidecar — pure, network-isolated nodes
+nginx/         gateway config (template-mounted)
+docs/          setup & operational guides
+```
+
+> `fa.foresight.slnx` (project root) is the .NET solution file — not inside `src/backend/`.
 
 ---
 
 ## Disclaimers
 
-Gaia uses a **remote MCP server** by default so plans, memories, and evolution lessons persist across machines and sessions (including GitHub Copilot's web coding agent).
+Foresight is positioned as an automated trading system operating on **information markets** (Polymarket prediction markets / event futures). It is **not** a gambling product and must never be repositioned as one.
 
-**Stored:** evolution suggestions, task plans, project memory — all segregated by project name.
-**Not stored:** user PII, project code, specs, or documentation.
-
-Prefer fully local? Point the MCP config at a local STDIO server instead.
-
----
-
-## Local development
-
-Working on Gaia itself? Install the plugin from a local clone so changes are picked up immediately.
-
-### GitHub Copilot
-
-```bash
-copilot plugin install /absolute/path/to/ai.toolkit.gaia
-```
-
-### Claude Code
-
-```bash
-/plugin marketplace add /absolute/path/to/ai.toolkit.gaia
-
-/plugin install gaia-foundation@frostaura
-```
+Trading involves risk of loss. Nothing here is financial advice. Live trading remains disarmed until explicitly validated and enabled by the operator.
 
 ---
 
 <p align="center">
-  <i>"In Greek mythology, Gaia is the personification of Earth and the ancestral mother of all life."</i>
+  <i>From ambition to enduring progress. — FrostAura Technologies</i>
 </p>
