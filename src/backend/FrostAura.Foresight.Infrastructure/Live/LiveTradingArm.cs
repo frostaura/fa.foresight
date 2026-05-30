@@ -42,11 +42,15 @@ public sealed class LiveTradingArm : ILiveTradingArm
     // so the armed flag survives a restart.
     private readonly IServiceScopeFactory? _scopes;
     private readonly ILogger<LiveTradingArm>? _logger;
+    // Optional SSE fan-out — null in unit tests; in production lets the Live page react to arm/disarm
+    // without polling /api/live/status.
+    private readonly ILiveEventHub? _events;
 
-    public LiveTradingArm(IServiceScopeFactory? scopes = null, ILogger<LiveTradingArm>? logger = null)
+    public LiveTradingArm(IServiceScopeFactory? scopes = null, ILogger<LiveTradingArm>? logger = null, ILiveEventHub? events = null)
     {
         _scopes = scopes;
         _logger = logger;
+        _events = events;
     }
 
     public bool IsArmed(Guid tenantId) => _armed.TryGetValue(tenantId, out var a) && a;
@@ -66,6 +70,7 @@ public sealed class LiveTradingArm : ILiveTradingArm
         _pending.TryRemove(tenantId, out _);
         _armed[tenantId] = true;
         Persist(tenantId, armed: true);
+        _events?.Publish(new LiveEvent(tenantId, LiveEventKind.ArmChanged, Armed: true, SessionId: null));
         return true;
     }
 
@@ -74,6 +79,7 @@ public sealed class LiveTradingArm : ILiveTradingArm
         _armed[tenantId] = false;
         _pending.TryRemove(tenantId, out _);
         Persist(tenantId, armed: false);
+        _events?.Publish(new LiveEvent(tenantId, LiveEventKind.ArmChanged, Armed: false, SessionId: null));
     }
 
     public async Task HydrateAsync(CancellationToken ct)

@@ -584,6 +584,7 @@ public sealed class ModelTrainingService : IModelTrainingService
     private readonly ITenantContext _tenant;
     private readonly ModelTrainer _trainer;
     private readonly IServiceScopeFactory _scopes;
+    private readonly IModelEventHub _events;
     private readonly ILogger<ModelTrainingService> _logger;
 
     public ModelTrainingService(
@@ -591,12 +592,14 @@ public sealed class ModelTrainingService : IModelTrainingService
         ITenantContext tenant,
         ModelTrainer trainer,
         IServiceScopeFactory scopes,
+        IModelEventHub events,
         ILogger<ModelTrainingService> logger)
     {
         _db = db;
         _tenant = tenant;
         _trainer = trainer;
         _scopes = scopes;
+        _events = events;
         _logger = logger;
     }
 
@@ -829,6 +832,11 @@ public sealed class ModelTrainingService : IModelTrainingService
         model.UpdatedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
 
+        // Push the "training" transition to any open SSE subscriber so the UI flips state without
+        // polling. The hub is a singleton, so it stays valid for the background task below even
+        // after this request's scope is disposed.
+        _events.Publish(new ModelEvent(tenantId, modelId, ModelEventKind.Training, null));
+
         // Fire-and-forget on a fresh DI scope with CancellationToken.None so the fit outlives the
         // HTTP request (and the browser tab) that started it. The UI watches TrainingStatus.
         _ = Task.Run(() => RunTrainingInBackgroundAsync(modelId, tenantId, tenantSlug, symbol, holdoutDays, interval), CancellationToken.None);
@@ -857,6 +865,8 @@ public sealed class ModelTrainingService : IModelTrainingService
             m.TrainingError = null;
             m.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync();
+            // Success transition → UI invalidates its model cache and the train gate resolves.
+            _events.Publish(new ModelEvent(tenantId, modelId, ModelEventKind.Trained, null));
         }
         catch (Exception ex)
         {
@@ -868,6 +878,7 @@ public sealed class ModelTrainingService : IModelTrainingService
                 m.TrainingError = ex.Message.Length > 2000 ? ex.Message[..2000] : ex.Message;
                 m.UpdatedAt = DateTimeOffset.UtcNow;
                 await db.SaveChangesAsync();
+                _events.Publish(new ModelEvent(tenantId, modelId, ModelEventKind.Failed, m.TrainingError));
             }
             catch (Exception saveEx) { _logger.LogError(saveEx, "Failed to mark training {Id} as failed", modelId); }
         }
