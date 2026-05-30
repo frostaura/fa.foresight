@@ -40,7 +40,7 @@ public static class PaperEndpoints
                 return Results.BadRequest(new { error = "symbol and interval are required" });
             try
             {
-                var s = await svc.StartAsync(req.Symbol, req.Interval, req.InitialBalance, req.InitialBetSize, req.StrategyId, req.Gated, ct);
+                var s = await svc.StartAsync(req.Symbol, req.Interval, req.InitialBalance, req.InitialBetSize, req.StrategyId, req.Gated, ct, startedAt: req.StartTime);
                 return Results.Created($"/api/paper/sessions/{req.Symbol}/{req.Interval}", s);
             }
             catch (InvalidOperationException ex)
@@ -124,4 +124,7 @@ public static class PaperEndpoints
     }
 }
 
-public sealed record StartSessionRequest(string Symbol, string Interval, decimal InitialBalance, decimal InitialBetSize, string? StrategyId, bool Gated = false);
+/// <param name="StartTime">Optional back-dated trading start (ISO-8601). When set to a past instant,
+/// the session back-bets every candle from that boundary up to now so the ledger/chart/balance read as
+/// a continuous run. Omitted / null = start now.</param>
+public sealed record StartSessionRequest(string Symbol, string Interval, decimal InitialBalance, decimal InitialBetSize, string? StrategyId, bool Gated = false, DateTimeOffset? StartTime = null);

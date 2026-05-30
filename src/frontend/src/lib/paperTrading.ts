@@ -211,12 +211,15 @@ export function usePaperSession(symbol: string, interval: string) {
     };
   }, [symbol, interval]);
 
-  const start = useCallback(async (initialBalance: number, initialBetSize: number, strategyId: string, gated: boolean) => {
+  // `startTime` (optional) back-dates the session: an ISO-8601 instant in the past makes the server
+  // back-bet every candle from that boundary up to now, so the ledger/chart/balance read as a
+  // continuous run. Omit (or pass undefined) to start now.
+  const start = useCallback(async (initialBalance: number, initialBetSize: number, strategyId: string, gated: boolean, startTime?: string) => {
     const tenant = tenantSlug();
     const res = await fetch(`${apiBase}/paper/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Tenant-Slug": tenant },
-      body: JSON.stringify({ symbol, interval, initialBalance, initialBetSize, strategyId, gated })
+      body: JSON.stringify({ symbol, interval, initialBalance, initialBetSize, strategyId, gated, startTime: startTime ?? null })
     });
     if (!res.ok) {
       const detail = await res.json().catch(() => ({}));
