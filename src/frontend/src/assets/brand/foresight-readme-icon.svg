@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" fill="none" role="img" aria-label="FrostAura Foresight mark">
+  <defs>
+    <linearGradient id="fa-foresight-star" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#BAE6FD" />
+      <stop offset="100%" stop-color="#60A5FA" />
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="b" />
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <!-- expanding horizon arcs: foresight reaching further into the future -->
+  <path d="M55 280 Q 200 215 345 280" stroke="#7DD3FC" stroke-width="14" stroke-linecap="round" opacity="0.55" fill="none" />
+  <path d="M90 322 Q 200 270 310 322" stroke="#7DD3FC" stroke-width="14" stroke-linecap="round" opacity="0.32" fill="none" />
+  <!-- four-point compass star: FrostAura family DNA, set as the focal north-star above the horizon -->
+  <g transform="translate(200 145)" filter="url(#glow)">
+    <path d="M0 -85 L 17 -17 L 85 0 L 17 17 L 0 85 L -17 17 L -85 0 L -17 -17 Z" fill="url(#fa-foresight-star)" />
+    <circle cx="0" cy="0" r="13" fill="#0B1220" />
+  </g>
+</svg>

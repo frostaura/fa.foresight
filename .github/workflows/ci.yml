@@ -1,0 +1,667 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ============================================================================
+  # Backend — lint, build, test (.NET 10)
+  # ============================================================================
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ./src/backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('src/backend/**/*.csproj', 'src/backend/**/*.slnx') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore ../../fa.foresight.slnx
+
+      - name: Lint (format check)
+        run: dotnet format ../../fa.foresight.slnx --verify-no-changes --no-restore
+
+      - name: Build
+        run: dotnet build ../../fa.foresight.slnx --nologo -v q --no-restore
+
+      - name: Test with coverage
+        run: dotnet test FrostAura.Foresight.Tests/FrostAura.Foresight.Tests.csproj --nologo -v q --settings coverlet.runsettings --results-directory ./TestResults
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          echo "## .NET Coverage Reports"
+          find ./TestResults -name "coverage.cobertura.xml" -exec echo "  Found: {}" \;
+
+      - name: Enforce coverage threshold
+        run: |
+          # Baseline ratchet: set to current measured backend line coverage (~40.8%).
+          # Raise this as the test suite grows — it is a regression guard, not a target.
+          THRESHOLD=40
+          REPORT=$(find ./TestResults -name "coverage.cobertura.xml" | head -1)
+          if [ -z "$REPORT" ]; then
+            echo "No Cobertura coverage report found"
+            exit 1
+          fi
+          echo "Parsing: $REPORT"
+          line_rate=$(grep -oP 'line-rate="\K[^"]+' "$REPORT" | head -1)
+          if [ -z "$line_rate" ]; then
+            echo "Could not parse line-rate from report"
+            exit 1
+          fi
+          coverage=$(awk "BEGIN {printf \"%.1f\", $line_rate * 100}")
+          echo "Line coverage: ${coverage}%"
+          echo "Threshold:     ${THRESHOLD}%"
+          if [ "$(awk "BEGIN {print ($coverage < $THRESHOLD)}")" -eq 1 ]; then
+            echo "Coverage ${coverage}% is below the ${THRESHOLD}% threshold"
+            exit 1
+          fi
+          echo "Coverage ${coverage}% meets the ${THRESHOLD}% threshold"
+
+  # ============================================================================
+  # Frontend — lint, build, test (Node 22 / React 19 / Vite)
+  # ============================================================================
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ./src/frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ./src/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test with coverage
+        run: npm run test -- --run --coverage
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: frontend-test-results
+          path: ./src/frontend/test-results/
+          retention-days: 7
+
+      - name: Enforce frontend coverage threshold
+        run: |
+          # Baseline placeholder: the frontend test suite is freshly scaffolded (vitest + v8
+          # coverage + smoke tests in src/lib). Coverage starts near zero; this gate guards that
+          # the test infra and coverage report stay intact. Raise it as the suite grows.
+          THRESHOLD=0
+          REPORT="coverage/coverage-summary.json"
+          if [ ! -f "$REPORT" ]; then
+            echo "Missing coverage summary artifact at $REPORT"
+            exit 1
+          fi
+          node -e "
+            const r = require('./coverage/coverage-summary.json');
+            const pct = r.total.lines.pct;
+            const threshold = ${THRESHOLD};
+            console.log('Line coverage: ' + pct + '%');
+            console.log('Threshold:     ' + threshold + '%');
+            if (pct < threshold) {
+              console.error('Coverage ' + pct + '% is below the ' + threshold + '% threshold');
+              process.exit(1);
+            }
+            console.log('Coverage ' + pct + '% meets the ' + threshold + '% threshold');
+          "
+
+  # ============================================================================
+  # Frontend E2E — single-shard Playwright smoke (chromium only)
+  # ============================================================================
+  frontend-e2e:
+    name: Frontend E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [frontend]
+    defaults:
+      run:
+        working-directory: ./src/frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ./src/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        timeout-minutes: 10
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: |
+            ./src/frontend/test-results/
+            ./src/frontend/playwright-report/
+          retention-days: 7
+
+  # ============================================================================
+  # Sandbox — build image + run pytest
+  # ============================================================================
+  sandbox:
+    name: Sandbox
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ./src/sandbox
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ./src/sandbox/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pytest
+        run: python -m pytest tests/ -v --tb=short
+
+      - name: Build sandbox Docker image (validation only)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/sandbox
+          file: ./src/sandbox/Dockerfile
+          push: false
+          platforms: linux/amd64
+
+  # ============================================================================
+  # Security — npm audit + dotnet vulnerable package scan
+  # ============================================================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: [frontend, backend]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ./src/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./src/frontend
+        run: npm ci
+
+      - name: npm audit (high severity)
+        working-directory: ./src/frontend
+        run: npm audit --audit-level=high
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore backend packages
+        working-directory: ./src/backend
+        run: dotnet restore ../../fa.foresight.slnx
+
+      - name: Check vulnerable NuGet packages
+        working-directory: ./src/backend
+        run: |
+          set -euo pipefail
+          dotnet list ../../fa.foresight.slnx package --vulnerable --include-transitive --format json > vulnerable-packages.json
+          node -e "
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('vulnerable-packages.json', 'utf8'));
+            const projects = report.projects || [];
+            const vulnerable = [];
+            for (const project of projects) {
+              for (const framework of project.frameworks || []) {
+                for (const pkg of framework.topLevelPackages || []) {
+                  if ((pkg.vulnerabilities || []).length > 0) vulnerable.push(pkg);
+                }
+                for (const pkg of framework.transitivePackages || []) {
+                  if ((pkg.vulnerabilities || []).length > 0) vulnerable.push(pkg);
+                }
+              }
+            }
+            if (vulnerable.length > 0) {
+              console.error('Vulnerable NuGet packages detected:');
+              for (const pkg of vulnerable) {
+                const ids = (pkg.vulnerabilities || []).map(v => v.severity + ':' + v.advisoryUrl).join(', ');
+                console.error('- ' + pkg.id + ' ' + pkg.resolvedVersion + ' -> ' + ids);
+              }
+              process.exit(1);
+            }
+            console.log('No vulnerable NuGet packages detected');
+          "
+
+  # ============================================================================
+  # Backend Integration — real Postgres boundary checks
+  # ============================================================================
+  backend-integration:
+    name: Backend Integration (Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [backend]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: foresight
+          POSTGRES_PASSWORD: foresight_test_pw
+          POSTGRES_DB: foresight_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U foresight"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: ./src/backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore FrostAura.Foresight.Tests/FrostAura.Foresight.Tests.csproj
+
+      - name: Run integration tests against Postgres
+        env:
+          API_BOUNDARY_TEST_CONNECTION_STRING: Host=localhost;Port=5432;Database=foresight_test;Username=foresight;Password=foresight_test_pw
+        run: dotnet test FrostAura.Foresight.Tests/FrostAura.Foresight.Tests.csproj --nologo -v q --filter "FullyQualifiedName~IntegrationTests"
+
+  # ============================================================================
+  # Docker Build & Push — only on push to main, after all CI gates pass
+  # ============================================================================
+  build-backend-amd64:
+    name: Build Backend (amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [backend, frontend, frontend-e2e, sandbox, backend-integration, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push backend image (amd64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./src/backend/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/foresight-backend:latest-amd64
+
+  build-backend-arm64:
+    name: Build Backend (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    needs: [backend, frontend, frontend-e2e, sandbox, backend-integration, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push backend image (arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./src/backend/Dockerfile
+          push: true
+          platforms: linux/arm64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/foresight-backend:latest-arm64
+
+  merge-backend-manifests:
+    name: Create Backend Multi-arch Manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [build-backend-amd64, build-backend-arm64]
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create and push manifest
+        run: |
+          docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/foresight-backend:latest \
+            ${{ secrets.DOCKERHUB_USERNAME }}/foresight-backend:latest-amd64 \
+            ${{ secrets.DOCKERHUB_USERNAME }}/foresight-backend:latest-arm64
+
+  build-sandbox-amd64:
+    name: Build Sandbox (amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [backend, frontend, frontend-e2e, sandbox, backend-integration, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push sandbox image (amd64)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/sandbox
+          file: ./src/sandbox/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/foresight-sandbox:latest-amd64
+
+  build-sandbox-arm64:
+    name: Build Sandbox (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    needs: [backend, frontend, frontend-e2e, sandbox, backend-integration, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push sandbox image (arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/sandbox
+          file: ./src/sandbox/Dockerfile
+          push: true
+          platforms: linux/arm64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/foresight-sandbox:latest-arm64
+
+  merge-sandbox-manifests:
+    name: Create Sandbox Multi-arch Manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [build-sandbox-amd64, build-sandbox-arm64]
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create and push manifest
+        run: |
+          docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/foresight-sandbox:latest \
+            ${{ secrets.DOCKERHUB_USERNAME }}/foresight-sandbox:latest-amd64 \
+            ${{ secrets.DOCKERHUB_USERNAME }}/foresight-sandbox:latest-arm64
+
+  build-frontend-amd64:
+    name: Build Frontend (amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [backend, frontend, frontend-e2e, sandbox, backend-integration, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push frontend image (amd64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./src/frontend/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/foresight-frontend:latest-amd64
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
+
+  build-frontend-arm64:
+    name: Build Frontend (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    needs: [backend, frontend, frontend-e2e, sandbox, backend-integration, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push frontend image (arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./src/frontend/Dockerfile
+          push: true
+          platforms: linux/arm64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/foresight-frontend:latest-arm64
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
+
+  merge-frontend-manifests:
+    name: Create Frontend Multi-arch Manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [build-frontend-amd64, build-frontend-arm64]
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create and push manifest
+        run: |
+          docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/foresight-frontend:latest \
+            ${{ secrets.DOCKERHUB_USERNAME }}/foresight-frontend:latest-amd64 \
+            ${{ secrets.DOCKERHUB_USERNAME }}/foresight-frontend:latest-arm64
+
+  # ============================================================================
+  # Portainer deploy — re-pull images and redeploy the live stack
+  # ============================================================================
+  deploy-portainer:
+    name: Re-pull images and redeploy on Portainer
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [merge-backend-manifests, merge-frontend-manifests, merge-sandbox-manifests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Wait for Docker Hub image propagation
+        run: |
+          echo "Sleeping 30s to let Docker Hub propagate the freshly pushed manifests before Portainer pulls."
+          sleep 30
+
+      - name: Trigger Portainer re-pull and redeploy
+        env:
+          PORTAINER_URL: ${{ secrets.PORTAINER_URL }}
+          PORTAINER_TOKEN: ${{ secrets.PORTAINER_TOKEN }}
+          PORTAINER_ENDPOINT_ID: ${{ secrets.PORTAINER_ENDPOINT_ID }}
+          PORTAINER_STACK_ID: ${{ secrets.PORTAINER_STACK_ID }}
+        run: |
+          set -euo pipefail
+          : "${PORTAINER_URL:?secret PORTAINER_URL is required}"
+          : "${PORTAINER_TOKEN:?secret PORTAINER_TOKEN is required}"
+          : "${PORTAINER_ENDPOINT_ID:?secret PORTAINER_ENDPOINT_ID is required}"
+          : "${PORTAINER_STACK_ID:?secret PORTAINER_STACK_ID is required}"
+
+          api="${PORTAINER_URL%/}/api"
+
+          echo "Fetching current stack file content..."
+          stack_file_content=$(curl -fsSL \
+            -H "X-API-Key: ${PORTAINER_TOKEN}" \
+            "${api}/stacks/${PORTAINER_STACK_ID}/file" \
+            | jq -r '.StackFileContent')
+
+          echo "Fetching current stack metadata..."
+          env_array=$(curl -fsSL \
+            -H "X-API-Key: ${PORTAINER_TOKEN}" \
+            "${api}/stacks/${PORTAINER_STACK_ID}" \
+            | jq -c '.Env // []')
+
+          echo "Submitting update with pullImage=true..."
+          body=$(jq -n \
+            --arg sfc "${stack_file_content}" \
+            --argjson env "${env_array}" \
+            '{stackFileContent: $sfc, env: $env, prune: false, pullImage: true}')
+
+          http_code=$(curl -sS -o /tmp/portainer-resp.json -w "%{http_code}" \
+            -X PUT "${api}/stacks/${PORTAINER_STACK_ID}?endpointId=${PORTAINER_ENDPOINT_ID}" \
+            -H "X-API-Key: ${PORTAINER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data "${body}")
+
+          echo "Portainer responded with HTTP ${http_code}"
+          if [ "${http_code}" -ge 400 ]; then
+            cat /tmp/portainer-resp.json
+            exit 1
+          fi
+          echo "Stack ${PORTAINER_STACK_ID} redeployed successfully."

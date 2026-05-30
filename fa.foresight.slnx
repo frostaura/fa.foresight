@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/backend/FrostAura.Foresight.Domain/FrostAura.Foresight.Domain.csproj" />
+    <Project Path="src/backend/FrostAura.Foresight.Application/FrostAura.Foresight.Application.csproj" />
+    <Project Path="src/backend/FrostAura.Foresight.Infrastructure/FrostAura.Foresight.Infrastructure.csproj" />
+    <Project Path="src/backend/FrostAura.Foresight.Api/FrostAura.Foresight.Api.csproj" />
+    <Project Path="src/backend/FrostAura.Foresight.Tests/FrostAura.Foresight.Tests.csproj" />
+  </Folder>
+</Solution>
