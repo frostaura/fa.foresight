@@ -860,13 +860,9 @@ function BacktestTab({ models, eligible }: { models: Model[]; eligible: Model[] 
     return () => { for (const es of subs.values()) es.close(); subs.clear(); };
   }, []);
 
-  useEffect(() => {
-    if (!history) return;
-    const pending = history.some((r) => r.status === "running" || r.status === "queued");
-    if (!pending) return;
-    const id = window.setInterval(() => refetch(), 2000);
-    return () => window.clearInterval(id);
-  }, [history, refetch]);
+  // No polling: each running backtest opens a per-run SSE (subscribeToRun) whose terminal event
+  // refetches the history, flipping the row running → complete. The list stays live via those
+  // push events, not an interval.
 
   const fanout = useMemo(() =>
     modelIds.flatMap((m) => strategyIds.map((s) => ({ modelId: m, strategyId: s }))),
@@ -1168,6 +1164,46 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
 
   const [runChaos, { isLoading: chaosLoading }] = useRunChaosMutation();
   const { data: chaosRuns, refetch: refetchChaos } = useListChaosRunsQuery({});
+  const chaosSubs = useRef<Map<string, EventSource>>(new Map());
+
+  // Push-based chaos progress: one SSE per in-flight batch (GET /api/chaos/stream?batchId). A combo
+  // finishing emits a progress frame whose sampleIndex reaches totalSamples — we refetch the list so
+  // that row flips running → complete; the terminal completed/failed frame closes the stream. This
+  // replaces the old 2s interval poll.
+  const subscribeToBatch = useCallback((batchId: string) => {
+    if (chaosSubs.current.has(batchId)) return;
+    const es = new EventSource(`/api/chaos/stream?batchId=${batchId}`);
+    chaosSubs.current.set(batchId, es);
+    const cleanup = () => {
+      es.close();
+      chaosSubs.current.delete(batchId);
+      refetchChaos();
+    };
+    es.onmessage = (msg) => {
+      try {
+        const evt = JSON.parse(msg.data);
+        if (evt.kind === "completed" || evt.kind === "failed") { cleanup(); return; }
+        // A single combo just finished (or errored) when its progress reaches the sample total.
+        if (evt.kind === "progress" && (evt.sampleIndex ?? 0) >= (evt.totalSamples ?? 0)) refetchChaos();
+      } catch { /* malformed frame */ }
+    };
+    es.onerror = cleanup;
+  }, [refetchChaos]);
+
+  // Subscribe to any batch with a still-running row (covers runs started in another tab/session).
+  useEffect(() => {
+    for (const cr of chaosRuns ?? []) {
+      if (cr.status === "running" && cr.batchId && !chaosSubs.current.has(cr.batchId)) {
+        subscribeToBatch(cr.batchId);
+      }
+    }
+  }, [chaosRuns, subscribeToBatch]);
+
+  // Close every open chaos stream on unmount.
+  useEffect(() => {
+    const subs = chaosSubs.current;
+    return () => { for (const es of subs.values()) es.close(); subs.clear(); };
+  }, []);
 
   useEffect(() => {
     setModelIds((prev) => sanitizeModelSelection(prev, eligible));
@@ -1189,14 +1225,6 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
     const validIds = new Set(strategiesResp.strategies.map((s) => s.id));
     if (!validIds.has(strategyId)) setStrategyId(strategiesResp.default ?? "flat");
   }, [strategiesResp, strategyId, setStrategyId]);
-
-  // Poll the chaos list while any run is in-flight so rows go running → complete live.
-  useEffect(() => {
-    const pending = (chaosRuns ?? []).some((cr) => cr.status === "running");
-    if (!pending) return;
-    const id = window.setInterval(() => { refetchChaos(); }, 2000);
-    return () => window.clearInterval(id);
-  }, [chaosRuns, refetchChaos]);
 
   // days → candles for the chaos window length. candlesPerDay = 1 day ÷ intervalMs.
   const candlesPerDay = 86_400_000 / intervalToMs(interval);
@@ -1222,8 +1250,9 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
     };
     try {
       // Chaos fans out over all selected models internally — one call per launch.
-      await runChaos(req).unwrap();
+      const { batchId } = await runChaos(req).unwrap();
       refetchChaos();
+      if (batchId) subscribeToBatch(batchId);
     } catch (e: unknown) {
       const err = e as { data?: { error?: string } };
       setError(err.data?.error ?? "Chaos test failed");

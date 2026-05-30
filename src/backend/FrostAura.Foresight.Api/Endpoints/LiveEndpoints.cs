@@ -183,6 +183,61 @@ public static class LiveEndpoints
             }
         });
 
+        // SSE control-plane stream — arm state + live-session changes for the tenant. One shared
+        // socket per browser tab; the Live page refetches arm status on `arm` and the session list on
+        // `session`. Replaces the page's old 4–5s polls of /api/sessions and /api/golive/status.
+        g.MapGet("/events/stream", async (HttpContext ctx, ITenantContext tc, ILiveEventHub hub, CancellationToken ct) =>
+        {
+            if (!tc.IsResolved) return Results.NotFound();
+            var tenantId = tc.TenantId!.Value;
+
+            ctx.Response.Headers.ContentType = "text/event-stream";
+            ctx.Response.Headers.CacheControl = "no-cache";
+            ctx.Response.Headers["X-Accel-Buffering"] = "no";
+            await ctx.Response.Body.FlushAsync(ct);
+
+            var jsonOpts = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+            using var heartbeat = new CancellationTokenSource();
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, heartbeat.Token);
+
+            var pulse = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!linked.IsCancellationRequested)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(15), linked.Token);
+                        await ctx.Response.WriteAsync(": ping\n\n", linked.Token);
+                        await ctx.Response.Body.FlushAsync(linked.Token);
+                    }
+                }
+                catch { /* expected on shutdown */ }
+            }, linked.Token);
+
+            try
+            {
+                await foreach (var evt in hub.Subscribe(linked.Token))
+                {
+                    if (evt.TenantId != tenantId) continue;
+                    var (name, payload) = evt.Kind == LiveEventKind.ArmChanged
+                        ? ("arm", JsonSerializer.Serialize(new { armed = evt.Armed ?? false }, jsonOpts))
+                        : ("session", JsonSerializer.Serialize(new { sessionId = evt.SessionId }, jsonOpts));
+                    var sb = new StringBuilder()
+                        .Append("event: ").Append(name).Append('\n')
+                        .Append("data: ").Append(payload).Append("\n\n");
+                    await ctx.Response.WriteAsync(sb.ToString(), linked.Token);
+                    await ctx.Response.Body.FlushAsync(linked.Token);
+                }
+            }
+            catch (OperationCanceledException) { /* client disconnected */ }
+            finally
+            {
+                heartbeat.Cancel();
+                try { await pulse; } catch { }
+            }
+            return Results.Empty;
+        });
+
         // Best-effort match against an on-Polymarket "BTC up or down" binary whose window aligns
         // with the prediction's target candle. Returns null when nothing's currently live (which
         // is most of the time — Polymarket runs these in bursts). The frontend falls back to a
