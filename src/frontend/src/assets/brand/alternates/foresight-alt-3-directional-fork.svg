@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none" role="img" aria-label="FrostAura Foresight — Directional Fork mark">
+  <defs>
+    <linearGradient id="a3-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0E1B33"/>
+      <stop offset="100%" stop-color="#070D1A"/>
+    </linearGradient>
+    <linearGradient id="a3-up" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#60A5FA"/>
+      <stop offset="100%" stop-color="#E0F2FE"/>
+    </linearGradient>
+    <radialGradient id="a3-glow" cx="72%" cy="30%" r="55%">
+      <stop offset="0%" stop-color="#3B82F6" stop-opacity="0.42"/>
+      <stop offset="100%" stop-color="#3B82F6" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="a3-soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#a3-bg)"/>
+  <rect x="8.5" y="8.5" width="239" height="239" rx="53.5" fill="none" stroke="#7DD3FC" stroke-opacity="0.16"/>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#a3-glow)"/>
+  <!-- shared stem entering from the left -->
+  <path d="M46 128 L 120 128" stroke="#7DD3FC" stroke-width="9" stroke-linecap="round" opacity="0.85"/>
+  <!-- decision node -->
+  <circle cx="120" cy="128" r="8" fill="#0B1220" stroke="#BAE6FD" stroke-width="3.5"/>
+  <!-- DOWN branch: dimmed, not taken -->
+  <path d="M120 128 L 196 188" stroke="#7DD3FC" stroke-width="7" stroke-linecap="round" opacity="0.22"/>
+  <path d="M196 188 l -17 -1 m 17 1 l -2 -17" stroke="#7DD3FC" stroke-width="7" stroke-linecap="round" opacity="0.22" fill="none"/>
+  <!-- UP branch: chosen, illuminated -->
+  <path d="M120 128 L 198 66" stroke="url(#a3-up)" stroke-width="10" stroke-linecap="round" filter="url(#a3-soft)"/>
+  <path d="M198 66 l -22 3 m 22 -3 l -4 22" stroke="#E0F2FE" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#a3-soft)"/>
+  <!-- small north-star accent above the chosen path: FrostAura DNA -->
+  <g transform="translate(150 78)" opacity="0.9">
+    <path d="M0 -11 L 2.2 -2.2 L 11 0 L 2.2 2.2 L 0 11 L -2.2 2.2 L -11 0 L -2.2 -2.2 Z" fill="#BAE6FD"/>
+  </g>
+</svg>

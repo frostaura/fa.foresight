@@ -1,0 +1,231 @@
+# fa.foresight — PRODUCTION compose (Portainer + Cloudflare Tunnel, no host ports)
+#
+# Deploy via Portainer → Stacks → Add stack → Repository:
+#   Repository URL:     https://github.com/frostaura/fa.foresight
+#   Repository ref:     refs/heads/main
+#   Compose path:       docker-compose.prod.yml
+#   Environment vars:   set the keys listed at the bottom of this file (the secret-bearing ones)
+#   GitOps updates:     ON — Portainer re-pulls this file + images on a schedule/webhook
+#
+# This file holds NO secrets: every secret/config is `${VAR}` and supplied by Portainer's
+# "Environment variables" panel (or its .env). That is why it is safe to commit and GitOps-poll.
+#
+# Topology — nothing publishes a host port; ingress is exclusively the Cloudflare Tunnel:
+#   cloudflared ──edge_net──> gateway:80 ──app_net──> backend:5000 (/api,/sse,/health) + frontend:80
+#   backend ──sandbox_net (internal)──> sandbox   (sandbox has NO internet egress)
+# In the Cloudflare Tunnel public-hostname config, point your hostname at:  http://gateway:80
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-foresight}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-foresight}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-foresight} -d ${POSTGRES_DB:-foresight}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app_net
+
+  # Deterministic Python execution sidecar. ONLY on sandbox_net (internal: true) → no internet
+  # egress. Hardened: read-only fs, dropped caps, non-root, memory + pid capped.
+  sandbox:
+    image: frostaura/foresight-sandbox:latest
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 64
+    user: "1001:1001"
+    environment:
+      SANDBOX_ENV: ${SANDBOX_ENV:-production}
+    networks:
+      - sandbox_net
+
+  backend:
+    image: frostaura/foresight-backend:latest
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:5000
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+
+      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-foresight};Username=${POSTGRES_USER:-foresight};Password=${POSTGRES_PASSWORD}"
+      Sandbox__BaseUrl: "http://sandbox:8000"
+
+      CORS_ALLOWED_ORIGINS: ${FORESIGHT_PUBLIC_URL:?FORESIGHT_PUBLIC_URL is required}
+      Foresight__PublicUrl: ${FORESIGHT_PUBLIC_URL}
+
+      # --- Polymarket CLOB V2 — leave empty for paper trading; fill + flip LiveTrading "true"
+      #     only after the supervised $1 validation order passes. ---
+      Polymarket__LiveTrading: ${Polymarket__LiveTrading:-false}
+      KeyVault__PrivateKey: ${KeyVault__PrivateKey:-}
+      KeyVault__SignatureType: ${KeyVault__SignatureType:-0}
+      KeyVault__Funder: ${KeyVault__Funder:-}
+      Polymarket__ApiKey: ${Polymarket__ApiKey:-}
+      Polymarket__ApiSecret: ${Polymarket__ApiSecret:-}
+      Polymarket__ApiPassphrase: ${Polymarket__ApiPassphrase:-}
+      Polymarket__WalletAddress: ${Polymarket__WalletAddress:-}
+
+      # --- Telegram (optional). NotifyChatId is numeric → leave empty or a real integer. ---
+      TelegramBot__Token: ${TelegramBot__Token:-}
+      TelegramBot__NotifyChatId: ${TelegramBot__NotifyChatId:-}
+      TelegramBot__AllowedChatIds__0: ${TelegramBot__AllowedChatIds__0:-}
+      TelegramBot__DefaultTenantSlug: ${TelegramBot__DefaultTenantSlug:-dean}
+      Telegram__EnableCommandListener: ${Telegram__EnableCommandListener:-true}
+
+      # --- Discord (optional). Channel/User ids are numeric → empty or real integers. ---
+      DiscordBot__Token: ${DiscordBot__Token:-}
+      DiscordBot__AllowedChannelIds__0: ${DiscordBot__AllowedChannelIds__0:-}
+      DiscordBot__AllowedChannelIds__1: ${DiscordBot__AllowedChannelIds__1:-}
+      DiscordBot__AllowedUserIds__0: ${DiscordBot__AllowedUserIds__0:-}
+      DiscordBot__DefaultTenantSlug: ${DiscordBot__DefaultTenantSlug:-dean}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      sandbox:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:5000/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - app_net          # internet egress (Polymarket / Binance / Telegram) + db + gateway
+      - sandbox_net      # reach the isolated sandbox
+
+  frontend:
+    image: frostaura/foresight-frontend:latest
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - app_net
+
+  # Single internal entry point. Reverse-proxies /api + /sse + /health to the backend and
+  # everything else to the frontend SPA. Listens on :80 internally; no host port. nginx config
+  # is inlined so the file is self-contained. cloudflared forwards to http://gateway:80.
+  gateway:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      edge_net:
+        aliases:
+          - gateway
+      app_net: {}
+    command:
+      - sh
+      - -c
+      - |
+          cat > /etc/nginx/nginx.conf <<'EOF'
+          worker_processes auto;
+          error_log /var/log/nginx/error.log warn;
+          pid /tmp/nginx.pid;
+          events { worker_connections 1024; }
+
+          http {
+            include /etc/nginx/mime.types;
+            default_type application/octet-stream;
+            sendfile on;
+            keepalive_timeout 65;
+
+            upstream backend_upstream  { server backend:5000; }
+            upstream frontend_upstream { server frontend:80; }
+
+            server {
+              listen 80;
+              server_name _;
+
+              location /api/ {
+                proxy_pass http://backend_upstream/api/;
+                proxy_set_header Host $$http_host;
+                proxy_set_header X-Real-IP $$remote_addr;
+                proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $$scheme;
+                client_max_body_size 10m;
+              }
+
+              # SSE — real-time prediction/bet/order streams; buffering off.
+              location /sse/ {
+                proxy_pass http://backend_upstream/sse/;
+                proxy_set_header Host $$host;
+                proxy_set_header X-Real-IP $$remote_addr;
+                proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $$scheme;
+                proxy_set_header Connection '';
+                proxy_http_version 1.1;
+                chunked_transfer_encoding off;
+                proxy_buffering off;
+                proxy_cache off;
+                proxy_read_timeout 86400s;
+              }
+
+              location /health {
+                proxy_pass http://backend_upstream/health;
+              }
+
+              location / {
+                proxy_pass http://frontend_upstream;
+                proxy_set_header Host $$host;
+                proxy_set_header X-Real-IP $$remote_addr;
+                proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $$scheme;
+              }
+            }
+          }
+          EOF
+
+          nginx -t
+          exec nginx -g 'daemon off;'
+
+  # The ONLY ingress. Connects outbound to Cloudflare; route your public hostname to
+  # http://gateway:80 in the tunnel's public-hostname config.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    command: tunnel run --token "${CLOUDFLARED_TUNNEL_TOKEN:?CLOUDFLARED_TUNNEL_TOKEN is required}"
+    networks:
+      - edge_net
+
+volumes:
+  postgres_data:
+
+networks:
+  edge_net:
+    driver: bridge
+  app_net:
+    driver: bridge
+  sandbox_net:
+    driver: bridge
+    internal: true
+
+# ===========================================================================================
+# Portainer → Environment variables  (set these on the stack — DO NOT hardcode values here)
+# ===========================================================================================
+# REQUIRED:
+#   POSTGRES_PASSWORD          <db password>
+#   FORESIGHT_PUBLIC_URL       https://<your-public-hostname>
+#   CLOUDFLARED_TUNNEL_TOKEN   <from Cloudflare Zero Trust → Tunnels → your tunnel>
+#
+# OPTIONAL (leave unset to disable):
+#   TelegramBot__Token, TelegramBot__NotifyChatId, TelegramBot__AllowedChatIds__0
+#   DiscordBot__Token, DiscordBot__AllowedChannelIds__0/1, DiscordBot__AllowedUserIds__0
+#   Polymarket__* / KeyVault__*  (leave empty until live trading)
+# ===========================================================================================
