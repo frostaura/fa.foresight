@@ -217,23 +217,7 @@ def _worker_main(
             "outputHash": None,
         }
 
-    # Deliver the result, then terminate WITHOUT running interpreter finalization.
-    #
-    # The worker's determinism guards make normal shutdown unsafe: apply_monkeypatches replaces
-    # time.monotonic/perf_counter globally, which CPython's thread-shutdown machinery calls during
-    # finalization, and apply_rlimits sets RLIMIT_FSIZE=0, which makes the flush of file-backed
-    # std streams (e.g. pytest's fd capture) fail. Either can crash the worker at exit (observed as
-    # exit code 120) *after* the result is queued but *before* the Queue feeder thread is drained —
-    # so the parent sees an empty queue and reports a phantom "terminated unexpectedly". Explicitly
-    # draining the feeder to its pipe and then hard-exiting via os._exit guarantees delivery and
-    # skips finalization entirely. (In production the worker is a short-lived compute process, so
-    # there is nothing meaningful to finalize.)
-    try:
-        queue.put(result)
-        queue.close()
-        queue.join_thread()
-    finally:
-        os._exit(0)
+    queue.put(result)
 
 
 # ---------------------------------------------------------------------------

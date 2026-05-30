@@ -36,6 +36,12 @@ def set_blas_env():
     ):
         os.environ[var] = "1"
 
+    # Cap glibc malloc arenas. Each arena reserves up to ~64 MiB of *virtual* address
+    # space per CPU; on multi-core runners that reservation alone can exceed a small
+    # RLIMIT_AS and make `import numpy` fail before any user code runs. Limiting arenas
+    # keeps the address-space footprint close to real usage so RLIMIT_AS behaves sanely.
+    os.environ.setdefault("MALLOC_ARENA_MAX", "2")
+
 
 # ---------------------------------------------------------------------------
 # Step 2: seed RNGs
@@ -194,7 +200,15 @@ def apply_rlimits(mem_mb: int):
     except ImportError:
         return  # Windows — skip silently
 
-    mem_bytes = mem_mb * 1024 * 1024
+    # RLIMIT_AS caps *virtual* address space, not resident memory. Importing numpy + pandas
+    # (BLAS shared libs, mmap'd arenas) needs a few hundred MiB of address space just to load,
+    # so a small per-node mem_mb (e.g. 64) would kill the interpreter before any user code runs.
+    # Floor the address-space cap at a value that reliably loads the scientific stack; real
+    # per-node memory enforcement is the container's job (Docker --memory / cgroups). Larger
+    # mem_mb requests are still honoured.
+    MIN_AS_MB = 256
+    effective_mb = max(mem_mb, MIN_AS_MB)
+    mem_bytes = effective_mb * 1024 * 1024
 
     try:
         resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
