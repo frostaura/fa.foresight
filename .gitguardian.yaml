@@ -1,0 +1,15 @@
+# GitGuardian / ggshield configuration.
+#
+# The two matches below are deterministic, throwaway secp256k1 TEST private keys used only by
+# the backend unit tests to verify Polymarket CLOB V2 EIP-712 signing and at-rest secret
+# protection. They are never funded and never used as real wallets:
+#   - ClobV2SigningTests.cs       — the canonical Ethereum documentation test key
+#   - PlatformConnectionTests.cs  — a test-only key for the secret protector round-trip
+# No production code contains a private key. These are intentional test vectors, not a leak.
+version: 2
+secret:
+  ignored-matches:
+    - name: "ClobV2 EIP-712 signing test vector (canonical eth test key, never funded)"
+      match: "0x4c0883a69102937d6231471b5dbb6e538eba2ef39a64d09e1caad98bce00f54e"
+    - name: "PlatformConnection secret-protector test key (test-only, never funded)"
+      match: "0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318"
