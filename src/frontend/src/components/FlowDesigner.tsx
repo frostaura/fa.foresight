@@ -16,6 +16,7 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import { AlertTriangle, Code2, Layout, Loader2, Play, Save, Terminal, Trash2, X } from "lucide-react";
 import { cn } from "../lib/cn";
+import { ProgressInline } from "./ProgressInline";
 import {
   useRunFlowNodeMutation,
   type FlowDefinition,
@@ -664,6 +665,9 @@ function RunInspectPanel({
           {isRunning ? "Running…" : "Run node"}
         </button>
       </div>
+      {isRunning && (
+        <ProgressInline pct={null} label="Executing in sandbox…" tone="frost" />
+      )}
       {!selectedNode && (
         <div className="text-fa-frost-dim fa-caption">Select a node on the canvas to run it through the sandbox.</div>
       )}

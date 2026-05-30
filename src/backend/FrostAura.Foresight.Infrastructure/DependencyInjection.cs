@@ -229,6 +229,7 @@ public static class DependencyInjection
         services.AddScoped<WalkForwardEvaluator>();
         services.AddScoped<IBacktestsService, Live.BacktestsService>();
         services.AddSingleton<Live.IBacktestEventHub, Live.BacktestEventHub>();
+        services.AddSingleton<Live.ITrainingEventHub, Live.TrainingEventHub>();
         services.AddScoped<IModelTrainingService, Live.ModelTrainingService>();
         services.AddScoped<IWalkForwardService, Live.WalkForwardService>();
         // Model-lifecycle SSE fan-out — lets the UI react to training-status transitions without polling.

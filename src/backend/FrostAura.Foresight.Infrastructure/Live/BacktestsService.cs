@@ -585,7 +585,17 @@ public sealed class ModelTrainingService : IModelTrainingService
     private readonly ModelTrainer _trainer;
     private readonly IServiceScopeFactory _scopes;
     private readonly IModelEventHub _events;
+    private readonly ITrainingEventHub _trainingHub;
     private readonly ILogger<ModelTrainingService> _logger;
+
+    /// <summary>Adapts the trainer's IProgress ticks straight onto the SSE hub synchronously,
+    /// without bouncing through a captured SynchronizationContext (which would reorder events).</summary>
+    private sealed class SyncProgress<T> : IProgress<T>
+    {
+        private readonly Action<T> _on;
+        public SyncProgress(Action<T> on) => _on = on;
+        public void Report(T value) => _on(value);
+    }
 
     public ModelTrainingService(
         ForesightDbContext db,
@@ -593,6 +603,7 @@ public sealed class ModelTrainingService : IModelTrainingService
         ModelTrainer trainer,
         IServiceScopeFactory scopes,
         IModelEventHub events,
+        ITrainingEventHub trainingHub,
         ILogger<ModelTrainingService> logger)
     {
         _db = db;
@@ -600,6 +611,7 @@ public sealed class ModelTrainingService : IModelTrainingService
         _trainer = trainer;
         _scopes = scopes;
         _events = events;
+        _trainingHub = trainingHub;
         _logger = logger;
     }
 
@@ -742,7 +754,10 @@ public sealed class ModelTrainingService : IModelTrainingService
                 var microProvider = scope.ServiceProvider.GetService<IHistoricalMicrostructureProvider>();
                 await HydrateTrainingDataAsync(flow, candleProvider, microProvider, symbol, iv, startMs, endMs, ct, _logger);
                 _logger.LogInformation("Training variant {Symbol}/{Interval} on {Days}d", symbol, iv, LookbackDaysFor(iv));
-                var result = await trainer.TrainAsync(flow, tenantId, modelId, symbol, iv, startMs, endMs, ct);
+                // Stream per-phase progress to the SSE hub so the UI fills a real bar per interval.
+                var progress = new SyncProgress<TrainProgress>(prog =>
+                    _trainingHub.Publish(new TrainingEvent(modelId, TrainingEventKind.Progress, prog.Interval, prog.Phase, prog.Processed, prog.Total, null)));
+                var result = await trainer.TrainAsync(flow, tenantId, modelId, symbol, iv, startMs, endMs, ct, progress: progress);
                 _logger.LogInformation("Variant {Symbol}/{Interval} fit complete — WF accuracy {Pct:P2}", symbol, iv, result.ValidationAccuracy);
                 return (Interval: iv, StartMs: startMs, EndMs: endMs, Json: result.TrainedStateJson, Accuracy: result.ValidationAccuracy);
             })
@@ -859,6 +874,7 @@ public sealed class ModelTrainingService : IModelTrainingService
         var trainingSvc = scope.ServiceProvider.GetRequiredService<IModelTrainingService>();
         try
         {
+            _trainingHub.Publish(new TrainingEvent(modelId, TrainingEventKind.Started, interval ?? "all", "queued", 0, 1, null));
             await trainingSvc.TrainAsync(modelId, symbol, holdoutDays, interval, CancellationToken.None);
             var m = await db.Models.FirstAsync(x => x.Id == modelId);
             m.TrainingStatus = null;
@@ -867,6 +883,7 @@ public sealed class ModelTrainingService : IModelTrainingService
             await db.SaveChangesAsync();
             // Success transition → UI invalidates its model cache and the train gate resolves.
             _events.Publish(new ModelEvent(tenantId, modelId, ModelEventKind.Trained, null));
+            _trainingHub.Publish(new TrainingEvent(modelId, TrainingEventKind.Completed, interval ?? "all", "done", 1, 1, null));
         }
         catch (Exception ex)
         {
@@ -879,6 +896,7 @@ public sealed class ModelTrainingService : IModelTrainingService
                 m.UpdatedAt = DateTimeOffset.UtcNow;
                 await db.SaveChangesAsync();
                 _events.Publish(new ModelEvent(tenantId, modelId, ModelEventKind.Failed, m.TrainingError));
+                _trainingHub.Publish(new TrainingEvent(modelId, TrainingEventKind.Failed, interval ?? "all", "failed", 0, 1, m.TrainingError));
             }
             catch (Exception saveEx) { _logger.LogError(saveEx, "Failed to mark training {Id} as failed", modelId); }
         }

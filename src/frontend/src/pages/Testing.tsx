@@ -16,7 +16,9 @@ import { SymbolIcon, SymbolPicker } from "../components/SymbolIcon";
 import BacktestRunModal from "../components/BacktestRunModal";
 import SideDrawer from "../components/SideDrawer";
 import RichMultiSelect, { type RichMultiSelectOption } from "../components/RichMultiSelect";
+import { ProgressInline } from "../components/ProgressInline";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
+import { useChaosProgress } from "../lib/chaosStream";
 import { cn } from "../lib/cn";
 import { fmtRunDate, fmtRunTime } from "../lib/format";
 import { useSort, SortHeader } from "../lib/sort";
@@ -1232,6 +1234,14 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
 
   const isRunning = chaosLoading || (chaosRuns ?? []).some((cr) => cr.status === "running");
 
+  // The batch currently executing — its rows share one batchId. We stream that batch's combo/sample
+  // progress so the run shows real movement instead of a 2s-polled orb. Idle (null) when nothing runs.
+  const runningBatchId = useMemo(
+    () => (chaosRuns ?? []).find((cr) => cr.status === "running")?.batchId ?? null,
+    [chaosRuns],
+  );
+  const chaosProgress = useChaosProgress(runningBatchId);
+
   const onRun = async () => {
     setError(null);
     if (modelIds.length === 0) { setError("Pick at least one trained model."); return; }
@@ -1375,6 +1385,15 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
             </button>
           </div>
         </div>
+        {isRunning && (
+          <div className="mt-4">
+            <ProgressInline
+              pct={chaosProgress.pct}
+              label={chaosProgress.label ?? "Sampling random windows…"}
+              tone="amber"
+            />
+          </div>
+        )}
       </div>
 
       {/* Chaos run summary from /api/chaos — the single source of truth for this tab, produced by

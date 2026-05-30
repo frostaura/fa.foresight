@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { createPortal } from "react-dom";
 import { AlertTriangle, Cpu, Loader2, X } from "lucide-react";
 import { cn } from "../lib/cn";
+import { useTrainingProgress } from "../lib/trainingStream";
+import { ProgressInline } from "./ProgressInline";
 import { useListModelsQuery, useTrainModelMutation, type Model } from "../store/api";
 
 // Every deterministic model is fit against BTCUSDT — the only instrument the trainer supports today.
@@ -124,6 +126,9 @@ function TrainDialog({ model: initial, onResolve }: { model: Model; onResolve: (
 
   const isTraining = phase === "training";
   const isFailed = phase === "failed";
+  // Live per-phase progress while the fit runs server-side, so the dialog shows real movement
+  // instead of just a spinning icon.
+  const trainProgress = useTrainingProgress(initial.id, isTraining);
 
   return createPortal(
     <div
@@ -176,6 +181,10 @@ function TrainDialog({ model: initial, onResolve }: { model: Model; onResolve: (
             <X className="h-4 w-4" />
           </button>
         </div>
+
+        {isTraining && (
+          <ProgressInline pct={trainProgress.pct} label={trainProgress.label ?? "Starting…"} tone="frost" />
+        )}
 
         {error && (
           <div className="text-rose-300 text-xs bg-rose-400/5 border border-rose-400/20 rounded-md px-3 py-2 break-words">
