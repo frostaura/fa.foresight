@@ -17,11 +17,17 @@ public enum PaperTradingEventKind
 /// Combined session + bet view pushed on every state change. Keeps the wire format consistent and
 /// lets the client patch its in-memory copy from a single record. `Bet` is null when only session
 /// state changed (e.g. SessionStarted, SessionStopped).
+///
+/// `Backfilled` is true for events emitted while catching a session up over a gap (downtime, or the
+/// lag between an export and its import). The SSE chart stream still consumes them so the chart fills
+/// in; the Telegram per-bet notifier skips them so a catch-up over many candles doesn't fire a photo
+/// per reconstructed bet.
 /// </summary>
 public sealed record PaperTradingEvent(
     PaperTradingEventKind Kind,
     PaperSession Session,
-    PaperBet? Bet);
+    PaperBet? Bet,
+    bool Backfilled = false);
 
 /// <summary>
 /// In-process fan-out hub for paper-trading state changes. Mirrors LivePredictionEventHub's

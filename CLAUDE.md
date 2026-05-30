@@ -40,7 +40,7 @@ Graduated from **FrostAura Labs → FrostAura Technologies** on 2026-05-29 as a 
 ## Dependencies on other FrostAura projects
 
 - No hard runtime dependency on other FrostAura projects.
-- Shares FrostAura brand tokens and the mandated tech stack (`.NET 10 + EF Core + PostgreSQL + React 19 + Tailwind + shadcn/ui`) with `fa.startup`, `fa.lifeos`, and other Technologies products.
+- Shares FrostAura brand tokens and the mandated tech stack (`.NET 10 + EF Core + PostgreSQL + React 19 + Tailwind + shadcn/ui`) with `fa.startup`, `fa.lifeos`, `fa.foresight`, and other Technologies products.
 - Portainer deploy infrastructure shared with Technologies division (same Portainer instance; separate stack ID).
 - Docker Hub images: `${DOCKERHUB_USERNAME}/foresight-backend`, `foresight-frontend`, `foresight-sandbox`.
 

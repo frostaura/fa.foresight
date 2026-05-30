@@ -34,6 +34,9 @@ public sealed class TelegramChartWidgetService : BackgroundService
             await foreach (var evt in _events.Subscribe(ct))
             {
                 if (evt.Kind != PaperTradingEventKind.BetResolved || evt.Bet is null) continue;
+                // Reconstructed (backfilled) bets patch the chart via SSE but must NOT each fire a
+                // Telegram photo — a catch-up over a gap would otherwise blast one photo per candle.
+                if (evt.Backfilled) continue;
                 try { await _composer.OnBetResolvedAsync(evt.Session, evt.Bet, ct); }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogWarning(ex, "Telegram chart update failed (non-fatal)"); }
