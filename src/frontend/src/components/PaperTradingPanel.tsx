@@ -55,6 +55,10 @@ export default function PaperTradingPanel({ symbol, interval }: PaperTradingPane
   // of betting every candle — same equation as the backtest gate. Lets the user A/B "always bet"
   // vs "sit out the coin-flips" on the live engine. Off by default = always-bet baseline.
   const [gated, setGated] = useState(false);
+  // Optional back-dated start. Held as a `datetime-local` string ("YYYY-MM-DDTHH:mm", local time);
+  // empty = start now. On submit it's converted to an absolute ISO instant for the API, which then
+  // back-bets every candle from that boundary up to the live candle.
+  const [startAt, setStartAt] = useState<string>("");
 
   if (!displaySession) {
     return (
@@ -66,17 +70,21 @@ export default function PaperTradingPanel({ symbol, interval }: PaperTradingPane
             strategyId={strategyId}
             strategies={strategies}
             gated={gated}
+            startAt={startAt}
             starting={starting}
             error={error}
             onBalance={setBalance}
             onInitialBet={setInitialBet}
             onStrategy={setStrategyId}
             onGated={setGated}
+            onStartAt={setStartAt}
             onCancel={() => setShowStart(false)}
             onStart={async () => {
               setStarting(true);
               try {
-                await start(balance, initialBet, strategyId, gated);
+                // Convert the local datetime-local value to an absolute ISO instant; empty = start now.
+                const startedIso = startAt ? new Date(startAt).toISOString() : undefined;
+                await start(balance, initialBet, strategyId, gated, startedIso);
                 setShowStart(false);
               } catch {
                 // error surfaced via the `error` state in usePaperSession's next render
@@ -118,23 +126,32 @@ export default function PaperTradingPanel({ symbol, interval }: PaperTradingPane
 }
 
 function StartDialog({
-  balance, initialBet, strategyId, strategies, gated, starting, error,
-  onBalance, onInitialBet, onStrategy, onGated, onStart, onCancel
+  balance, initialBet, strategyId, strategies, gated, startAt, starting, error,
+  onBalance, onInitialBet, onStrategy, onGated, onStartAt, onStart, onCancel
 }: {
   balance: number;
   initialBet: number;
   strategyId: string;
   strategies: { id: string; name: string; description: string }[];
   gated: boolean;
+  startAt: string;
   starting: boolean;
   error: string | null;
   onBalance: (v: number) => void;
   onInitialBet: (v: number) => void;
   onStrategy: (id: string) => void;
   onGated: (v: boolean) => void;
+  onStartAt: (v: string) => void;
   onStart: () => void;
   onCancel: () => void;
 }) {
+  // `max` pins the picker to "now" (local time) so a future start can't be chosen — the server
+  // back-bets the past, it can't trade the future.
+  const nowLocal = useMemo(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, []);
   return (
     <div className="flex flex-wrap items-end gap-3">
       <div>
@@ -198,6 +215,35 @@ function StartDialog({
             {gated ? "Gated (skip no-bets)" : "Always bet"}
           </button>
         </Tooltip>
+      </div>
+      <div>
+        <div className="text-fa-frost-dim fa-overline mb-1 inline-flex items-center gap-1">
+          Start from
+          <Tooltip content="Optional. Pick a past date & time to open the session as if it had started then — the engine back-bets every candle from that moment up to now, so the ledger, balance and chart fill in the gap. Leave blank to start now. Limited to the most recent ~1000 candles.">
+            <Info className="h-3 w-3 opacity-70 cursor-help" />
+          </Tooltip>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <input
+            type="datetime-local"
+            value={startAt}
+            max={nowLocal}
+            onChange={(e) => onStartAt(e.target.value)}
+            className="bg-fa-glass border border-fa-edge rounded px-2 py-1 text-sm tabular-nums text-fa-frost-bright [color-scheme:dark]"
+          />
+          {startAt ? (
+            <button
+              type="button"
+              onClick={() => onStartAt("")}
+              title="Clear — start now instead"
+              className="rounded p-1 text-fa-frost-dim hover:text-fa-frost-bright transition"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <span className="text-fa-frost-dim fa-caption whitespace-nowrap">now</span>
+          )}
+        </div>
       </div>
       <div className="flex gap-1.5">
         <button
