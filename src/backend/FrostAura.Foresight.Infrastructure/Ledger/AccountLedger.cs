@@ -66,37 +66,72 @@ public sealed class AccountLedger : IAccountLedger
 
     /// <inheritdoc/>
     /// <remarks>
-    /// Reads the real on-chain pUSD ERC-20 balance from Polygon via a JSON-RPC eth_call to
-    /// balanceOf(walletAddress) on the pUSD contract. Returns 0 gracefully when:
-    ///   - no wallet private key is configured (KeyVault:PrivateKey is empty)
-    ///   - no wallet address can be resolved
-    ///   - the RPC endpoint is unreachable or returns an error
-    ///   - the live trading gate is disarmed (balance stays at 0 so reservation logic is inert)
+    /// Reads the real on-chain pUSD ERC-20 balance from Polygon for the tenant's configured wallet.
+    /// Returns 0 when the balance is UNKNOWN (no wallet configured, RPC unreachable, parse failure) —
+    /// callers that need to distinguish unknown from a real 0 (reconciliation) use
+    /// <see cref="ReadWalletPusdKnownAsync"/>. For reservation math a 0 is safe-conservative: free
+    /// goes ≤ 0, so a reserve attempt fails loudly rather than over-committing unconfirmed funds.
     /// </remarks>
     public async Task<decimal> GetWalletPusdAsync(Guid tenantId, CancellationToken ct)
+        => (await ReadWalletPusdKnownAsync(tenantId, ct)).Balance;
+
+    /// <summary>
+    /// Read the tenant's on-chain pUSD balance, distinguishing a confirmed value from UNKNOWN.
+    /// Sources the wallet address + RPC endpoint from the tenant's platform connection (falling back
+    /// to the env-bound vault/options for the bootstrap/dev path). <c>Known=false</c> means the balance
+    /// could not be confirmed (no wallet, RPC error, bad response) — never treat that as a real 0.
+    /// </summary>
+    internal async Task<(decimal Balance, bool Known)> ReadWalletPusdKnownAsync(Guid tenantId, CancellationToken ct)
     {
-        // Only meaningful with a wallet configured (live path only).
-        if (!_keyVaultOpts.HasKey) return 0m;
+        var (address, rpcUrl) = await ResolveWalletConfigAsync(tenantId, ct);
+        if (string.IsNullOrWhiteSpace(address))
+            return (0m, false); // no wallet configured for this tenant — balance is N/A, not a real 0
 
         try
         {
-            var address = await _vault.GetPublicAddressAsync(ct);
-            return await ReadPusdBalanceAsync(address, ct);
+            var balance = await ReadPusdBalanceKnownAsync(address!, rpcUrl, ct);
+            return balance;
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "GetWalletPusdAsync: on-chain read failed — returning 0 (pUSD balance unconfirmed)");
-            return 0m;
+            _logger.LogWarning(ex, "ReadWalletPusdKnownAsync: on-chain read failed for tenant {Tenant} — balance UNKNOWN (not assumed 0)", tenantId);
+            return (0m, false);
         }
     }
 
     /// <summary>
-    /// Read pUSD ERC-20 balance from Polygon via eth_call to balanceOf(address).
-    /// Uses minimal JSON-RPC (no Nethereum ABI overhead) to keep the dependency surface light.
-    /// ABI-encodes the balanceOf(address) call manually: 4-byte selector + 32-byte padded address.
+    /// Resolve the tenant's wallet address + Polygon RPC URL. Prefers the per-tenant platform
+    /// connection (WalletAddress + RpcUrl); falls back to the env-bound vault/options when no
+    /// connection row exists (bootstrap/dev). Returns a null address when no wallet is available.
     /// </summary>
-    internal async Task<decimal> ReadPusdBalanceAsync(string walletAddress, CancellationToken ct)
+    private async Task<(string? Address, string RpcUrl)> ResolveWalletConfigAsync(Guid tenantId, CancellationToken ct)
+    {
+        var conn = await _db.PlatformConnections.AsNoTracking()
+            .Where(c => c.TenantId == tenantId && c.IsDefault)
+            .Select(c => new { c.WalletAddress, c.RpcUrl })
+            .FirstOrDefaultAsync(ct);
+
+        var rpcUrl = !string.IsNullOrWhiteSpace(conn?.RpcUrl) ? conn!.RpcUrl! : _polygonOpts.RpcUrl;
+
+        if (!string.IsNullOrWhiteSpace(conn?.WalletAddress))
+            return (conn!.WalletAddress, rpcUrl);
+
+        // Env/bootstrap fallback: use the global key vault's derived address when a key is configured.
+        if (_keyVaultOpts.HasKey)
+        {
+            try { return (await _vault.GetPublicAddressAsync(ct), rpcUrl); }
+            catch (Exception ex) { _logger.LogWarning(ex, "ResolveWalletConfigAsync: could not derive env wallet address"); }
+        }
+        return (null, rpcUrl);
+    }
+
+    /// <summary>
+    /// Read pUSD ERC-20 balance from Polygon via eth_call to balanceOf(address) on the given RPC.
+    /// Uses minimal JSON-RPC (no Nethereum ABI overhead). Returns <c>Known=false</c> on any RPC/parse
+    /// failure so the caller never mistakes an unconfirmed read for a real 0 balance.
+    /// </summary>
+    internal async Task<(decimal Balance, bool Known)> ReadPusdBalanceKnownAsync(string walletAddress, string rpcUrl, CancellationToken ct)
     {
         // balanceOf(address) selector: keccak256("balanceOf(address)")[0:4] = 0x70a08231
         const string selector = "70a08231";
@@ -117,32 +152,32 @@ public sealed class AccountLedger : IAccountLedger
             id = 1
         });
 
-        using var req  = new HttpRequestMessage(HttpMethod.Post, _polygonOpts.RpcUrl)
+        using var req  = new HttpRequestMessage(HttpMethod.Post, rpcUrl)
             { Content = new StringContent(rpcBody, Encoding.UTF8, "application/json") };
         using var resp = await _http.SendAsync(req, ct);
         if (!resp.IsSuccessStatusCode)
         {
-            _logger.LogWarning("Polygon RPC returned {Status} for balanceOf — returning 0", resp.StatusCode);
-            return 0m;
+            _logger.LogWarning("Polygon RPC returned {Status} for balanceOf — balance UNKNOWN", resp.StatusCode);
+            return (0m, false);
         }
 
         var body = await resp.Content.ReadAsStringAsync(ct);
         using var doc  = JsonDocument.Parse(body);
         if (!doc.RootElement.TryGetProperty("result", out var resultEl))
         {
-            _logger.LogWarning("Polygon RPC response missing 'result' field — returning 0. Body: {Body}", body[..Math.Min(body.Length, 200)]);
-            return 0m;
+            _logger.LogWarning("Polygon RPC response missing 'result' field — balance UNKNOWN. Body: {Body}", body[..Math.Min(body.Length, 200)]);
+            return (0m, false);
         }
 
         var hex = resultEl.GetString() ?? "0x0";
-        if (hex == "0x" || hex == "0x0") return 0m;
+        if (hex == "0x" || hex == "0x0") return (0m, true); // a real, confirmed zero balance
 
         // Parse the 32-byte ABI-encoded uint256 result.
         var cleanHex = hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? hex[2..] : hex;
         if (!BigInteger.TryParse(cleanHex, System.Globalization.NumberStyles.HexNumber, null, out var raw))
         {
-            _logger.LogWarning("Could not parse Polygon RPC result '{Hex}' as uint256 — returning 0", hex);
-            return 0m;
+            _logger.LogWarning("Could not parse Polygon RPC result '{Hex}' as uint256 — balance UNKNOWN", hex);
+            return (0m, false);
         }
 
         // Scale from integer (6 decimals) to decimal pUSD.
@@ -152,7 +187,7 @@ public sealed class AccountLedger : IAccountLedger
         var balance = whole + frac;
 
         _logger.LogDebug("On-chain pUSD balance for {Address}: {Balance} (raw={Raw})", walletAddress, balance, raw);
-        return balance;
+        return (balance, true);
     }
 
     /// <inheritdoc/>
@@ -276,11 +311,37 @@ public sealed class AccountLedger : IAccountLedger
     /// <inheritdoc/>
     public async Task ReconcileAsync(Guid tenantId, CancellationToken ct)
     {
-        var walletPusd   = await GetWalletPusdAsync(tenantId, ct);
+        var (walletPusd, known) = await ReadWalletPusdKnownAsync(tenantId, ct);
         var activeReserved = await ActiveLiveReservedAsync(tenantId, ct);
-        var free         = walletPusd - activeReserved;
-        // drift = (Σ active_balance + free) − walletPUSD. If ledger is consistent, drift == 0.
-        var drift = (activeReserved + free) - walletPusd;
+
+        // When the on-chain balance can't be confirmed, do NOT compute or claim a drift — recording a
+        // drift of 0 against an assumed-0 wallet would silently mask a real divergence. Write an audit
+        // row marking the balance unknown and skip the alert.
+        if (!known)
+        {
+            _db.AccountLedger.Add(new AccountLedgerEntry
+            {
+                Id         = Guid.NewGuid(),
+                TenantId   = tenantId,
+                Venue      = Venue,
+                EntryKind  = "reconcile",
+                Amount     = 0m,
+                WalletPusd = 0m,
+                FreeAfter  = -activeReserved,
+                Drift      = null, // unknown — not computed
+                Note       = JsonSerializer.Serialize(new { balanceKnown = false, activeReserved, note = "on-chain pUSD balance unconfirmed (no wallet / RPC error) — drift not computed" }),
+                CreatedAt  = DateTimeOffset.UtcNow
+            });
+            await _db.SaveChangesAsync(ct);
+            _logger.LogWarning("Ledger reconcile SKIPPED for tenant {Tenant}: on-chain pUSD balance unconfirmed (no wallet or RPC error)", tenantId);
+            return;
+        }
+
+        var free = walletPusd - activeReserved;
+        // Meaningful drift: how much MORE the active live sessions collectively claim than the wallet
+        // actually holds. ≤ 0 in a healthy account (wallet funds at least the reservations); > 0 is a
+        // real shortfall (external withdrawal, unsettled divergence) that must be surfaced.
+        var drift = activeReserved - walletPusd;
 
         _db.AccountLedger.Add(new AccountLedgerEntry
         {
@@ -292,14 +353,16 @@ public sealed class AccountLedger : IAccountLedger
             WalletPusd = walletPusd,
             FreeAfter  = free,
             Drift      = drift,
-            Note       = JsonSerializer.Serialize(new { walletPusd, activeReserved, free, drift }),
+            Note       = JsonSerializer.Serialize(new { balanceKnown = true, walletPusd, activeReserved, free, drift }),
             CreatedAt  = DateTimeOffset.UtcNow
         });
         await _db.SaveChangesAsync(ct);
 
-        if (drift != 0m)
+        // Alert only on a real shortfall (active reservations exceed the on-chain wallet, beyond a
+        // tiny rounding epsilon). A healthy positive free balance is not drift.
+        if (drift > 0.000001m)
         {
-            var msg = $"[LEDGER DRIFT] Σ(active+free)={activeReserved + free:F6} vs walletPUSD={walletPusd:F6}, drift={drift:F6}. Check live session balances.";
+            var msg = $"[LEDGER DRIFT] active reservations={activeReserved:F6} exceed on-chain walletPUSD={walletPusd:F6} by {drift:F6}. Live sessions claim more than the wallet holds — check balances/withdrawals.";
             _logger.LogWarning(msg);
             await _channel.SendAsync(tenantId, new OutboundNotification(
                 NotificationKind.CircuitBreakerTripped, "Ledger drift detected", msg), ct);

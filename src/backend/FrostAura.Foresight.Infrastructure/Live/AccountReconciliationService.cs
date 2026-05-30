@@ -15,8 +15,9 @@ namespace FrostAura.Foresight.Infrastructure.Live;
 /// Mirrors the scoped-loop pattern of <see cref="Paper.PaperTradingProcessorService"/>:
 ///   - Opens a fresh DI scope per tick so the DbContext and TenantContext are lifecycle-clean.
 ///   - Default interval: 60 s (configurable via FORESIGHT_RECONCILE_INTERVAL_SECONDS).
-///   - Inert in practice while walletPUSD returns 0 (Phase E stub) — the loop is safe and will
-///     compute drift=0 on every tick until the on-chain balance read is wired.
+///   - Reads the real on-chain pUSD balance (per-tenant wallet + RPC). When the balance can't be
+///     confirmed the tick records an "unknown" audit row and skips the drift alert — it never
+///     mistakes an unconfirmed read for a real 0.
 ///   - Any reconciliation error is caught, logged, and swallowed; the loop continues.
 /// </summary>
 public sealed class AccountReconciliationService : BackgroundService

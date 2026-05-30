@@ -105,10 +105,15 @@ public sealed class PolymarketClobMarketInfoClient
         if (yesId is null || noId is null) return null;
 
         var negRisk = root.TryGetProperty("neg_risk",   out var nr) && nr.GetBoolean();
-        var mts     = root.TryGetProperty("minimum_tick_size", out var mtsEl) ? ParseDecProp(mtsEl) : 0.01m;
-        var mos     = root.TryGetProperty("minimum_order_size", out var mosEl) ? ParseDecProp(mosEl) : 0m;
+        var hasMts  = root.TryGetProperty("minimum_tick_size", out var mtsEl);
+        var hasMos  = root.TryGetProperty("minimum_order_size", out var mosEl);
+        var mts     = hasMts ? ParseDecProp(mtsEl) : 0.01m;
+        var mos     = hasMos ? ParseDecProp(mosEl) : 0m;
+        // Trusted only when BOTH min-size fields parsed to a usable value. Otherwise the caller must
+        // apply a conservative floor rather than silently placing a possibly sub-minimum order.
+        var trusted = hasMts && mts > 0m && hasMos && mos > 0m;
 
-        return new ClobMarketInfo(conditionId, yesId, noId, negRisk, mts, mos);
+        return new ClobMarketInfo(conditionId, yesId, noId, negRisk, mts, mos, trusted);
     }
 
     private static ClobMarketInfo ParseGammaMarketInfo(string conditionId, string json)
@@ -130,8 +135,8 @@ public sealed class PolymarketClobMarketInfoClient
         }
 
         var negRisk = root.TryGetProperty("negRisk", out var nr) && nr.GetBoolean();
-        // gamma-api doesn't expose mts/mos; use safe defaults.
-        return new ClobMarketInfo(conditionId, yesId, noId, negRisk, Mts: 0.01m, Mos: 0m);
+        // gamma-api doesn't expose mts/mos — mark UNTRUSTED so the caller applies a conservative floor.
+        return new ClobMarketInfo(conditionId, yesId, noId, negRisk, Mts: 0.01m, Mos: 0m, MinSizesTrusted: false);
     }
 
     private static decimal ParseDecProp(JsonElement el)
@@ -147,7 +152,10 @@ public sealed class PolymarketClobMarketInfoClient
 
 /// <summary>
 /// Market info returned by the CLOB market-info endpoint.
-/// Mts = minimum tick size (e.g. 0.01). Mos = minimum order size in shares (0 = no minimum from API).
+/// Mts = minimum tick size (e.g. 0.01). Mos = minimum order size in shares.
+/// <see cref="MinSizesTrusted"/> is false when the venue did not supply usable min-size fields — the
+/// Mts/Mos are then placeholder defaults and the execution layer must apply a conservative floor
+/// rather than risk placing a sub-minimum order that the exchange would reject.
 /// </summary>
 public sealed record ClobMarketInfo(
     string ConditionId,
@@ -155,4 +163,5 @@ public sealed record ClobMarketInfo(
     string NoTokenId,
     bool   NegRisk,
     decimal Mts,
-    decimal Mos);
+    decimal Mos,
+    bool   MinSizesTrusted);

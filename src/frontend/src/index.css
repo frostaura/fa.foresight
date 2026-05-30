@@ -88,6 +88,11 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(164, 212, 244, 0.12); border-radius: 5px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(164, 212, 244, 0.24); }
+/* Kill the default (light) corner where horizontal + vertical scrollbars meet — it otherwise
+   renders as a stray white square in the bottom-right of scroll containers (e.g. the mobile
+   ledger sheet). Same for the resize grip, which we never want. */
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-resizer { display: none; }
 
 @layer components {
   .fa-card {

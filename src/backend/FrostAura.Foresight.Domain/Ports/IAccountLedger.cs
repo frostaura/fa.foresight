@@ -52,9 +52,11 @@ public interface IAccountLedger
     Task ReleaseAsync(Guid tenantId, Guid sessionId, CancellationToken ct);
 
     /// <summary>
-    /// Reconciliation sweep: compute drift = (Σ active current_balance + free) − walletPUSD.
-    /// Logs and notifies via IChannelAdapter on non-zero drift. Does NOT silently correct — drift
-    /// is a correctness signal.
+    /// Reconciliation sweep: compares the on-chain pUSD wallet against active reservations and records
+    /// drift = Σ(active current_balance) − walletPUSD. Alerts (logs + IChannelAdapter) only on a real
+    /// shortfall (drift &gt; 0). When the on-chain balance can't be confirmed it records an "unknown"
+    /// audit row and skips the alert — never treating an unconfirmed read as a real 0. Does NOT
+    /// silently correct — drift is a correctness signal.
     /// </summary>
     Task ReconcileAsync(Guid tenantId, CancellationToken ct);
 }

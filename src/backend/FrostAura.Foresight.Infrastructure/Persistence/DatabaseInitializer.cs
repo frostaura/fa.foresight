@@ -574,11 +574,27 @@ public static class DatabaseInitializer
                 ""ChainId""             integer NOT NULL DEFAULT 137,
                 ""LiveTrading""         boolean NOT NULL DEFAULT false,
                 ""MaxTradeUsd""         numeric(20,4) NOT NULL DEFAULT 0,
+                ""EffectivePrice""      numeric(6,5) NOT NULL DEFAULT 0.55,
+                ""RpcUrl""              varchar(300) NULL,
                 ""CreatedAt""           timestamptz NOT NULL,
                 ""UpdatedAt""           timestamptz NOT NULL
             );
             CREATE UNIQUE INDEX IF NOT EXISTS ix_platform_connections_tenant_connector
                 ON platform_connections (""TenantId"", ""ConnectorId"");
+            -- Idempotent migration for DBs created before the fixed-fee payoff model + on-chain RPC.
+            ALTER TABLE platform_connections
+                ADD COLUMN IF NOT EXISTS ""EffectivePrice"" numeric(6,5) NOT NULL DEFAULT 0.55;
+            ALTER TABLE platform_connections
+                ADD COLUMN IF NOT EXISTS ""RpcUrl"" varchar(300) NULL;
+
+            -- Durable mirror of the per-tenant live-trading arm flag (survives process restart).
+            CREATE TABLE IF NOT EXISTS live_arm_state (
+                ""TenantId""  uuid PRIMARY KEY,
+                ""Armed""     boolean NOT NULL DEFAULT false,
+                ""ArmedAt""   timestamptz NULL,
+                ""ArmedBy""   varchar(120) NULL,
+                ""UpdatedAt"" timestamptz NOT NULL
+            );
 
             -- Data Protection key ring (DB-persisted so encrypted secrets survive restarts).
             CREATE TABLE IF NOT EXISTS data_protection_keys (
@@ -602,6 +618,28 @@ public static class DatabaseInitializer
             db.Tenants.Add(tenant);
             await db.SaveChangesAsync(ct);
             logger.LogInformation("Seeded default tenant {TenantId}", tenant.Id);
+        }
+
+        // One-time bootstrap of the default tenant's Telegram chat from env. The bot is global; only the
+        // destination chat is per-tenant (TenantSettings.TelegramChatId, editable in-app). Seed it from
+        // TelegramBot:NotifyChatId / AllowedChatIds[0] when unset so the admin/dev tenant keeps getting
+        // notifications without manual setup. After this, the DB value is authoritative.
+        var defaultForChat = await db.Tenants.FirstOrDefaultAsync(t => t.Slug == "default", ct);
+        if (defaultForChat is not null && defaultForChat.Settings.TelegramChatId is null)
+        {
+            var notifyRaw = config.GetSection("TelegramBot")["NotifyChatId"];
+            var allowedRaw = config.GetSection("TelegramBot")["AllowedChatIds:0"];
+            long? seedChat = long.TryParse(notifyRaw, out var n) ? n
+                : long.TryParse(allowedRaw, out var a) ? a : null;
+            if (seedChat is { } chat)
+            {
+                defaultForChat.Settings.TelegramChatId = chat;
+                // The Settings value-converter compares by reference, so mutating a property in place
+                // isn't auto-detected — flag it modified explicitly so the jsonb column is rewritten.
+                db.Entry(defaultForChat).Property(t => t.Settings).IsModified = true;
+                await db.SaveChangesAsync(ct);
+                logger.LogInformation("Seeded default tenant Telegram chat id from env");
+            }
         }
 
         // One-time bootstrap of the default tenant's platform connection from env. After this, the
@@ -829,37 +867,29 @@ public static class DatabaseInitializer
         if (unlockedCount > 0)
             logger.LogInformation("Cleared IsBuiltIn flag on {Count} model(s)", unlockedCount);
 
-        // AI description backfill for built-ins that are missing descriptions. Gated on the
-        // OpenRouter key being present so this is a no-op in dev/CI environments without a key.
-        // Runs fire-and-forget (one enqueue per missing row) so startup isn't delayed.
-        var hasOpenRouterKey = !string.IsNullOrWhiteSpace(scope.ServiceProvider
-            .GetRequiredService<IConfiguration>()["OpenRouter:ApiKey"]);
-        if (hasOpenRouterKey)
+        // Deterministic description backfill for any rows missing descriptions — no external AI, no
+        // API key, generated inline from each entity's structure (kind, backtestability, node types).
+        var modelsMissingDesc = await db.Models.Where(m => m.SimpleDescription == null).ToListAsync(ct);
+        foreach (var m in modelsMissingDesc)
         {
-            var describer = scope.ServiceProvider.GetRequiredService<FrostAura.Foresight.Infrastructure.Live.ModelDescriber>();
-            var missingDescriptions = await db.Models
-                .Where(m => m.SimpleDescription == null)
-                .Select(m => m.Id)
-                .ToListAsync(ct);
-            foreach (var modelId in missingDescriptions)
-            {
-                describer.EnqueueAsync(modelId);
-            }
-            if (missingDescriptions.Count > 0)
-                logger.LogInformation("Enqueued AI description generation for {Count} model(s) missing descriptions", missingDescriptions.Count);
-
-            // AI description backfill for strategies missing descriptions.
-            var strategyDescriber = scope.ServiceProvider.GetRequiredService<FrostAura.Foresight.Infrastructure.Live.StrategyDescriber>();
-            var missingStrategyDescriptions = await db.Strategies
-                .Where(s => s.SimpleDescription == null)
-                .Select(s => s.Id)
-                .ToListAsync(ct);
-            foreach (var strategyId in missingStrategyDescriptions)
-            {
-                strategyDescriber.EnqueueAsync(strategyId);
-            }
-            if (missingStrategyDescriptions.Count > 0)
-                logger.LogInformation("Enqueued AI description generation for {Count} strategy/ies missing descriptions", missingStrategyDescriptions.Count);
+            var (simple, technical) = Domain.Descriptions.DescriptionTemplater.ForModel(m.Name, m.Kind, m.SupportsBacktesting, m.Definition);
+            m.SimpleDescription = simple;
+            m.TechnicalDescription = technical;
+            m.UpdatedAt = now;
+        }
+        var strategiesMissingDesc = await db.Strategies.Where(s => s.SimpleDescription == null).ToListAsync(ct);
+        foreach (var s in strategiesMissingDesc)
+        {
+            var (simple, technical) = Domain.Descriptions.DescriptionTemplater.ForStrategy(s.Name, s.Description, s.Definition);
+            s.SimpleDescription = simple;
+            s.TechnicalDescription = technical;
+            s.UpdatedAt = now;
+        }
+        if (modelsMissingDesc.Count > 0 || strategiesMissingDesc.Count > 0)
+        {
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation("Backfilled deterministic descriptions for {Models} model(s), {Strategies} strategy/ies",
+                modelsMissingDesc.Count, strategiesMissingDesc.Count);
         }
 
         // Strip the legacy "Foresight " prefix from any tenant-owned model names left over from
@@ -877,6 +907,12 @@ public static class DatabaseInitializer
             await db.SaveChangesAsync(ct);
             logger.LogInformation("Stripped 'Foresight ' prefix from {Count} tenant model(s)", stalePrefixed.Count);
         }
+
+        // Restore the live-trading arm flag from its durable mirror so an armed tenant resumes
+        // automated execution after a process restart (operator-chosen behaviour). Fail-safe: a read
+        // error leaves all tenants disarmed.
+        var arm = scope.ServiceProvider.GetRequiredService<FrostAura.Foresight.Infrastructure.Live.ILiveTradingArm>();
+        await arm.HydrateAsync(ct);
     }
 
     // ──────────────────────────────────────────────────────────────────────────────────────────
@@ -1019,6 +1055,9 @@ public static class DatabaseInitializer
         var chainRaw  = config.GetSection("Polymarket")["ChainId"];
         var chainId   = int.TryParse(chainRaw, out var ci) ? ci : 137;
         var liveTrading = string.Equals(config.GetSection("Polymarket")["LiveTrading"], "true", StringComparison.OrdinalIgnoreCase);
+        var effPriceRaw = config.GetSection("Polymarket")["EffectivePrice"];
+        var effPrice    = decimal.TryParse(effPriceRaw, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var ep) && ep > 0m && ep < 1m ? ep : 0.55m;
+        var rpcUrl      = config.GetSection("Polymarket")["RpcUrl"] ?? "https://polygon-rpc.com";
 
         var hasKey = !string.IsNullOrWhiteSpace(key);
         string? walletAddress = null;
@@ -1052,6 +1091,8 @@ public static class DatabaseInitializer
             ChainId             = chainId,
             LiveTrading         = liveTrading,
             MaxTradeUsd         = 0m,
+            EffectivePrice      = effPrice,
+            RpcUrl              = rpcUrl,
             CreatedAt           = now,
             UpdatedAt           = now
         };

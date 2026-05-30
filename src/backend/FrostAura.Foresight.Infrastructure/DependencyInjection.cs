@@ -73,7 +73,6 @@ public static class DependencyInjection
         services.Configure<Live.TradingGuardrailOptions>(config.GetSection("Trading"));
         services.AddSingleton<Live.ILiveTradingArm, Live.LiveTradingArm>();
         services.AddSingleton<Domain.Sizing.IPositionSizer, Domain.Sizing.KellyPositionSizer>();
-        services.AddScoped<Live.MarketTradeExecutor>();
 
         // Channel adapters: register each channel whose token is configured. Outbound notifications
         // fan out to all of them via the composite IChannelAdapter; a single channel resolves directly,
@@ -87,7 +86,19 @@ public static class DependencyInjection
             services.AddSingleton<TelegramChannelAdapter>(sp => new TelegramChannelAdapter(
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("telegram"),
                 sp.GetRequiredService<IOptions<TelegramBotOptions>>(),
+                sp.GetRequiredService<IServiceScopeFactory>(),
                 sp.GetRequiredService<ILogger<TelegramChannelAdapter>>()));
+            // Shared chart composer: per-bet photos (notification stream) + the /start live dashboard
+            // (a single message edited in place on each bet). Singleton — owns no per-request state.
+            services.AddSingleton<Live.TelegramChartComposer>();
+            // Inbound /start + /connect command listener (long-polling getUpdates). ONLY ONE instance
+            // may poll a given bot — a second poller gets 409 Conflict. Default on; set
+            // Telegram__EnableCommandListener=false on instances that shouldn't own it (e.g. local dev
+            // while prod runs it). The chart widget below uses sendPhoto and never conflicts.
+            if (config.GetValue("Telegram:EnableCommandListener", true))
+                services.AddHostedService<Live.TelegramCommandListenerService>();
+            // Drives per-bet charts + dashboard edits off the paper event hub.
+            services.AddHostedService<Live.TelegramChartWidgetService>();
         }
         if (hasDiscord)
         {
@@ -199,19 +210,12 @@ public static class DependencyInjection
         // ModelId mapping. Singleton so cached values survive across DI scopes; the resolver opens
         // its own scope internally when it has to read from the DbContext.
         services.AddSingleton<IActiveModelResolver, Live.ActiveModelResolver>();
-        // OpenRouter client for AI model description generation. Registered as a typed HttpClient
-        // and no-ops (returns null) when OpenRouter:ApiKey is absent — safe to have in every env.
-        services.AddHttpClient<Adapters.OpenRouterClient>();
-        // ModelDescriber is singleton: it holds no per-request state, uses IServiceScopeFactory
-        // for its background DB writes, and is injected into the scoped ModelsService safely via
-        // the singleton-captures-scoped-through-factory pattern.
-        services.AddSingleton<Live.ModelDescriber>();
-        // StrategyDescriber mirrors ModelDescriber: singleton, background scope factory pattern.
-        services.AddSingleton<Live.StrategyDescriber>();
+        // Model/strategy descriptions are generated deterministically inline by DescriptionTemplater
+        // (no external LLM, no API key) at upsert time — no describer services to register.
         services.AddScoped<IModelsService, Live.ModelsService>();
         services.AddScoped<Live.ActiveModelsService>();
 
-        // Venue price store — resolves anti-look-ahead entry quotes; falls back to synthetic-flat.
+        // Venue price store — resolves anti-look-ahead entry quotes at the tenant's fixed conservative fee.
         services.AddScoped<IVenuePriceStore, VenuePriceStore>();
 
         // Strategy evaluator — unified built-in + custom-DAG path. Scoped because it consumes the

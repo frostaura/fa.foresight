@@ -76,15 +76,13 @@ public sealed class StrategyEvaluator : IStrategyEvaluator
         }
         catch (JsonException ex)
         {
-            _logger.LogError(ex, "StrategyEvaluator: strategy {Id} definition is not valid JSON; returning 0", strategyId);
-            return 0m;
+            // BROKEN strategy — fail loud rather than masquerading as a no-bet forever.
+            _logger.LogError(ex, "StrategyEvaluator: strategy {Id} definition is not valid JSON", strategyId);
+            throw new StrategyEvaluationException(strategyId, $"Strategy {strategyId} definition is not valid JSON: {ex.Message}", ex);
         }
 
         if (flow is null)
-        {
-            _logger.LogWarning("StrategyEvaluator: strategy {Id} definition deserialized to null; returning 0", strategyId);
-            return 0m;
-        }
+            throw new StrategyEvaluationException(strategyId, $"Strategy {strategyId} definition deserialized to null.");
 
         // Execute the strategy DAG. Strategy nodes (edge_aware_kelly, clamp_round, gate, etc.) are
         // pure functions of their declared input ports. Ports in the StrategyContextPorts set are
@@ -104,14 +102,19 @@ public sealed class StrategyEvaluator : IStrategyEvaluator
             if (stakeObj is double stakeDouble) return (decimal)stakeDouble;
             if (stakeObj is int stakeInt) return stakeInt;
 
-            _logger.LogWarning("StrategyEvaluator: strategy {Id} output.stake was null or unrecognised type {Type}; returning 0",
-                strategyId, stakeObj?.GetType().Name ?? "null");
-            return 0m;
+            // The DAG ran but produced no usable stake — a broken strategy, not a deliberate no-bet.
+            throw new StrategyEvaluationException(strategyId,
+                $"Strategy {strategyId} produced no usable output.stake (got {stakeObj?.GetType().Name ?? "null"}).");
+        }
+        catch (StrategyEvaluationException)
+        {
+            throw; // already a typed broken-strategy failure — don't wrap it again
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "StrategyEvaluator: strategy {Id} DAG execution failed; returning 0", strategyId);
-            return 0m;
+            // BROKEN strategy — the DAG threw. Fail loud so the session/run reports the error.
+            _logger.LogError(ex, "StrategyEvaluator: strategy {Id} DAG execution failed", strategyId);
+            throw new StrategyEvaluationException(strategyId, $"Strategy {strategyId} DAG execution failed: {ex.Message}", ex);
         }
     }
 

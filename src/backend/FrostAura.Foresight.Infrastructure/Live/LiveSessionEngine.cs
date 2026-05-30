@@ -334,12 +334,40 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                     openBet.MarketOutcomeUp = marketOutcomeUp;
                     openBet.ResolvedAt     = DateTimeOffset.UtcNow;
 
-                    // Divergence signal: when the market resolved and it disagrees with the model's predicted side.
-                    // A divergence is a correctness signal (the model called direction wrong) not a loss-cause note.
+                    // Divergence signals on a real resolution. Two distinct cases, recorded separately:
                     if (marketOutcomeUp.HasValue)
                     {
+                        // (1) SETTLEMENT-SOURCE ALIGNMENT (§B/§9): the model predicts — and paper/backtest
+                        // settle on — the Binance candle's own body (close > open). If the venue settled
+                        // the OTHER way, the prediction window / reference source is misaligned with the
+                        // market's; that is a CORRECTNESS bug (a UP candle that the market settles DOWN),
+                        // not merely a model miss. Surface it loudly so it isn't mistaken for a bad call.
+                        try
+                        {
+                            var alignCandles = await _binance.GetKlinesAsync(tracked.Symbol, tracked.Interval, 5, ct);
+                            var alignCandle = alignCandles.FirstOrDefault(c => c.OpenTime == openBet.TargetOpenTime);
+                            if (alignCandle is not null)
+                            {
+                                var candleUp = alignCandle.Close > alignCandle.Open;
+                                if (candleUp != marketOutcomeUp.Value)
+                                {
+                                    openBet.DivergenceNote =
+                                        $"ALIGNMENT: Binance candle settled {(candleUp ? "UP" : "DOWN")} (close vs open) but Polymarket resolved {(marketOutcomeUp.Value ? "YES (UP)" : "NO (DOWN)")}. Window/reference-source mismatch — correctness bug, not a loss-cause.";
+                                    _logger.LogWarning("Live bet {BetId} SETTLEMENT-SOURCE divergence: candle={CandleSide} market={MarketSide} (window/source mismatch)",
+                                        openBet.Id, candleUp ? "UP" : "DOWN", marketOutcomeUp.Value ? "YES" : "NO");
+                                }
+                            }
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            _logger.LogDebug(ex, "Live bet {BetId}: could not fetch candle for settlement-source alignment check", openBet.Id);
+                        }
+
+                        // (2) MODEL CALIBRATION: the model's predicted side disagrees with the market.
+                        // Only note this when there isn't already an alignment note (the alignment case is
+                        // the more important root cause).
                         var modelPredictedUp = openBet.Side == "UP";
-                        if (modelPredictedUp != marketOutcomeUp.Value)
+                        if (modelPredictedUp != marketOutcomeUp.Value && openBet.DivergenceNote is null)
                         {
                             openBet.DivergenceNote = $"Model predicted {(modelPredictedUp ? "UP" : "DOWN")} but market resolved {(marketOutcomeUp.Value ? "YES (UP)" : "NO (DOWN)")}. Correctness signal — check model calibration.";
                             _logger.LogInformation("Live bet {BetId} divergence: model={ModelSide} market={MarketSide}",
@@ -355,10 +383,15 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                     await _ledger.RecomputeAsync(tenantId, tracked.Id, tracked.CurrentBalance, ct);
                     if (tracked.Bust) await _ledger.ReleaseAsync(tenantId, tracked.Id, ct);
 
-                    // Notify bet resolution (best-effort).
+                    // Notify bet resolution (best-effort). Counts include the just-settled bet.
+                    var placedCount = tracked.Bets.Count(b => b.Resolved);
+                    var wonCount = tracked.Bets.Count(b => b.Resolved && b.Outcome == "win");
                     await _notifier.NotifyBetResolvedAsync(
                         tenantId, tracked.Id, openBet.Id,
-                        openBet.Side, openBet.Size, step.Payout, step.Won, tracked.CurrentBalance, ct);
+                        tracked.Symbol, tracked.Interval, openBet.TargetOpenTime,
+                        openBet.Size, step.Payout, step.Won,
+                        tracked.CurrentBalance, tracked.InitialBalance,
+                        wonCount, placedCount, ct);
                     if (tracked.Bust)
                         await _notifier.NotifySessionBustAsync(tenantId, tracked.Id, "live", tracked.CurrentBalance, ct);
 

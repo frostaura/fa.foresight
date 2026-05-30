@@ -27,6 +27,8 @@ public sealed class ForesightDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<Strategy> Strategies => Set<Strategy>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<PlatformConnection> PlatformConnections => Set<PlatformConnection>();
+    /// <summary>Durable mirror of the per-tenant live-trading arm flag (survives process restart).</summary>
+    public DbSet<LiveArmState> LiveArmStates => Set<LiveArmState>();
     /// <summary>Data Protection key ring — DB-persisted so encrypted secrets survive restarts.</summary>
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
     public DbSet<Market> Markets => Set<Market>();
@@ -91,8 +93,17 @@ public sealed class ForesightDbContext : DbContext, IDataProtectionKeyContext
             b.Property(c => c.ClobBaseUrl).HasMaxLength(300).IsRequired();
             b.Property(c => c.GammaBaseUrl).HasMaxLength(300).IsRequired();
             b.Property(c => c.MaxTradeUsd).HasColumnType("numeric(20,4)");
+            b.Property(c => c.EffectivePrice).HasColumnType("numeric(6,5)");
+            b.Property(c => c.RpcUrl).HasMaxLength(300);
             // One connection per (tenant, connector); the IsDefault row is the active connector.
             b.HasIndex(c => new { c.TenantId, c.ConnectorId }).IsUnique();
+        });
+
+        mb.Entity<LiveArmState>(b =>
+        {
+            b.ToTable("live_arm_state");
+            b.HasKey(s => s.TenantId);
+            b.Property(s => s.ArmedBy).HasMaxLength(120);
         });
 
         // Data Protection key ring — let the package configure its own entity shape.

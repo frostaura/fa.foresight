@@ -10,11 +10,13 @@
 import { useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
+  Bell,
   ChevronDown,
   CircleDollarSign,
   Info,
   Plug,
   Plus,
+  Send,
   ShieldAlert,
   ShieldCheck,
   Square,
@@ -43,11 +45,16 @@ import {
   useConfirmGoLiveMutation,
   useKillswitchMutation,
   useGetPlatformConnectionQuery,
+  useGetAccountBalanceQuery,
   useUpdatePlatformConnectionMutation,
+  useGetNotificationSettingsQuery,
+  useUpdateNotificationSettingsMutation,
+  useTestNotificationMutation,
   type NormalizedSession,
   type CreateSessionRequest,
   type PlatformConnection,
   type UpdatePlatformConnectionRequest,
+  type NotificationSettings,
 } from "../store/api";
 
 const SYMBOLS = ["BTCUSDT"];
@@ -407,7 +414,7 @@ function LiveNumbers({ session, onStop, stopping }: {
         <span>
           {hitRate != null ? `${hitRate.toFixed(0)}% hit` : "— hit"} · {session.betsWon}/{session.betsPlaced} bets
         </span>
-        {session.reservedAmount != null && session.reservedAmount > 0 && (
+        {session.reservedAmount != null && (
           <span>${session.reservedAmount.toFixed(2)} reserved</span>
         )}
         <button
@@ -457,6 +464,114 @@ function LiveSessionCard({ session }: { session: NormalizedSession }) {
 // Shows the active Polymarket connection at a glance (wallet status, live-trading flag, endpoints)
 // with an "Edit connection" button. The connection now lives in the DB per tenant and is edited
 // in-app via the dialog below — env is only a one-time bootstrap default.
+// ── Account balance strip ─────────────────────────────────────────────────────
+// Wallet / Reserved / Free for the live-trading account. The wallet pUSD is read on-chain; until a
+// funded wallet is configured it is 0/unconfirmed, so Wallet and Free render "—" (never a misleading
+// $0.00). Reserved (Σ active live-session balances) is always meaningful.
+function AccountBalanceStrip() {
+  const { data: bal } = useGetAccountBalanceQuery();
+  const funded = !!bal && bal.walletPusd > 0;
+  const cell = (label: string, value: string, valueCls = "text-fa-frost") => (
+    <div>
+      <div className="fa-overline text-fa-frost-dim">{label}</div>
+      <div className={`tabular-nums ${valueCls}`}>{value}</div>
+    </div>
+  );
+  return (
+    <div className="fa-card px-4 py-3">
+      <div className="grid grid-cols-3 gap-x-6 gap-y-2 fa-caption">
+        {cell("Wallet (pUSD)", funded ? `$${bal!.walletPusd.toFixed(2)}` : "—", funded ? "text-fa-frost-bright" : "text-fa-frost-dim")}
+        {cell("Reserved", bal ? `$${bal.reserved.toFixed(2)}` : "—")}
+        {cell("Free", funded ? `$${bal!.free.toFixed(2)}` : "—", funded && bal!.free < 0 ? "text-fa-danger" : "text-fa-frost")}
+      </div>
+      {!funded && (
+        <p className="fa-caption text-fa-frost-dim mt-2">
+          Wallet balance is read on-chain once a funded Polymarket wallet is configured. Reserved tracks
+          active live sessions.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Notifications card ─────────────────────────────────────────────────────────
+// The Telegram bot is global (one Foresight bot); the destination chat id is per-tenant and edited
+// here. "Send test" delivers a message to the resolved chat so the user can confirm wiring.
+function NotificationsCard() {
+  const { data: settings } = useGetNotificationSettingsQuery();
+  // Seed the editor once settings arrive (key forces a fresh mount → useState initializer picks up the
+  // loaded value without a setState-in-effect). Until then, render a minimal shell.
+  if (!settings) {
+    return (
+      <div className="fa-card px-4 py-3">
+        <span className="inline-flex items-center gap-1.5 fa-section-title">
+          <Bell className="h-4 w-4 text-fa-frost-dim" /> Notifications
+        </span>
+      </div>
+    );
+  }
+  return <NotificationsCardInner key={String(settings.telegramChatId ?? "none")} settings={settings} />;
+}
+
+function NotificationsCardInner({ settings }: { settings: NotificationSettings }) {
+  const [updateSettings, { isLoading: saving }] = useUpdateNotificationSettingsMutation();
+  const [sendTest, { isLoading: testing }] = useTestNotificationMutation();
+  const [chatId, setChatId] = useState(settings.telegramChatId != null ? String(settings.telegramChatId) : "");
+  const [status, setStatus] = useState<null | "saved" | "test-ok" | "test-err">(null);
+
+  const save = async () => {
+    const trimmed = chatId.trim();
+    const parsed = trimmed === "" ? null : Number(trimmed);
+    if (parsed !== null && !Number.isInteger(parsed)) return; // ignore non-numeric input
+    try { await updateSettings({ telegramChatId: parsed }).unwrap(); setStatus("saved"); } catch { /* surfaced below */ }
+  };
+  const test = async () => {
+    try { await sendTest().unwrap(); setStatus("test-ok"); } catch { setStatus("test-err"); }
+  };
+
+  return (
+    <div className="fa-card px-4 py-3 space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="inline-flex items-center gap-1.5 fa-section-title">
+          <Bell className="h-4 w-4 text-fa-frost-dim" /> Notifications
+        </span>
+        <span className={cn("fa-overline px-2 py-0.5 rounded-full",
+          settings.botConfigured ? "text-emerald-300 bg-emerald-300/10" : "text-fa-frost-dim bg-fa-glass")}>
+          {settings.botConfigured ? "Telegram bot connected" : "No bot token"}
+        </span>
+        <button
+          onClick={test}
+          disabled={testing || !settings.botConfigured}
+          className="ml-auto inline-flex items-center gap-1.5 fa-caption text-fa-frost-dim hover:text-fa-frost-bright transition disabled:opacity-40"
+        >
+          <Send className="h-3.5 w-3.5" /> {testing ? "Sending…" : "Send test"}
+        </button>
+      </div>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-0 flex-1">
+          <label htmlFor="fa-tg-chat" className="fa-overline text-fa-frost-dim mb-1.5 block">Your Telegram chat id</label>
+          <Input
+            id="fa-tg-chat"
+            value={chatId}
+            onChange={(e) => { setChatId(e.target.value); setStatus(null); }}
+            placeholder="e.g. 123456789"
+            inputMode="numeric"
+            className="text-sm tabular-nums max-w-xs"
+          />
+        </div>
+        <Button onClick={save} disabled={saving} variant="primary" size="sm">{saving ? "Saving…" : "Save"}</Button>
+      </div>
+      <p className="fa-caption text-fa-frost-dim">
+        The Foresight bot is shared; only your chat id is personal — it's where your alerts are sent.
+        Message the bot once, then paste your chat id here. Leave blank to use the account default.
+        {status === "saved" && <span className="text-fa-success ml-1">Saved.</span>}
+        {status === "test-ok" && <span className="text-fa-success ml-1">Test sent — check Telegram.</span>}
+        {status === "test-err" && <span className="text-fa-danger ml-1">Test failed.</span>}
+      </p>
+    </div>
+  );
+}
+
 function ConnectionCard({ onEdit }: { onEdit: () => void }) {
   const { data: conn, isLoading, isError } = useGetPlatformConnectionQuery();
 
@@ -510,6 +625,10 @@ function ConnectionCard({ onEdit }: { onEdit: () => void }) {
             <div className="fa-overline text-fa-frost-dim">Per-trade cap</div>
             <div className="text-fa-frost tabular-nums">${conn.maxTradeUsd.toFixed(2)}</div>
           </div>
+          <div>
+            <div className="fa-overline text-fa-frost-dim">Effective price (fee)</div>
+            <div className="text-fa-frost tabular-nums">{conn.effectivePrice.toFixed(2)}</div>
+          </div>
           <div className="sm:col-span-2">
             <div className="fa-overline text-fa-frost-dim">CLOB endpoint</div>
             <div className="text-fa-frost-dim truncate font-mono text-xs">{conn.clobBaseUrl}</div>
@@ -542,6 +661,8 @@ function ConnectionEditorDialog({ onClose }: { onClose: () => void }) {
   const [chainId, setChainId] = useState(conn?.chainId ?? 137);
   const [maxTradeUsd, setMaxTradeUsd] = useState(conn?.maxTradeUsd ?? 0);
   const [liveTrading, setLiveTrading] = useState(conn?.liveTrading ?? false);
+  const [effectivePrice, setEffectivePrice] = useState(conn?.effectivePrice ?? 0.55);
+  const [rpcUrl, setRpcUrl] = useState(conn?.rpcUrl ?? "");
 
   const saveErrMsg =
     saveError && "data" in saveError
@@ -562,6 +683,8 @@ function ConnectionEditorDialog({ onClose }: { onClose: () => void }) {
     if (chainId !== (conn?.chainId ?? 137)) body.chainId = chainId;
     if (maxTradeUsd !== (conn?.maxTradeUsd ?? 0)) body.maxTradeUsd = maxTradeUsd;
     if (liveTrading !== (conn?.liveTrading ?? false)) body.liveTrading = liveTrading;
+    if (effectivePrice !== (conn?.effectivePrice ?? 0.55)) body.effectivePrice = effectivePrice;
+    if (rpcUrl.trim() !== (conn?.rpcUrl ?? "")) body.rpcUrl = rpcUrl.trim();
 
     try {
       await updateConnection(body).unwrap();
@@ -690,6 +813,36 @@ function ConnectionEditorDialog({ onClose }: { onClose: () => void }) {
                 onChange={(e) => setMaxTradeUsd(Number(e.target.value))}
                 className="text-sm tabular-nums"
               />
+            </div>
+            <div>
+              <label htmlFor="fa-conn-eff" className={labelCls}>Effective entry price (fee)</label>
+              <Input
+                id="fa-conn-eff"
+                type="number"
+                min={0.5}
+                max={0.95}
+                step="0.01"
+                value={effectivePrice}
+                onChange={(e) => setEffectivePrice(Number(e.target.value))}
+                className="text-sm tabular-nums"
+              />
+              <p className="fa-caption text-fa-frost-dim mt-1">
+                A win pays stake ÷ price (e.g. $2 at 0.55 → $3.64). Lower = closer to double; 0.55 is a
+                conservative default for these near-50/50 markets.
+              </p>
+            </div>
+            <div className="sm:col-span-2">
+              <label htmlFor="fa-conn-rpc" className={labelCls}>Polygon RPC URL</label>
+              <Input
+                id="fa-conn-rpc"
+                value={rpcUrl}
+                onChange={(e) => setRpcUrl(e.target.value)}
+                placeholder="https://polygon-rpc.com"
+                className="text-sm font-mono"
+              />
+              <p className="fa-caption text-fa-frost-dim mt-1">
+                Used to read the on-chain pUSD wallet balance during reconciliation.
+              </p>
             </div>
           </div>
 
@@ -895,6 +1048,12 @@ export default function Live() {
 
         {/* Connection — view/edit the per-tenant Polymarket connection in-app */}
         <ConnectionCard onEdit={() => setShowConnection(true)} />
+
+        {/* Account balance — wallet / reserved / free for the live-trading account */}
+        <AccountBalanceStrip />
+
+        {/* Notifications — per-tenant Telegram chat id (bot is global) */}
+        <NotificationsCard />
 
         {/* New live session — collapsible */}
         <div className="fa-card overflow-hidden">

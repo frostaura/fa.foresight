@@ -10,9 +10,11 @@ namespace FrostAura.Foresight.Api.Endpoints;
 /// Step 2: POST /api/golive/confirm       → echo the code back to arm live execution for this tenant.
 /// Step 3: POST /api/golive/killswitch    → immediately disarm live execution.
 ///
-/// The arm state is in-memory (ILiveTradingArm singleton) and resets on restart. Every real order
-/// additionally requires Polymarket:LiveTrading=true in config AND a wallet key configured — the arm
-/// is the final runtime layer. Without all three, PolymarketExecutionProvider refuses the order.
+/// The arm state is held in-memory (ILiveTradingArm singleton) AND mirrored to the live_arm_state
+/// table, so an armed tenant RESUMES automated execution after a process restart (pending codes are
+/// in-memory only and do not survive). Every real order additionally requires LiveTrading=true on the
+/// tenant connection AND a wallet key configured — the arm is the final runtime layer. Without all
+/// three, PolymarketExecutionProvider refuses the order.
 /// </summary>
 public static class GoLiveEndpoints
 {

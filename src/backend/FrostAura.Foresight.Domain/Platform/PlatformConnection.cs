@@ -51,6 +51,24 @@ public sealed class PlatformConnection : ITenantScoped
     /// <summary>Optional per-trade cap (USD) surfaced from the connection editor. 0 ⇒ unset.</summary>
     public decimal MaxTradeUsd { get; set; }
 
+    /// <summary>
+    /// Conservative effective entry price ∈ (0,1) for the BTC up/down contract — the fee/spread model
+    /// that replaces fetching live odds. These near-50/50 markets pay slightly below double on a win,
+    /// so a $S stake buys <c>S / EffectivePrice</c> shares and a win pays <c>shares × $1</c>
+    /// (e.g. $2 at 0.55 → $3.64). The SAME price applies to whichever side is bought (UP or DOWN),
+    /// because the fee is symmetric — it is NOT a coherent YES+NO=1 order book. Used uniformly for
+    /// sizing/edge across paper, backtest, chaos, AND as the live BUY limit (an order simply doesn't
+    /// fill when the real ask is worse than this, a safe skip). Default 0.55 is deliberately
+    /// conservative: real fills are usually cheaper (~0.52), so surviving at 0.55 means surviving live.
+    /// </summary>
+    public decimal EffectivePrice { get; set; } = 0.55m;
+
+    /// <summary>
+    /// JSON-RPC endpoint (Polygon) used for the on-chain pUSD balance read during reconciliation.
+    /// Non-secret. Empty ⇒ reconciliation skips the on-chain read (drift unknown, never assumed 0).
+    /// </summary>
+    public string? RpcUrl { get; set; } = "https://polygon-rpc.com";
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

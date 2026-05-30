@@ -22,7 +22,9 @@ public sealed record ResolvedConnection(
     string  GammaBaseUrl,
     int     ChainId,
     bool    LiveTrading,
-    decimal MaxTradeUsd)
+    decimal MaxTradeUsd,
+    decimal EffectivePrice,
+    string? RpcUrl)
 {
     public bool HasUsableKey => !string.IsNullOrWhiteSpace(PrivateKey);
 }
@@ -83,6 +85,8 @@ public sealed class PlatformConnectionResolver : IPlatformConnectionResolver
             privateKey, apiSecret, row.WalletAddress,
             row.SignatureType, row.Funder,
             row.ClobBaseUrl, row.GammaBaseUrl, row.ChainId,
-            row.LiveTrading, row.MaxTradeUsd);
+            row.LiveTrading, row.MaxTradeUsd,
+            row.EffectivePrice <= 0m || row.EffectivePrice >= 1m ? 0.55m : row.EffectivePrice,
+            row.RpcUrl);
     }
 }

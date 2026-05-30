@@ -2,6 +2,7 @@ using System.Text.Json;
 using FrostAura.Foresight.Application.Flow;
 using FrostAura.Foresight.Application.Models;
 using FrostAura.Foresight.Application.Tenancy;
+using FrostAura.Foresight.Domain.Descriptions;
 using FrostAura.Foresight.Domain.Models;
 using FrostAura.Foresight.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -13,14 +14,12 @@ public sealed class ModelsService : IModelsService
     private readonly ForesightDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly FlowValidator _validator;
-    private readonly ModelDescriber _describer;
 
-    public ModelsService(ForesightDbContext db, ITenantContext tenant, FlowValidator validator, ModelDescriber describer)
+    public ModelsService(ForesightDbContext db, ITenantContext tenant, FlowValidator validator)
     {
         _db = db;
         _tenant = tenant;
         _validator = validator;
-        _describer = describer;
     }
 
     public async Task<IReadOnlyList<Model>> ListAsync(CancellationToken ct, bool includeArchived = false)
@@ -80,11 +79,11 @@ public sealed class ModelsService : IModelsService
             CreatedAt = now,
             UpdatedAt = now,
         };
+        var (simple, technical) = DescriptionTemplater.ForModel(model.Name, model.Kind, model.SupportsBacktesting, model.Definition);
+        model.SimpleDescription = simple;
+        model.TechnicalDescription = technical;
         _db.Models.Add(model);
         await _db.SaveChangesAsync(ct);
-
-        // Fire-and-forget: generate AI descriptions in background so the HTTP response returns immediately.
-        _describer.EnqueueAsync(model.Id);
 
         return model;
     }
@@ -107,14 +106,16 @@ public sealed class ModelsService : IModelsService
             ValidateDefinitionOrThrow(definition);
             model.Definition = definition;
         }
+        // Regenerate descriptions when the name or definition changed, since they're derived from
+        // those fields. Deterministic + inline — no background task, persisted in the same write.
+        if (nameChanged || definitionChanged)
+        {
+            var (simple, technical) = DescriptionTemplater.ForModel(model.Name, model.Kind, model.SupportsBacktesting, model.Definition);
+            model.SimpleDescription = simple;
+            model.TechnicalDescription = technical;
+        }
         model.UpdatedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
-
-        // Regenerate descriptions in background only when the name or definition actually changed,
-        // since descriptions are derived from those fields. Description-only edits (human text)
-        // don't warrant regeneration.
-        if (nameChanged || definitionChanged)
-            _describer.EnqueueAsync(model.Id);
 
         return model;
     }
@@ -162,6 +163,9 @@ public sealed class ModelsService : IModelsService
             CreatedAt = now,
             UpdatedAt = now,
         };
+        var (simple, technical) = DescriptionTemplater.ForModel(clone.Name, clone.Kind, clone.SupportsBacktesting, clone.Definition);
+        clone.SimpleDescription = simple;
+        clone.TechnicalDescription = technical;
         _db.Models.Add(clone);
         await _db.SaveChangesAsync(ct);
         return clone;

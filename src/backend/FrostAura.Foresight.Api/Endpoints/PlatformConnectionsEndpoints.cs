@@ -55,7 +55,9 @@ public static class PlatformConnectionsEndpoints
                     GammaBaseUrl: "https://gamma-api.polymarket.com",
                     ChainId: 137,
                     LiveTrading: false,
-                    MaxTradeUsd: 0m));
+                    MaxTradeUsd: 0m,
+                    EffectivePrice: 0.55m,
+                    RpcUrl: "https://polygon-rpc.com"));
             }
 
             return Results.Ok(new PlatformConnectionView(
@@ -69,7 +71,9 @@ public static class PlatformConnectionsEndpoints
                 GammaBaseUrl: conn.GammaBaseUrl,
                 ChainId: conn.ChainId,
                 LiveTrading: conn.LiveTrading,
-                MaxTradeUsd: conn.MaxTradeUsd));
+                MaxTradeUsd: conn.MaxTradeUsd,
+                EffectivePrice: conn.EffectivePrice,
+                RpcUrl: conn.RpcUrl));
         });
 
         // PUT — upsert the tenant's default connection.
@@ -125,6 +129,16 @@ public static class PlatformConnectionsEndpoints
             if (req.ChainId.HasValue)        conn.ChainId = req.ChainId.Value;
             if (req.LiveTrading.HasValue)    conn.LiveTrading = req.LiveTrading.Value;
             if (req.MaxTradeUsd.HasValue)    conn.MaxTradeUsd = req.MaxTradeUsd.Value;
+            if (req.EffectivePrice.HasValue)
+            {
+                // Guard the fee/price into a sane band: must be a probability strictly in (0,1), and
+                // realistically a slight premium over a coin flip for these near-50/50 markets.
+                var p = req.EffectivePrice.Value;
+                if (p < 0.50m || p > 0.95m)
+                    return Results.BadRequest(new { error = "effectivePrice must be between 0.50 and 0.95 (the conservative fee/price for a near-50/50 contract)." });
+                conn.EffectivePrice = p;
+            }
+            if (req.RpcUrl is not null)      conn.RpcUrl = string.IsNullOrWhiteSpace(req.RpcUrl) ? null : req.RpcUrl.Trim();
             conn.UpdatedAt = now;
 
             if (isNew) db.PlatformConnections.Add(conn);
@@ -144,7 +158,9 @@ public static class PlatformConnectionsEndpoints
                 GammaBaseUrl: conn.GammaBaseUrl,
                 ChainId: conn.ChainId,
                 LiveTrading: conn.LiveTrading,
-                MaxTradeUsd: conn.MaxTradeUsd));
+                MaxTradeUsd: conn.MaxTradeUsd,
+                EffectivePrice: conn.EffectivePrice,
+                RpcUrl: conn.RpcUrl));
         });
     }
 
@@ -160,7 +176,9 @@ public static class PlatformConnectionsEndpoints
         string  GammaBaseUrl,
         int     ChainId,
         bool    LiveTrading,
-        decimal MaxTradeUsd);
+        decimal MaxTradeUsd,
+        decimal EffectivePrice,
+        string? RpcUrl);
 
     /// <summary>Upsert body. All fields optional; omitted = unchanged. privateKey is write-only.</summary>
     private sealed record UpdatePlatformConnectionRequest(
@@ -171,5 +189,7 @@ public static class PlatformConnectionsEndpoints
         string?  GammaBaseUrl,
         int?     ChainId,
         bool?    LiveTrading,
-        decimal? MaxTradeUsd);
+        decimal? MaxTradeUsd,
+        decimal? EffectivePrice,
+        string?  RpcUrl);
 }

@@ -226,6 +226,22 @@ public sealed class PaperTradingService : IPaperTradingService
                 // the truth instead of a stale snapshot.
                 var candles = await _binance.GetKlinesAsync(tracked.Symbol, tracked.Interval, 5, ct);
                 var candle = candles.FirstOrDefault(c => c.OpenTime == openBet.TargetOpenTime);
+                // After a longer outage (downtime spanning more than the recent window above) the
+                // target candle is older than the last 5, so the quick fetch misses it and the bet
+                // would never settle — freezing placement forever. Fall back to a precise historical
+                // range fetch for that exact candle so stale bets ALWAYS back-resolve on start-up,
+                // no matter how long the processor was down.
+                if (candle is null)
+                {
+                    var exact = await _binance.GetKlinesRangeAsync(
+                        tracked.Symbol, tracked.Interval,
+                        openBet.TargetOpenTime, openBet.TargetOpenTime + intervalMs - 1, limit: 2, ct);
+                    candle = exact.FirstOrDefault(c => c.OpenTime == openBet.TargetOpenTime);
+                    if (candle is not null)
+                        _logger.LogInformation(
+                            "Back-resolving stale paper bet {Id} (target {Target}) via historical fetch after downtime",
+                            openBet.Id, openBet.TargetOpenTime);
+                }
                 if (candle is not null)
                 {
                     var actualClose = candle.Close;
@@ -284,13 +300,12 @@ public sealed class PaperTradingService : IPaperTradingService
                     }
                     if (settled)
                     {
+                        // The BetResolved event drives the Telegram per-bet chart photo (chart + the
+                        // same win/loss card as its caption) via TelegramChartComposer — that IS the
+                        // paper bet notification now, so we don't also fire a separate text card here.
                         _events.Publish(new PaperTradingEvent(PaperTradingEventKind.BetResolved, tracked, openBet));
                         if (tracked.Bust)
                             _events.Publish(new PaperTradingEvent(PaperTradingEventKind.SessionBust, tracked, null));
-                        // Notify bet resolution via channel adapter (best-effort).
-                        await _notifier.NotifyBetResolvedAsync(
-                            tracked.TenantId, tracked.Id, openBet.Id,
-                            openBet.Side, openBet.Size, step.Payout, step.Won, tracked.CurrentBalance, ct);
                         if (tracked.Bust)
                             await _notifier.NotifySessionBustAsync(tracked.TenantId, tracked.Id, "paper", tracked.CurrentBalance, ct);
                         openBet = null; // freed; placement can now consider this candle's slot
@@ -370,10 +385,24 @@ public sealed class PaperTradingService : IPaperTradingService
                             // built-in code strategies and custom DAG strategies transparently.
                             var strategyCtx = DagStakingStrategyAdapter.MakeStrategyFlowContext(
                                 tracked.TenantId, tracked.Id, tracked.Symbol, tracked.Interval);
-                            var nextStake = await _strategyEvaluator.NextStakeAsync(
-                                tracked.StrategyId,
-                                new StrategyStep(lastStake, lastWon, tracked.InitialBetSize, tracked.CurrentBalance, entryInputs),
-                                strategyCtx, ct);
+                            decimal nextStake;
+                            try
+                            {
+                                nextStake = await _strategyEvaluator.NextStakeAsync(
+                                    tracked.StrategyId,
+                                    new StrategyStep(lastStake, lastWon, tracked.InitialBetSize, tracked.CurrentBalance, entryInputs),
+                                    strategyCtx, ct);
+                            }
+                            catch (StrategyEvaluationException ex)
+                            {
+                                // A BROKEN strategy must stop the session, not silently no-bet forever.
+                                _logger.LogError(ex, "Paper session {SessionId}: strategy {Strategy} failed to evaluate — stopping session", tracked.Id, tracked.StrategyId);
+                                tracked.StoppedAt = DateTimeOffset.UtcNow;
+                                await _db.SaveChangesAsync(ct);
+                                _events.Publish(new PaperTradingEvent(PaperTradingEventKind.SessionStopped, tracked, null));
+                                await _notifier.NotifySessionErrorAsync(tracked.TenantId, tracked.Id, "paper", ex.Message, ct);
+                                return tracked;
+                            }
 
                             if (nextStake > 0m)
                             {

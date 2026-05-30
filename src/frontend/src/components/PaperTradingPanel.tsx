@@ -3,10 +3,9 @@ import { createPortal } from "react-dom";
 import ShimmerOnChange from "./ShimmerOnChange";
 import InfoTip, { TipBody } from "./InfoTip";
 import { Tooltip } from "./ui";
-import { CircleDollarSign, Info, Play, ScrollText, Square } from "lucide-react";
+import { CircleDollarSign, Info, Play, ScrollText, Square, X } from "lucide-react";
 import {
   usePaperSession,
-  rescorePaperSession,
   type PaperBet,
   type PaperSession
 } from "../lib/paperTrading";
@@ -18,28 +17,22 @@ import { cn } from "../lib/cn";
 interface PaperTradingPanelProps {
   symbol: string;
   interval: string;
-  /**
-   * Chart's authoritative close-by-openTime map for this card. When supplied, the panel
-   * rescores resolved bets against these candles instead of trusting the server-recorded
-   * `bet.outcome` (which is computed off the drifty `anchorClose`). Keeps the ledger,
-   * P&L strip, and balance number aligned with the chart's PREV chip and accuracy
-   * headline — see `rescorePaperSession` in lib/paperTrading.ts.
-   */
-  closeByOpenTime?: Map<number, number>;
-  intervalMs?: number;
 }
 
 /**
  * Thin client over the server-side paper-trading engine. Start/stop go through REST; live state
  * arrives via the shared SSE stream in `lib/paperTrading.ts`. Trading runs server-side regardless
  * of whether this panel is mounted — closing the tab does not stop the session.
+ *
+ * The SERVER is the single source of truth for balance / P&L / outcomes. The panel renders the
+ * backend session verbatim — no client-side rescoring — so the strip, the ledger, and the chart's
+ * balance line all read the same numbers. (The backend grades each bet on the target candle's body,
+ * close-vs-open, and pays the fixed conservative fee; the chart's hit/miss dots grade the same way
+ * via close-vs-prevClose, which is identical since open[T] == close[T-1].)
  */
-export default function PaperTradingPanel({ symbol, interval, closeByOpenTime, intervalMs }: PaperTradingPanelProps) {
+export default function PaperTradingPanel({ symbol, interval }: PaperTradingPanelProps) {
   const { session, start, stop, error } = usePaperSession(symbol, interval);
-  const displaySession = useMemo(() => {
-    if (!session || !closeByOpenTime || intervalMs == null) return session;
-    return rescorePaperSession(session, closeByOpenTime, intervalMs);
-  }, [session, closeByOpenTime, intervalMs]);
+  const displaySession = session;
   const { data: strategiesResp } = useGetStakingStrategiesQuery();
   const [showStart, setShowStart] = useState(false);
   const [balance, setBalance] = useState(1000);
@@ -296,38 +289,42 @@ function ActiveSession({
 
   return (
     <div className="mt-3 pt-3 border-t border-fa-edge/60">
-      {/* Row 1 — data only. Fans across the full content width via justify-between so the leftmost
-          item hugs the card edge and the rightmost item ends at the right edge — aligning with the
-          Stop button on row 2 below. */}
-      <div className="flex items-center justify-between gap-x-3 fa-caption tabular-nums">
-        <span className="text-fa-frost-dim uppercase tracking-wider inline-flex items-center gap-1">
-          <CircleDollarSign className="h-3 w-3 fa-paper-pulse" aria-label="Paper trading is active" />
-          Paper · <span className="text-fa-frost normal-case tracking-normal">{prettifyStrategyId(session.strategyId)}</span>
+      {/* Row 1 — data only. On mobile the label sits on its own line above the three numbers (which
+          spread edge-to-edge) so nothing wraps mid-value; from sm up it collapses to a single
+          justify-between row hugging both card edges, aligning with the Stop button on row 2. */}
+      <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-x-3 fa-caption tabular-nums">
+        <span className="text-fa-frost-dim uppercase tracking-wider inline-flex items-center gap-1 min-w-0">
+          <CircleDollarSign className="h-3 w-3 fa-paper-pulse shrink-0" aria-label="Paper trading is active" />
+          <span className="whitespace-nowrap truncate">
+            Paper · <span className="text-fa-frost normal-case tracking-normal">{prettifyStrategyId(session.strategyId)}</span>
+          </span>
           {streamError && (
             <span
-              className="ml-1.5 text-amber-300 normal-case tracking-normal"
+              className="ml-1.5 text-amber-300 normal-case tracking-normal whitespace-nowrap"
               title={`Live stream interrupted: ${streamError}. Falling back to 30s REST refresh; updates may lag.`}
             >
               ⚠ reconnecting
             </span>
           )}
         </span>
-        <ShimmerOnChange value={session.currentBalance}>
-          <span className="text-fa-frost-bright">${session.currentBalance.toFixed(2)}</span>
-        </ShimmerOnChange>
-        <ShimmerOnChange value={session.currentBetSize}>
-          <span className="text-fa-frost-dim">
-            ${session.currentBetSize.toFixed(2)}
-            {session.currentBetSize > session.initialBetSize && (
-              <Tooltip content="Martingale escalation: bet size doubles after each loss until the next win resets it back to the initial stake.">
-                <span className="text-amber-300 ml-1 cursor-help">
-                  ×{Math.round(session.currentBetSize / session.initialBetSize)}
-                </span>
-              </Tooltip>
-            )}
-          </span>
-        </ShimmerOnChange>
-        <PnLDisplay pnl={pnl} pnlPct={pnlPct} pnlUp={pnlUp} />
+        <div className="flex items-center justify-between gap-x-3 sm:justify-end shrink-0">
+          <ShimmerOnChange value={session.currentBalance}>
+            <span className="text-fa-frost-bright">${session.currentBalance.toFixed(2)}</span>
+          </ShimmerOnChange>
+          <ShimmerOnChange value={session.currentBetSize}>
+            <span className="text-fa-frost-dim whitespace-nowrap">
+              ${session.currentBetSize.toFixed(2)}
+              {session.currentBetSize > session.initialBetSize && (
+                <Tooltip content="Martingale escalation: bet size doubles after each loss until the next win resets it back to the initial stake.">
+                  <span className="text-amber-300 ml-1 cursor-help">
+                    ×{Math.round(session.currentBetSize / session.initialBetSize)}
+                  </span>
+                </Tooltip>
+              )}
+            </span>
+          </ShimmerOnChange>
+          <PnLDisplay pnl={pnl} pnlPct={pnlPct} pnlUp={pnlUp} />
+        </div>
       </div>
 
       {/* Row 2 — open-bet status (left, optional) and the action buttons (right, always present).
@@ -365,25 +362,38 @@ function ActiveSession({
 
 function PnLDisplay({ pnl, pnlPct }: { pnl: number; pnlPct: number; pnlUp: boolean }) {
   return (
-    <span className="inline-flex items-baseline gap-1.5">
+    <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap">
       <Tooltip content="Profit and loss for this paper-trading session. Calculated as current balance minus the initial balance you started with. Only settled bets are reflected; open bets are still in flight.">
         <span className="text-fa-frost-dim uppercase tracking-wider inline-flex items-center gap-1 cursor-help">
           PnL
           <Info className="h-3 w-3 opacity-70" />
         </span>
       </Tooltip>
-      <ShimmerOnChange value={pnl}>
-        <span className={pnlClass(pnl)}>
-          {pnl >= 0 ? "+" : "-"}${Math.abs(pnl).toFixed(2)} ({pnl >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)
-        </span>
+      {/* Colour goes on the ShimmerOnChange span itself (not a child): .fa-shimmer paints with a
+          transparent fill + currentColor gradient, so a child's colour would be swallowed during the
+          sweep. With the colour here, the shimmer is green/red-tinted and the text stays coloured. */}
+      <ShimmerOnChange value={pnl} className={`${pnlClass(pnl)} whitespace-nowrap`}>
+        {pnl >= 0 ? "+" : "-"}${Math.abs(pnl).toFixed(2)} ({pnl >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)
       </ShimmerOnChange>
     </span>
   );
 }
 
+// Desktop popover placement: an anchored box that flips both axes to stay on-screen and sizes
+// itself to the available space (wider + longer when there's room, scrolls when cramped). On a
+// narrow (mobile) viewport we drop the anchoring entirely and show a fullscreen modal instead —
+// `placement === null && open` means "render as modal".
+type LedgerPlacement = {
+  left: number;
+  top?: number;     // anchored below the trigger
+  bottom?: number;  // flipped above the trigger (distance from viewport bottom)
+  width: number;
+  maxHeight: number;
+};
+
 function LedgerButton({ session }: { session: PaperSession }) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [placement, setPlacement] = useState<LedgerPlacement | null>(null);
   const ref = useRef<HTMLButtonElement>(null);
   // Close-timer ref. When the cursor leaves either the button or the popover we schedule a
   // close; entering the *other* element cancels it. This bridges the 4px visual gap between
@@ -411,36 +421,104 @@ function LedgerButton({ session }: { session: PaperSession }) {
     outcome: (b) => b.outcome ?? null,
   });
 
-  // Position the popover relative to the viewport using getBoundingClientRect. Rendered via a
-  // portal at document.body so it overlays sibling cards regardless of the grid's stacking
-  // context. When the right edge would overflow the viewport (right-column cards), flip the
-  // anchor so the popover aligns to the trigger's right edge instead of its left.
-  const showPopover = () => {
+  const cancelClose = () => {
     if (closeTimer.current != null) {
       window.clearTimeout(closeTimer.current);
       closeTimer.current = null;
     }
+  };
+
+  // Position the ledger relative to the viewport using getBoundingClientRect. Rendered via a
+  // portal at document.body so it overlays sibling cards regardless of the grid's stacking
+  // context. Below ~640px we show a fullscreen modal (placement = null) instead of an anchored
+  // popover. On desktop we flip on BOTH axes — right-align if the right edge would overflow, flip
+  // ABOVE the trigger when there's more room up than down — and size to the free space so the box
+  // is wider/taller when it can be and scrolls when it can't, never getting clipped off-screen.
+  const showPopover = () => {
+    cancelClose();
+    const vw = window.innerWidth;
+    if (vw < 640) { setPlacement(null); setOpen(true); return; } // mobile → fullscreen modal
+
     const rect = ref.current?.getBoundingClientRect();
-    if (rect) {
-      const ledgerWidth = Math.min(460, window.innerWidth * 0.9);
-      const margin = 8;
-      let left = rect.left;
-      if (left + ledgerWidth > window.innerWidth - margin) {
-        // Flip to align the popover's right edge with the trigger's right edge.
-        left = Math.max(margin, rect.right - ledgerWidth);
-      }
-      setPos({ top: rect.bottom + 4, left });
-    }
+    if (!rect) { setOpen(true); return; }
+    const vh = window.innerHeight;
+    const margin = 8;
+    const gap = 6;
+    const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi));
+
+    const width = Math.min(560, vw - margin * 2);
+    let left = rect.left;
+    if (left + width > vw - margin) left = rect.right - width; // right-align under the trigger
+    left = clamp(left, margin, vw - margin - width);
+
+    const spaceBelow = vh - rect.bottom - gap - margin;
+    const spaceAbove = rect.top - gap - margin;
+    const placeBelow = spaceBelow >= 240 || spaceBelow >= spaceAbove;
+    const maxHeight = clamp(placeBelow ? spaceBelow : spaceAbove, 180, Math.round(vh * 0.82));
+
+    setPlacement(placeBelow
+      ? { left, top: rect.bottom + gap, width, maxHeight }
+      : { left, bottom: vh - rect.top + gap, width, maxHeight });
     setOpen(true);
   };
 
   const scheduleClose = () => {
+    // Modal mode (placement === null) is dismissed only by the X / backdrop / Escape — never by the
+    // trigger's hover/blur, which would otherwise yank the sheet away mid-interaction on touch.
+    if (!placement) return;
     if (closeTimer.current != null) window.clearTimeout(closeTimer.current);
     closeTimer.current = window.setTimeout(() => {
       setOpen(false);
       closeTimer.current = null;
     }, 180);
   };
+
+  const closeNow = () => { cancelClose(); setOpen(false); };
+
+  // While the anchored popover is open, a scroll or resize would leave it floating in the wrong
+  // place — recompute (which also re-flips) so it tracks the trigger; Escape always closes.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeNow(); };
+    window.addEventListener("keydown", onKey);
+    let scrollResize: (() => void) | null = null;
+    if (placement) {
+      scrollResize = () => showPopover();
+      window.addEventListener("scroll", scrollResize, true);
+      window.addEventListener("resize", scrollResize);
+    }
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (scrollResize) {
+        window.removeEventListener("scroll", scrollResize, true);
+        window.removeEventListener("resize", scrollResize);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, placement != null]);
+
+  // The ledger table — shared verbatim by the desktop popover and the mobile modal.
+  const ledgerTable = recentBets.length === 0 ? (
+    <div className="text-fa-frost-dim italic px-1 py-2">No bets placed yet.</div>
+  ) : (
+    <table className="fa-table-bordered w-full text-xs [&_th]:whitespace-nowrap [&_td]:whitespace-nowrap">
+      <thead className="text-fa-frost-dim sticky top-0 bg-fa-ink/95 backdrop-blur">
+        <tr className="text-left">
+          <th className="font-normal py-0.5 pl-2 pr-3"><SortHeader<LedgerKey> {...headerProps("placed")}>Placed</SortHeader></th>
+          <th className="font-normal py-0.5 pr-3"><SortHeader<LedgerKey> {...headerProps("side")}>Side</SortHeader></th>
+          <th className="font-normal py-0.5 pr-3 text-right"><SortHeader<LedgerKey> {...headerProps("size")} align="right">Size</SortHeader></th>
+          <th className="font-normal py-0.5 pr-3 text-right"><SortHeader<LedgerKey> {...headerProps("payout")} align="right">P&amp;L</SortHeader></th>
+          <th className="font-normal py-0.5 pr-3 text-right"><SortHeader<LedgerKey> {...headerProps("balance")} align="right">Balance</SortHeader></th>
+          <th className="font-normal py-0.5 text-center"><SortHeader<LedgerKey> {...headerProps("outcome")}>Result</SortHeader></th>
+        </tr>
+      </thead>
+      <tbody>
+        {sortedRows.map((b) => (
+          <LedgerRow key={b.id} bet={b} />
+        ))}
+      </tbody>
+    </table>
+  );
 
   return (
     <button
@@ -450,46 +528,65 @@ function LedgerButton({ session }: { session: PaperSession }) {
       onMouseLeave={scheduleClose}
       onFocus={showPopover}
       onBlur={scheduleClose}
-      onClick={() => (open ? setOpen(false) : showPopover())}
+      onClick={() => (open ? closeNow() : showPopover())}
       className="inline-flex items-center gap-1 text-fa-frost-dim hover:text-fa-frost-bright transition"
       title="View bet ledger"
       aria-expanded={open}
     >
       <ScrollText className="h-3 w-3" />
       Ledger
-      {open && pos && createPortal(
+      {/* Desktop: anchored, two-axis-flipping popover sized to free space. */}
+      {open && placement && createPortal(
         <div
-          style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 9999 }}
-          className="w-[min(460px,90vw)] rounded-md border border-fa-edge bg-fa-ink/95 backdrop-blur p-3 shadow-2xl fa-caption tabular-nums"
+          style={{
+            position: "fixed",
+            top: placement.top,
+            bottom: placement.bottom,
+            left: placement.left,
+            width: placement.width,
+            maxHeight: placement.maxHeight,
+            zIndex: 9999,
+          }}
+          className="flex flex-col rounded-md border border-fa-edge bg-fa-ink/95 backdrop-blur p-3 shadow-2xl fa-caption tabular-nums"
           onMouseEnter={showPopover}
           onMouseLeave={scheduleClose}
         >
-          <div className="text-fa-frost-dim fa-overline mb-2">
+          <div className="text-fa-frost-dim fa-overline mb-2 shrink-0">
             Bet ledger · {session.bets.length} total
           </div>
-          {recentBets.length === 0 ? (
-            <div className="text-fa-frost-dim italic">No bets placed yet.</div>
-          ) : (
-            <div className="max-h-[280px] overflow-y-auto">
-              <table className="fa-table-bordered w-full text-xs [&_th]:whitespace-nowrap [&_td]:whitespace-nowrap">
-                <thead className="text-fa-frost-dim sticky top-0 bg-fa-ink/95 backdrop-blur">
-                  <tr className="text-left">
-                    <th className="font-normal py-0.5 pr-3"><SortHeader<LedgerKey> {...headerProps("placed")}>Placed</SortHeader></th>
-                    <th className="font-normal py-0.5 pr-3"><SortHeader<LedgerKey> {...headerProps("side")}>Side</SortHeader></th>
-                    <th className="font-normal py-0.5 pr-3 text-right"><SortHeader<LedgerKey> {...headerProps("size")} align="right">Size</SortHeader></th>
-                    <th className="font-normal py-0.5 pr-3 text-right"><SortHeader<LedgerKey> {...headerProps("payout")} align="right">P&amp;L</SortHeader></th>
-                    <th className="font-normal py-0.5 pr-3 text-right"><SortHeader<LedgerKey> {...headerProps("balance")} align="right">Balance</SortHeader></th>
-                    <th className="font-normal py-0.5 text-center"><SortHeader<LedgerKey> {...headerProps("outcome")}>Result</SortHeader></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedRows.map((b) => (
-                    <LedgerRow key={b.id} bet={b} />
-                  ))}
-                </tbody>
-              </table>
+          <div className="overflow-y-auto min-h-0">
+            {ledgerTable}
+          </div>
+        </div>,
+        document.body
+      )}
+      {/* Mobile (&lt;640px): fullscreen modal — backdrop + near-fullscreen sheet with a close button. */}
+      {open && !placement && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex flex-col bg-fa-ink/70 backdrop-blur-sm"
+          onClick={closeNow}
+        >
+          <div
+            className="m-3 flex min-h-0 flex-1 flex-col rounded-lg border border-fa-edge bg-fa-ink shadow-2xl fa-caption tabular-nums"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-fa-edge/60 px-4 py-3 shrink-0">
+              <span className="text-fa-frost-dim fa-overline">
+                Bet ledger · {session.bets.length} total
+              </span>
+              <button
+                type="button"
+                onClick={closeNow}
+                className="rounded p-1 text-fa-frost-dim hover:text-fa-frost-bright transition"
+                aria-label="Close ledger"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
-          )}
+            <div className="overflow-y-auto min-h-0 px-3 py-2">
+              {ledgerTable}
+            </div>
+          </div>
         </div>,
         document.body
       )}
@@ -510,7 +607,7 @@ function LedgerRow({ bet }: { bet: PaperBet }) {
   const placedStr = placedAt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
   return (
     <tr className="border-t border-fa-edge/40">
-      <td className="py-0.5 pr-3 text-fa-frost-dim" title={placedAt.toLocaleString()}>{placedStr}</td>
+      <td className="py-0.5 pl-2 pr-3 text-fa-frost-dim" title={placedAt.toLocaleString()}>{placedStr}</td>
       <td className={`py-0.5 pr-3 ${sideColor}`}>{bet.side === "UP" ? "↑ UP" : "↓ DOWN"}</td>
       <td className="py-0.5 pr-3 text-right">${bet.size.toFixed(2)}</td>
       <td className={`py-0.5 pr-3 text-right ${bet.payout == null ? "text-fa-frost-dim" : pnlClass(bet.payout)}`}>

@@ -29,10 +29,15 @@ public interface IStrategyEvaluator
     /// <summary>
     /// Compute the next stake for <paramref name="strategyId"/> given the current step context.
     ///
-    /// Returns 0 when:
+    /// Returns 0 (a legitimate no-bet) when:
     ///  — the strategy gates out (no edge, sub-$1 rounding, confidence band),
     ///  — the DAG flow's output.stake node emits 0, or
-    ///  — the strategy id cannot be resolved (unknown built-in; strategy row not found).
+    ///  — the strategy id cannot be resolved (unknown built-in; strategy row not found / no definition).
+    ///
+    /// THROWS <see cref="StrategyEvaluationException"/> when a custom DAG strategy is BROKEN — invalid
+    /// JSON, the DAG throws during execution, or it produces no usable stake. This is deliberately NOT
+    /// swallowed as a 0: a broken strategy must fail loud (stop the session / fail the run), not read
+    /// as a silent no-bet forever.
     ///
     /// For built-ins the call is synchronous-equivalent (no async I/O). For DAG strategies, the
     /// flow executor runs in-process — no network calls from pure strategy nodes.

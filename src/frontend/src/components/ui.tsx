@@ -1,4 +1,5 @@
-import { type ReactNode, type HTMLAttributes, type ButtonHTMLAttributes, type InputHTMLAttributes, forwardRef, useState } from "react";
+import { type ReactNode, type HTMLAttributes, type ButtonHTMLAttributes, type InputHTMLAttributes, forwardRef, useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check } from "lucide-react";
 import { cn } from "../lib/cn";
 
@@ -147,28 +148,66 @@ export function Tooltip({
   className?: string;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
+  // Portal + fixed positioning so the tooltip can't be clipped by an ancestor's overflow, with the
+  // same edge-aware behaviour as InfoTip: honour the requested side, flip to the other side when
+  // that one is cramped, and clamp horizontally so a w-64 bubble never spills off-screen. This is
+  // the shared tooltip used across the app, so the flip/clamp fixes cut-off everywhere at once.
+  const WIDTH = 256; // w-64
+  const ref = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
+
+  const place = useCallback(() => {
+    const node = ref.current;
+    if (!node) return;
+    const r = node.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const GAP = 8, MARGIN = 8, FLIP_MIN = 130;
+    let left = r.left + r.width / 2 - WIDTH / 2;
+    left = Math.max(MARGIN, Math.min(left, vw - WIDTH - MARGIN));
+    const spaceBelow = vh - r.bottom, spaceAbove = r.top;
+    let placeBottom = side === "bottom";
+    if (placeBottom && spaceBelow < FLIP_MIN && spaceAbove > spaceBelow) placeBottom = false;
+    if (!placeBottom && spaceAbove < FLIP_MIN && spaceBelow > spaceAbove) placeBottom = true;
+    setPos(placeBottom ? { left, top: r.bottom + GAP } : { left, bottom: vh - r.top + GAP });
+  }, [side]);
+
+  const close = useCallback(() => setPos(null), []);
+
+  // Keep glued to the trigger on scroll/resize while open.
+  useEffect(() => {
+    if (!pos) return;
+    const reflow = () => place();
+    window.addEventListener("scroll", reflow, true);
+    window.addEventListener("resize", reflow);
+    return () => {
+      window.removeEventListener("scroll", reflow, true);
+      window.removeEventListener("resize", reflow);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pos != null, place]);
+
   return (
     <span
+      ref={ref}
       className={cn("relative inline-flex items-center", className)}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-      onFocus={() => setOpen(true)}
-      onBlur={() => setOpen(false)}
+      onMouseEnter={place}
+      onMouseLeave={close}
+      onFocus={place}
+      onBlur={close}
     >
       {children}
-      {open && (
+      {pos && createPortal(
         <span
           role="tooltip"
+          style={{ position: "fixed", left: pos.left, top: pos.top, bottom: pos.bottom, width: WIDTH }}
           className={cn(
-            "absolute left-1/2 -translate-x-1/2 w-64 rounded-md border border-fa-edge",
-            "bg-fa-ink/95 backdrop-blur px-2.5 py-1.5 fa-caption text-fa-frost",
-            "normal-case tracking-normal shadow-2xl z-50 pointer-events-none leading-snug",
-            side === "top" ? "bottom-full mb-2" : "top-full mt-2"
+            "z-[100] rounded-md border border-fa-edge bg-fa-ink/95 backdrop-blur px-2.5 py-1.5",
+            "fa-caption text-fa-frost normal-case tracking-normal shadow-2xl pointer-events-none leading-snug"
           )}
         >
           {content}
-        </span>
+        </span>,
+        document.body
       )}
     </span>
   );

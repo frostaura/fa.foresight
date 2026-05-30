@@ -60,13 +60,17 @@ public sealed record RichContent(
     RichChart? Chart = null,
     IReadOnlyList<RichButtonRow>? Buttons = null,
     byte[]? ImagePng = null,
-    string? ImageCaption = null)
+    string? ImageCaption = null,
+    /// <summary>Preformatted monospace block (already laid out by the caller). Rendered inside a code
+    /// block so column alignment survives — Telegram &lt;pre&gt;, Discord/text channels a ``` fence.</summary>
+    string? Monospace = null)
 {
     /// <summary>Plain-text rendering used by the fallback path and any text-only channel (e.g. log).</summary>
     public string RenderText()
     {
         var sb = new System.Text.StringBuilder();
         if (!string.IsNullOrWhiteSpace(Text)) sb.AppendLine(Text);
+        if (!string.IsNullOrWhiteSpace(Monospace)) { sb.AppendLine("```"); sb.AppendLine(Monospace); sb.AppendLine("```"); }
         if (Table is not null) sb.AppendLine(Table.RenderMonospace());
         if (Chart is not null) sb.AppendLine(Chart.RenderAscii());
         if (Buttons is { Count: > 0 })

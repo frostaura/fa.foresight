@@ -183,6 +183,30 @@ public class StrategyEvaluatorTests
         stake.Should().Be(0m);
     }
 
+    [Fact]
+    public async Task Broken_strategy_definition_throws_StrategyEvaluationException()
+    {
+        // A custom strategy whose definition is not valid JSON is BROKEN — it must fail loud, NOT
+        // silently read as a 0 (no-bet) forever.
+        var strategyId = Guid.NewGuid();
+        var strategy = new Strategy
+        {
+            Id = strategyId,
+            TenantId = null,
+            Name = "Broken JSON DAG",
+            Definition = "{ this is not valid json",
+            IsBuiltIn = false,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        var evaluator = BuildEvaluator(MakeDb(strategy));
+
+        var act = async () => await evaluator.NextStakeAsync(
+            strategyId.ToString(), new StrategyStep(2m, true, 2m, 100m, default), MakeFlowCtx(), default);
+
+        await act.Should().ThrowAsync<StrategyEvaluationException>();
+    }
+
     /// <summary>
     /// With ambient injection, the canonical EAK DAG now receives pUp/balance/yesPrice/noPrice
     /// from the StrategyStep rather than from upstream edges. It should produce a non-zero stake

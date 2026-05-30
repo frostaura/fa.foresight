@@ -21,4 +21,19 @@ public sealed class TenantSettings
     public bool AutotradeEnabled { get; set; } = false;
     public string DefaultJurisdiction { get; set; } = "global-ex-us";
     public string DefaultLlmProviderId { get; set; } = "openrouter";
+
+    /// <summary>
+    /// Telegram chat id that receives THIS tenant's outbound notifications. The bot itself is global
+    /// (one Foresight bot, token in app config); only the destination chat is per-tenant. Null ⇒ fall
+    /// back to the global default chat (seeded from env for the admin/dev tenant). Stored in the
+    /// tenant's jsonb settings, editable in-app — never a per-user env var.
+    /// </summary>
+    public long? TelegramChatId { get; set; }
+
+    /// <summary>
+    /// Message id of the single live-chart widget in the tenant's Telegram chat. The chart is sent
+    /// once then updated in place (editMessageMedia) on each candle, so it stays one message instead
+    /// of spamming a new image every time. Null until the first chart is sent (or after it's deleted).
+    /// </summary>
+    public long? TelegramChartMessageId { get; set; }
 }

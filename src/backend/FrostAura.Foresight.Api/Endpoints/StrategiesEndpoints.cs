@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FrostAura.Foresight.Application.Flow;
 using FrostAura.Foresight.Application.Tenancy;
+using FrostAura.Foresight.Domain.Descriptions;
 using FrostAura.Foresight.Domain.Strategies;
 using FrostAura.Foresight.Domain.Trading;
 using FrostAura.Foresight.Infrastructure.Live;
@@ -108,7 +109,7 @@ public static class StrategiesEndpoints
 
         // ── CREATE ────────────────────────────────────────────────────────────────────────────
         g.MapPost("/", async (CreateStrategyRequest req, ITenantContext tc, ForesightDbContext db,
-            FlowValidator validator, StrategyDescriber describer, CancellationToken ct) =>
+            FlowValidator validator, CancellationToken ct) =>
         {
             if (!tc.IsResolved || !tc.TenantId.HasValue)
                 return Results.Unauthorized();
@@ -142,6 +143,9 @@ public static class StrategiesEndpoints
                 CreatedAt = now,
                 UpdatedAt = now,
             };
+            var (simple, technical) = DescriptionTemplater.ForStrategy(strategy.Name, strategy.Description, strategy.Definition);
+            strategy.SimpleDescription = simple;
+            strategy.TechnicalDescription = technical;
             db.Strategies.Add(strategy);
             try
             {
@@ -152,15 +156,12 @@ public static class StrategiesEndpoints
                 return Results.Conflict(new { error = $"A strategy named '{req.Name}' already exists." });
             }
 
-            // Fire-and-forget AI description generation.
-            describer.EnqueueAsync(strategy.Id);
-
             return Results.Created($"/api/strategies/{strategy.Id}", ToDtoEnriched(strategy, null, null, 0));
         });
 
         // ── UPDATE ────────────────────────────────────────────────────────────────────────────
         g.MapPut("/{id:guid}", async (Guid id, UpdateStrategyRequest req, ITenantContext tc,
-            ForesightDbContext db, FlowValidator validator, StrategyDescriber describer, CancellationToken ct) =>
+            ForesightDbContext db, FlowValidator validator, CancellationToken ct) =>
         {
             if (!tc.IsResolved || !tc.TenantId.HasValue)
                 return Results.Unauthorized();
@@ -189,12 +190,15 @@ public static class StrategiesEndpoints
                 row.Definition = req.Definition;
             }
 
+            // Regenerate descriptions (deterministic, inline) when name or definition changed.
+            if (req.Name is not null || req.Definition is not null)
+            {
+                var (simple, technical) = DescriptionTemplater.ForStrategy(row.Name, row.Description, row.Definition);
+                row.SimpleDescription = simple;
+                row.TechnicalDescription = technical;
+            }
             row.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(ct);
-
-            // Regenerate AI descriptions when name or definition changed.
-            if (req.Name is not null || req.Definition is not null)
-                describer.EnqueueAsync(row.Id);
 
             return Results.Ok(ToDtoEnriched(row, null, null, 0));
         });

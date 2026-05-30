@@ -62,68 +62,13 @@ export interface PaperSession {
   bets: PaperBet[];
 }
 
-/**
- * Re-score a paper session's resolved bets against the chart's own Binance candles, then
- * recompute payouts and the cumulative balance trail.
- *
- * Why this exists: the server resolves each bet against its persisted `anchorClose`, which
- * has been observed to drift by $6-$99 from the actual Binance close of the prior candle —
- * see [[feedback-hitmiss-from-chart-candles]]. That drift means the ledger's `outcome` /
- * `payout` / `balanceAfter` / the session's `currentBalance` and the PNL strip can disagree
- * with the chart's PREV chip and accuracy headline on the same bet ("PREV says HIT but the
- * ledger row shows MISS"). Re-scoring against `closeByOpenTime` aligns every paper-trading
- * surface with what the candles on screen actually show.
- *
- * Mechanics — for each resolved bet:
- *   1. Look up `closeByOpenTime[bet.targetOpenTime]` and `closeByOpenTime[bet.targetOpenTime - intervalMs]`.
- *   2. If both exist, derive outcome from `bet.side` vs the strict `>` close-vs-prevClose rule
- *      (matches the candle body color and PREV chip exactly).
- *   3. If either is missing (bet outside the chart window), fall back to the server-recorded
- *      `bet.outcome` — same fallback the chart dots use for off-window predictions.
- *   4. Recompute `payout = +bet.size` for win / `-bet.size` for loss. This is exact under flat
- *      staking; under martingale the placed sizes themselves were a function of the (wrong)
- *      prior outcomes, but the rescored payout still honestly shows what each placed bet
- *      would have netted given the actual market move.
- *   5. Walk the bets chronologically (by `placedAt` ASC) starting from `initialBalance`,
- *      accumulating `payout` to produce the corrected `balanceAfter` per bet and the final
- *      `currentBalance`.
- *
- * Open (unresolved) bets are passed through unchanged.
- */
-export function rescorePaperSession(
-  session: PaperSession,
-  closeByOpenTime: Map<number, number>,
-  intervalMs: number
-): PaperSession {
-  const chronological = [...session.bets].sort(
-    (a, b) => new Date(a.placedAt).getTime() - new Date(b.placedAt).getTime()
-  );
-  let balance = session.initialBalance;
-  const rescoredBets: PaperBet[] = [];
-  for (const bet of chronological) {
-    if (!bet.resolved) {
-      rescoredBets.push(bet);
-      continue;
-    }
-    const targetClose = closeByOpenTime.get(bet.targetOpenTime);
-    // 2-step canon: the bet resolves on close(target) vs the ANCHOR = close two bars back (the last
-    // closed candle at decision time). The intervening candle was still forming when the bet was
-    // decided, so it is excluded as the reference. close[T-2] equals the bet's stored anchorClose.
-    const anchorClose = closeByOpenTime.get(bet.targetOpenTime - 2 * intervalMs);
-    let outcome: "win" | "loss" | null;
-    if (targetClose != null && anchorClose != null) {
-      const sideUp = bet.side === "UP";
-      const liveUp = targetClose > anchorClose;
-      outcome = sideUp === liveUp ? "win" : "loss";
-    } else {
-      outcome = bet.outcome ?? null;
-    }
-    const payout = outcome === "win" ? bet.size : outcome === "loss" ? -bet.size : null;
-    if (payout != null) balance += payout;
-    rescoredBets.push({ ...bet, outcome, payout, balanceAfter: balance });
-  }
-  return { ...session, bets: rescoredBets, currentBalance: balance };
-}
+// NOTE: a former `rescorePaperSession` helper re-graded resolved bets client-side against the chart
+// candles (2-step canon + even-money payout). It was removed: the backend is now the single source of
+// truth — it grades each bet on the target candle's body (close-vs-open) and credits the fixed
+// conservative fee, and the chart's hit/miss dots grade the same way (close-vs-prevClose ≡
+// close-vs-open since open[T] == close[T-1]). Re-grading on the client only re-introduced drift
+// (a wrong, even-money balance that flickered over the correct server value), so every surface now
+// reads the server's `balanceAfter` / `currentBalance` / `outcome` verbatim.
 
 // ── Shared SSE stream ──────────────────────────────────────────────────────────────────────────
 

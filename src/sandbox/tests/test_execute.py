@@ -179,6 +179,62 @@ def test_network_access_raises_nondeterminism_error():
 
 
 # ---------------------------------------------------------------------------
+# 5b. Filesystem WRITE attempt (open(..., 'w')) => NondeterminismError
+# ---------------------------------------------------------------------------
+
+def test_filesystem_write_raises_nondeterminism_error():
+    """Opening a file in a write mode must fail with NondeterminismError (purity guard).
+
+    Write-mode file access would let a code node persist state across runs, breaking the
+    same-definition+inputs ⇒ identical-output contract the chaos/bust test relies on.
+    """
+    req = {
+        "protocolVersion": 1,
+        "mode": "step",
+        "nodeId": "test-fs-write",
+        "code": (
+            "f = open('/tmp/fa_foresight_sandbox_test.txt', 'w')\n"
+            "f.write('should never happen')\n"
+            "outputs['result'] = 1.0\n"
+        ),
+        "seed": 0,
+        "params": {},
+        "seriesLength": 0,
+        "inputs": {},
+        "outputSchema": {"result": "scalar"},
+        "limits": {"timeoutMs": 5000, "memMb": 64},
+    }
+    body = _execute(req)
+
+    assert body["ok"] is False
+    assert body["error"]["kind"] == "NondeterminismError"
+    assert "open" in body["error"]["message"]
+
+
+def test_filesystem_append_raises_nondeterminism_error():
+    """Append mode ('a') must also be blocked, not just truncating write ('w')."""
+    req = {
+        "protocolVersion": 1,
+        "mode": "step",
+        "nodeId": "test-fs-append",
+        "code": (
+            "open('/tmp/fa_foresight_sandbox_test.txt', 'a').write('x')\n"
+            "outputs['result'] = 1.0\n"
+        ),
+        "seed": 0,
+        "params": {},
+        "seriesLength": 0,
+        "inputs": {},
+        "outputSchema": {"result": "scalar"},
+        "limits": {"timeoutMs": 5000, "memMb": 64},
+    }
+    body = _execute(req)
+
+    assert body["ok"] is False
+    assert body["error"]["kind"] == "NondeterminismError"
+
+
+# ---------------------------------------------------------------------------
 # 6. Missing declared output => SchemaMismatch
 # ---------------------------------------------------------------------------
 

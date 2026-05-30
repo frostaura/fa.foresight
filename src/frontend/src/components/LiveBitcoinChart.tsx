@@ -431,6 +431,25 @@ export default function LiveBitcoinChart({
     return betUp === liveUp ? "winning" : "losing";
   }, [currentPrediction, lastCandle?.close, lastCandle?.openTime, candles]);
 
+  // The in-flight paper bet sitting on the currently-forming candle (if a real session is live).
+  // This is the position the pulsing orb represents — we colour that orb by the bet's own live lean
+  // so it always reads green (currently winning) or red (currently losing), never a neutral amber.
+  const pendingActiveBet = useMemo(
+    () => paperSession?.bets.find((b) => !b.resolved && b.targetOpenTime === lastCandle?.openTime) ?? null,
+    [paperSession, lastCandle?.openTime]
+  );
+
+  // Lean that drives the pulsing active-candle orb. Prefer the REAL in-flight bet's side (so the orb
+  // matches the live position even when no `currentPrediction` record exists for this candle — which
+  // was leaving the orb stuck amber); fall back to the virtual current prediction's lean. Same
+  // close-vs-prior-close rule as `currentLean` so the orb tracks the live candle body colour.
+  const activeLean = useMemo<"winning" | "losing" | null>(() => {
+    if (!lastCandle || candles.length < 2) return null;
+    const liveUp = lastCandle.close > candles[candles.length - 2].close;
+    if (pendingActiveBet) return (pendingActiveBet.side === "UP") === liveUp ? "winning" : "losing";
+    return currentLean;
+  }, [pendingActiveBet, currentLean, lastCandle?.close, lastCandle?.openTime, candles]);
+
   // Most recently resolved prediction — the "did the last call hit or miss" readout sits next to
   // the live next-candle line so the user can sanity-check the system in one glance without
   // dropping into TABLE view. Newest-first scan over displayablePredictions; the SSE stream and
@@ -577,6 +596,13 @@ export default function LiveBitcoinChart({
         } else {
           state = "open";
         }
+        // The unresolved bet on the still-forming candle is drawn by the lean-coloured PendingActiveDot
+        // (green/red live), so skip its amber "open" ResultDot here — otherwise it shows through as a
+        // stray yellow orb on the rightmost candle.
+        if (state === "open" && bet.targetOpenTime === lastCandle?.openTime) {
+          covered.add(bet.targetOpenTime);
+          continue;
+        }
         const placedAt = new Date(bet.placedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
         const sizeStr = `$${bet.size.toFixed(2)}`;
         const tooltip = state === "open"
@@ -606,7 +632,7 @@ export default function LiveBitcoinChart({
       dots.push({ id: `pred:${p.id}`, anchor: p.targetOpenTime, state, tooltip });
     }
     return dots;
-  }, [paperSession, rowOpenTimes, displayablePredictions, closeByOpenTime, interval, gateNoBets]);
+  }, [paperSession, rowOpenTimes, displayablePredictions, closeByOpenTime, interval, gateNoBets, lastCandle?.openTime]);
 
   // Bank-balance overlay series. Built from the paper-session ledger: each resolved bet contributes
   // one point (openTime → balanceAfter). Points are snapped to the candle's targetOpenTime so they
@@ -630,23 +656,29 @@ export default function LiveBitcoinChart({
     return points;
   }, [paperSession, interval]);
 
-  // Balance Y-domain (hidden secondary YAxis). AUTOSCALED to the balance's own min/max (with padding)
-  // so the up/down movement actually reads — anchoring to 0 flattened the line into a near-straight
-  // trace because the swings are tiny next to the absolute balance. The dotted reference line is the
-  // session's STARTING balance (break-even): above it = profit, below = loss, so the curve oscillates
-  // around it like a P&L trace.
+  // All-time session peak balance (across the WHOLE run, not just in-view candles) — drawn as the
+  // dotted reference line so drawdown below the peak and recovery back toward it are always visible.
+  const sessionPeak = useMemo(
+    () => (balanceSeries.length > 0 ? Math.max(...balanceSeries.map((p) => p.balance)) : 0),
+    [balanceSeries],
+  );
+
+  // Balance Y-domain (hidden secondary YAxis). Scaled to the IN-VIEW balances so the line's up/down
+  // movement actually reads, but always stretched to include the all-time peak so the dotted peak line
+  // stays on screen (the gap below it = how far into drawdown we are).
   const balanceYDomain = useMemo<[number, number]>(() => {
     if (balanceSeries.length === 0) return [0, 1];
-    const vals = balanceSeries.map((p) => p.balance);
-    const maxBal = Math.max(...vals);
+    const inView = balanceSeries.filter((p) => rowOpenTimes.has(p.openTime)).map((p) => p.balance);
+    const vals = inView.length > 0 ? inView : balanceSeries.map((p) => p.balance);
     const minBal = Math.min(...vals);
+    const maxBal = Math.max(Math.max(...vals), sessionPeak);
     const range = Math.max(maxBal - minBal, Math.max(maxBal * 0.001, 1)); // floor for flat series
-    const pad = range * 0.28; // breathing room top/bottom so the line isn't glued to an edge
-    return [minBal - pad, maxBal + pad];
-  }, [balanceSeries]);
+    const pad = range * 0.18;
+    return [minBal - pad, maxBal + pad * 0.6];
+  }, [balanceSeries, rowOpenTimes, sessionPeak]);
 
-  // Break-even reference (the session's starting balance) for the dotted baseline.
-  const balanceBaseline = balanceSeries.length > 0 ? balanceSeries[0].balance : 0;
+  // The dotted reference line sits at the all-time peak.
+  const balanceBaseline = sessionPeak;
 
   // openTime → { balance, delta-from-previous-point } for the hover tooltip.
   const balanceByTime = useMemo(() => {
@@ -672,8 +704,8 @@ export default function LiveBitcoinChart({
 
   return (
     <div className={fullscreen
-      ? "fixed inset-0 z-50 bg-fa-ink border border-fa-edge flex flex-col p-4"
-      : `${bare ? "" : "fa-card "}p-4 flex flex-col${fill ? " h-full" : ""}`
+      ? "fixed inset-0 z-50 bg-fa-ink border border-fa-edge flex flex-col p-3 sm:p-4"
+      : `${bare ? "" : "fa-card "}p-2.5 sm:p-4 flex flex-col${fill ? " h-full" : ""}`
     }>
       {/* Header — two compact rows that hold regardless of card width (these cards live in a
           responsive grid, so a viewport-keyed breakpoint can't tell how wide the card actually is).
@@ -781,14 +813,12 @@ export default function LiveBitcoinChart({
         <PaperTradingPanel
           symbol={symbol}
           interval={interval}
-          closeByOpenTime={closeByOpenTime}
-          intervalMs={INTERVAL_MS[interval]}
         />
       )}
 
       {/* Chart/table container. h-56 in grid card; flex-1 fills the remaining viewport height
           in fullscreen mode for a proper tablet dashboard view. */}
-      <div className={`${fullscreen || fill ? "flex-1 min-h-0" : "h-56"} mt-3 relative`}>
+      <div className={`${fullscreen || fill ? "flex-1 min-h-0" : "h-56"} mt-2 sm:mt-3 relative`}>
         {/* LivePulse now lives inside the NextCandleAction header next to "Next candle". */}
         {loading && rows.length === 0 ? (
           <div className="h-full flex items-center justify-center text-fa-frost-dim text-sm gap-2">
@@ -818,7 +848,7 @@ export default function LiveBitcoinChart({
               {/* Primary Y-axis: BTC price scale */}
               <YAxis yAxisId="price" domain={yDomain} tickFormatter={(v: number) => `$${Math.round(v).toLocaleString()}`}
                 tick={{ fill: "rgb(148 163 184)", fontSize: 10 }}
-                stroke="rgb(255 255 255 / 0.1)" width={60} />
+                stroke="rgb(255 255 255 / 0.1)" width={48} />
               {/* Secondary Y-axis: bank balance — hidden, scaled independently so the balance line
                   reads as an overlay trend without compressing or stretching the price candles. */}
               {balanceSeries.length > 0 && (
@@ -859,13 +889,13 @@ export default function LiveBitcoinChart({
                   )}
                 />
               ))}
-              {last && currentPrediction && (
+              {last && (pendingActiveBet || currentPrediction) && (
                 <ReferenceDot
                   yAxisId="price"
                   x={last.openTime}
                   y={yDomain[1]}
                   ifOverflow="visible"
-                  shape={(p: unknown) => <PendingActiveDot {...(p as { cx?: number; cy?: number })} lean={currentLean} />}
+                  shape={(p: unknown) => <PendingActiveDot {...(p as { cx?: number; cy?: number })} lean={activeLean} />}
                 />
               )}
             </ComposedChart>
@@ -880,7 +910,7 @@ export default function LiveBitcoinChart({
                 stroke="rgb(255 255 255 / 0.1)" minTickGap={48} />
               <YAxis yAxisId="price" domain={yDomain} tickFormatter={(v: number) => `$${Math.round(v).toLocaleString()}`}
                 tick={{ fill: "rgb(148 163 184)", fontSize: 10 }}
-                stroke="rgb(255 255 255 / 0.1)" width={60} />
+                stroke="rgb(255 255 255 / 0.1)" width={48} />
               {balanceSeries.length > 0 && (
                 <YAxis yAxisId="balance" orientation="right" domain={balanceYDomain} hide />
               )}
@@ -937,13 +967,13 @@ export default function LiveBitcoinChart({
                   )}
                 />
               ))}
-              {last && currentPrediction && (
+              {last && (pendingActiveBet || currentPrediction) && (
                 <ReferenceDot
                   yAxisId="price"
                   x={last.openTime}
                   y={yDomain[1]}
                   ifOverflow="visible"
-                  shape={(p: unknown) => <PendingActiveDot {...(p as { cx?: number; cy?: number })} lean={currentLean} />}
+                  shape={(p: unknown) => <PendingActiveDot {...(p as { cx?: number; cy?: number })} lean={activeLean} />}
                 />
               )}
             </ComposedChart>
@@ -959,7 +989,7 @@ export default function LiveBitcoinChart({
               {/* Primary Y-axis: BTC price scale */}
               <YAxis yAxisId="price" domain={yDomain} tickFormatter={(v: number) => `$${Math.round(v).toLocaleString()}`}
                 tick={{ fill: "rgb(148 163 184)", fontSize: 10 }}
-                stroke="rgb(255 255 255 / 0.1)" width={60} />
+                stroke="rgb(255 255 255 / 0.1)" width={48} />
               {/* Secondary Y-axis: bank balance — hidden, independently scaled so the balance line
                   reads as an overlay trend without compressing or distorting the price axis. */}
               {balanceSeries.length > 0 && (
@@ -1002,13 +1032,13 @@ export default function LiveBitcoinChart({
                   )}
                 />
               ))}
-              {last && currentPrediction && (
+              {last && (pendingActiveBet || currentPrediction) && (
                 <ReferenceDot
                   yAxisId="price"
                   x={last.openTime}
                   y={yDomain[1]}
                   ifOverflow="visible"
-                  shape={(p: unknown) => <PendingActiveDot {...(p as { cx?: number; cy?: number })} lean={currentLean} />}
+                  shape={(p: unknown) => <PendingActiveDot {...(p as { cx?: number; cy?: number })} lean={activeLean} />}
                 />
               )}
             </ComposedChart>
@@ -1172,23 +1202,27 @@ function NextCandleAction({
           translate-y keeps everything sharing the same visible baseline so "UP" and "54%" line up
           cleanly regardless of font size. items-baseline alone would pick the SVG's bottom edge
           on the larger span and shove the smaller percentage down. */}
-      {/* 2×2 layout: the big directional call fills the left half across both rows; the right half
-          stacks the edge/hit metrics (top) over the up / no-bet / down bar (bottom). */}
-      <div className="grid grid-cols-2 grid-rows-2 gap-x-4 gap-y-1.5 items-center">
-        {/* Left — big directional call, spanning both rows */}
-        <div className="row-span-2 flex items-baseline gap-2 min-w-0">
+      {/* Layout: on mobile a single vertical stack (hero → edge/hit → up/no/down bar) so nothing
+          overlaps at narrow widths; from sm up, the 2×2 grid where the big call fills the left half
+          across both rows and the right half stacks the edge/hit metrics over the bar. */}
+      <div className="flex flex-col gap-2 sm:grid sm:grid-cols-2 sm:grid-rows-2 sm:gap-x-4 sm:gap-y-1.5 sm:items-center">
+        {/* Left — big directional call, spanning both rows. Tight gap so the % sits right next to
+            the UP/DOWN label rather than drifting away from it. `whitespace-nowrap` keeps the
+            arrow+label glued together (without it the arrow and "DOWN" split across two lines at
+            narrow widths). Hero text steps down a size on mobile so it never overruns its column. */}
+        <div className="sm:row-span-2 flex items-baseline gap-1.5 min-w-0">
           {prediction ? (
             <>
-              <span className={`text-3xl font-light leading-none ${dirColor}`}>
+              <span className={`text-2xl sm:text-3xl font-light leading-none whitespace-nowrap ${dirColor}`}>
                 {up
-                  ? <ArrowUp className="inline h-7 w-7 -translate-y-[3px] mr-0.5" strokeWidth={2.25} />
-                  : <ArrowDown className="inline h-7 w-7 -translate-y-[3px] mr-0.5" strokeWidth={2.25} />
+                  ? <ArrowUp className="inline h-6 w-6 sm:h-7 sm:w-7 -translate-y-[2px] sm:-translate-y-[3px] mr-0.5" strokeWidth={2.25} />
+                  : <ArrowDown className="inline h-6 w-6 sm:h-7 sm:w-7 -translate-y-[2px] sm:-translate-y-[3px] mr-0.5" strokeWidth={2.25} />
                 }
                 {up ? "UP" : "DOWN"}
               </span>
               <UiTooltip content="Calibrated confidence in the called direction — P(up) for an UP call, the implied P(down) = 1−P(up) for a DOWN call. The bet side is decided on P(up); 50% = no edge, and distance from 50% is conviction either way.">
                 <span
-                  className={`text-xl leading-none tabular-nums opacity-80 ${dirColor} cursor-help`}
+                  className={`text-lg sm:text-xl leading-none tabular-nums opacity-80 ${dirColor} cursor-help`}
                   title={prediction.reasoning ?? undefined}
                 >
                   {sidePct.toFixed(0)}%
@@ -1204,11 +1238,12 @@ function NextCandleAction({
           )}
         </div>
 
-        {/* Top-right — edge + hit-rate text, right-aligned above the bar */}
-        <div className="flex items-center justify-end gap-x-2 fa-caption sm:text-xs tabular-nums whitespace-nowrap min-w-0">
+        {/* Edge + hit-rate text — left-aligned on mobile (its own row), right-aligned above the bar
+            on desktop. Wraps rather than overflowing if both metrics are present at a tight width. */}
+        <div className="flex items-center justify-start sm:justify-end gap-x-2 gap-y-0.5 flex-wrap fa-caption sm:text-xs tabular-nums min-w-0">
           {tradeSignal && (
             <span
-              className="text-fa-frost-dim"
+              className="text-fa-frost-dim whitespace-nowrap"
               title="Probability advantage over the fair-market reference. Side is already implied by the UP/DOWN call."
             >
               <span className={tradeSignal.edge >= 0 ? "text-emerald-300/90" : "text-fa-frost-dim"}>
@@ -1220,7 +1255,7 @@ function NextCandleAction({
           {tradeSignal && accuracy && <span className="text-fa-frost-dim/50" aria-hidden>·</span>}
           {accuracy && (
             <span
-              className="text-fa-frost-dim"
+              className="text-fa-frost-dim whitespace-nowrap"
               title={`${accuracy.count} resolved predictions visible · hit rate ${(accuracy.hitRate * 100).toFixed(0)}%`}
             >
               <ShimmerOnChange value={accuracy.count}>{accuracy.count}</ShimmerOnChange>
@@ -1351,23 +1386,29 @@ function RecapStrip({
   }
 
   return (
+    // Table-cell alignment: fixed columns so CURR and PREV line up exactly regardless of UP(2)/DOWN(4)
+    // or 2-vs-3-digit %. The time column is right-aligned and the badge column left-aligned, so both
+    // rows' grey times share a right edge and both badges share a left edge. items-center vertically
+    // centres the arrow with its text. Fixed widths (not `auto`) are what make the two separate rows
+    // align with each other.
     <div
-      className="mt-1.5 flex items-baseline gap-x-2 fa-caption tabular-nums"
+      // Mobile: tighter label/time columns and a flexible final column so the badge is pinned to the
+      // card's right edge and can never bleed past it, no matter how narrow the card. From sm up,
+      // the wider fixed grid that keeps CURR and PREV (UP=2ch / DOWN=4ch) perfectly column-aligned.
+      className="mt-1.5 grid grid-cols-[2rem_6rem_2.5rem_1fr] sm:grid-cols-[2.25rem_6rem_2.75rem_auto] items-center gap-x-2 fa-caption tabular-nums"
       title={prediction.reasoning ?? undefined}
     >
       <span className="fa-overline text-fa-frost-dim/50">{label}</span>
-      <span className={`inline-flex items-baseline gap-1 ${dirColor}`}>
+      <span className={`inline-flex items-center gap-1 ${dirColor}`}>
         {up
-          ? <ArrowUp className="inline h-3 w-3 -translate-y-[1px]" strokeWidth={2.25} />
-          : <ArrowDown className="inline h-3 w-3 -translate-y-[1px]" strokeWidth={2.25} />}
+          ? <ArrowUp className="h-3 w-3" strokeWidth={2.25} />
+          : <ArrowDown className="h-3 w-3" strokeWidth={2.25} />}
         <span>{up ? "UP" : "DOWN"}</span>
         {/* Confidence in the called side: P(up) for UP, implied P(down)=1−pUp for DOWN — mirrors the headline. */}
         <span className="opacity-70">{((up ? pUp : 1 - pUp) * 100).toFixed(0)}%</span>
       </span>
-      <span className="text-fa-frost-dim/40" aria-hidden>·</span>
-      <span className="text-fa-frost-dim/60">{timeLabel}</span>
-      <span className="text-fa-frost-dim/40" aria-hidden>·</span>
-      {chip}
+      <span className="text-fa-frost-dim/60 text-right">{timeLabel}</span>
+      <span className="justify-self-end sm:justify-self-start">{chip}</span>
     </div>
   );
 }

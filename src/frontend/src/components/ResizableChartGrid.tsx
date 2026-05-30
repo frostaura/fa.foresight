@@ -105,6 +105,18 @@ export function ResizableChartCard({
     { colSpan: 1, height: defaultHeight },
   );
 
+  // On phones the corner-drag resize is fiddly and the persisted desktop height wastes the screen.
+  // Below sm we ignore the stored size, let the card fill most of the viewport height (so the plot
+  // gets far more room), and hide the grip. Desktop keeps the full resizable behaviour.
+  const [narrow, setNarrow] = useState(false);
+  useLayoutEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const sync = () => setNarrow(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
   // Live values during a drag (so the card animates without thrashing localStorage). Null = idle.
   const [live, setLive] = useState<StoredSize | null>(null);
   const drag = useRef<{
@@ -176,36 +188,41 @@ export function ResizableChartCard({
   return (
     <div
       style={{
-        gridColumn: `span ${renderSpan} / span ${renderSpan}`,
-        height,
+        gridColumn: narrow ? "1 / -1" : `span ${renderSpan} / span ${renderSpan}`,
+        // Phones: fill most of the viewport for a big, readable chart (clamped so it never gets
+        // absurd on short/landscape screens). Desktop: the resizable px height.
+        height: narrow ? "clamp(28rem, 90vh, 60rem)" : height,
       }}
       className={cn("relative min-w-0", live && "select-none")}
     >
       <div className="h-full w-full">{children}</div>
 
-      {/* Bottom-right corner resize grip. Pointer events cover mouse + touch. */}
-      <div
-        role="separator"
-        aria-label="Resize chart"
-        className={cn(
-          "absolute bottom-1 right-1 h-4 w-4 cursor-se-resize touch-none",
-          "text-fa-frost-dim/50 hover:text-fa-frost transition-colors",
-        )}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-      >
-        <svg viewBox="0 0 16 16" className="h-full w-full" aria-hidden="true">
-          <path
-            d="M14 6 L6 14 M14 10 L10 14 M14 14 L14 14"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            fill="none"
-          />
-        </svg>
-      </div>
+      {/* Bottom-right corner resize grip — desktop only (touch resize is awkward and it overlaps
+          the plot on a phone). Pointer events cover mouse + touch. */}
+      {!narrow && (
+        <div
+          role="separator"
+          aria-label="Resize chart"
+          className={cn(
+            "absolute bottom-1 right-1 h-4 w-4 cursor-se-resize touch-none",
+            "text-fa-frost-dim/50 hover:text-fa-frost transition-colors",
+          )}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+        >
+          <svg viewBox="0 0 16 16" className="h-full w-full" aria-hidden="true">
+            <path
+              d="M14 6 L6 14 M14 10 L10 14 M14 14 L14 14"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              fill="none"
+            />
+          </svg>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Linq;
 using FrostAura.Foresight.Domain.Ports;
 using Microsoft.Extensions.Logging;
 
@@ -41,19 +43,28 @@ public sealed class TradingNotifier
     }
 
     /// <summary>
-    /// Notify that a bet was resolved (win or loss, paper or live).
+    /// Notify that a bet was resolved (win or loss, paper or live), formatted as a compact card:
+    /// a bold header (🟢 WIN / 🔴 LOSS · SYM int · time) over a monospace block showing this bet's
+    /// P&amp;L + stake→payout, the session's overall P&amp;L and hit rate, and the new balance with a
+    /// direction arrow. Colour is conveyed by emoji + ▲/▼ (Telegram text has no per-run colour).
     /// </summary>
     public async Task NotifyBetResolvedAsync(
         Guid tenantId, Guid sessionId, Guid betId,
-        string side, decimal size, decimal payout, bool won, decimal balanceAfter,
+        string symbol, string interval, long targetOpenTimeMs,
+        decimal stake, decimal payout, bool won,
+        decimal balanceAfter, decimal initialBalance,
+        int betsWon, int betsPlaced,
         CancellationToken ct)
     {
-        var outcome = won ? "WIN" : "LOSS";
-        var body = $"Session {sessionId:N} | {outcome} | {side} size={size:F4} payout={payout:F4} balance-after={balanceAfter:F4}";
+        var (title, body) = BetCardFormatter.Format(
+            symbol, interval, targetOpenTimeMs, stake, payout, won, balanceAfter, initialBalance, betsWon, betsPlaced);
+
         _logger.LogInformation(
-            "Bet resolved — session={SessionId} betId={BetId} outcome={Outcome} side={Side} size={Size} payout={Payout} balanceAfter={BalanceAfter}",
-            sessionId, betId, outcome, side, size, payout, balanceAfter);
-        await SendSafeAsync(tenantId, NotificationKind.PositionResolution, $"Bet resolved: {outcome}", body, ct);
+            "Bet resolved — session={SessionId} betId={BetId} outcome={Outcome} stake={Stake} payout={Payout} balanceAfter={BalanceAfter}",
+            sessionId, betId, won ? "WIN" : "LOSS", stake, payout, balanceAfter);
+
+        await SendRichSafeAsync(tenantId, NotificationKind.PositionResolution, title,
+            new RichContent(Monospace: body), ct);
     }
 
     /// <summary>
@@ -68,6 +79,19 @@ public sealed class TradingNotifier
             "Session bust — session={SessionId} mode={Mode} finalBalance={FinalBalance}",
             sessionId, mode, finalBalance);
         await SendSafeAsync(tenantId, NotificationKind.CircuitBreakerTripped, "Session busted", body, ct);
+    }
+
+    /// <summary>
+    /// Notify that a session was STOPPED by an error (e.g. a broken custom strategy that failed to
+    /// evaluate) rather than a bust. Surfaced so a broken strategy never silently no-bets forever.
+    /// </summary>
+    public async Task NotifySessionErrorAsync(
+        Guid tenantId, Guid sessionId, string mode, string reason,
+        CancellationToken ct)
+    {
+        var body = $"Session {sessionId:N} [{mode}] STOPPED on error — {reason}";
+        _logger.LogError("Session error — session={SessionId} mode={Mode} reason={Reason}", sessionId, mode, reason);
+        await SendSafeAsync(tenantId, NotificationKind.CircuitBreakerTripped, "Session stopped (error)", body, ct);
     }
 
     /// <summary>
@@ -100,6 +124,20 @@ public sealed class TradingNotifier
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Channel notification failed (kind={Kind}, title={Title}) — swallowed; trading loop unaffected", kind, title);
+        }
+    }
+
+    /// <summary>Best-effort rich send — same swallow-and-log contract as <see cref="SendSafeAsync"/>.</summary>
+    private async Task SendRichSafeAsync(
+        Guid tenantId, NotificationKind kind, string title, RichContent content, CancellationToken ct)
+    {
+        try
+        {
+            await _channel.SendRichAsync(tenantId, kind, title, content, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Channel rich notification failed (kind={Kind}, title={Title}) — swallowed; trading loop unaffected", kind, title);
         }
     }
 }

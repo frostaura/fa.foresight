@@ -24,22 +24,28 @@ export default function ShimmerOnChange({
   className?: string;
 }) {
   const prevRef = useRef(value);
-  const [animKey, setAnimKey] = useState(0);
+  // `key` restarts the CSS animation on each change; `on` is true only WHILE the shimmer plays.
+  const [state, setState] = useState({ key: 0, on: false });
 
   useEffect(() => {
     if (prevRef.current === value) return;
     prevRef.current = value;
-    setAnimKey((k) => k + 1);
-  }, [value]);
+    setState((s) => ({ key: s.key + 1, on: true }));
+    const id = window.setTimeout(() => setState((s) => ({ ...s, on: false })), durationMs);
+    return () => window.clearTimeout(id);
+  }, [value, durationMs]);
 
-  // animKey=0 means no shimmer yet (initial mount). After the first real change, animKey>=1
-  // and we mount the inner span keyed on animKey so the CSS animation restarts each time.
-  if (animKey === 0) {
+  // CRITICAL: `.fa-shimmer` paints the text with a transparent fill + currentColor gradient, which
+  // SWALLOWS any colour set on a child. So we only apply it WHILE shimmering, then revert to a plain
+  // `className` span — that restores the caller's solid colour (e.g. green/red P&L) after the sweep
+  // instead of leaving the text permanently colourless. Callers that want the shimmer ITSELF tinted
+  // should pass the colour via `className` (it sits on the same element as `.fa-shimmer`).
+  if (!state.on) {
     return <span className={className}>{children}</span>;
   }
   return (
     <span
-      key={animKey}
+      key={state.key}
       className={className ? `fa-shimmer ${className}` : "fa-shimmer"}
       style={{ animationDuration: `${durationMs}ms` }}
     >

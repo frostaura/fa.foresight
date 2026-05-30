@@ -84,15 +84,16 @@ public sealed class PolymarketExecutionProvider : IPlatformConnector
         // Resolve market info: tokenId, negRisk flag, min-tick-size, min-order-size.
         var info = await _marketInfo.GetMarketInfoAsync(request.MarketExternalId, ct);
         var tokenId = request.Side == OrderSide.Yes ? info.YesTokenId : info.NoTokenId;
+        var (mts, mos) = ResolveMinSizes(info);
 
         // Tick-round price and compute V2 integer amounts (floor, 6dp).
         var rawPrice = decimal.Round(request.LimitPrice, 4, MidpointRounding.ToZero);
-        var amounts  = OrderMath.SizeBuy(rawPrice, request.QuantityShares, info.Mts, info.Mos);
+        var amounts  = OrderMath.SizeBuy(rawPrice, request.QuantityShares, mts, mos);
         if (amounts is null)
         {
             _logger.LogWarning("Order skipped: size {Qty} below min-order-size {Mos} or price rounded to zero on {Market}",
-                request.QuantityShares, info.Mos, request.MarketExternalId);
-            throw new InvalidOperationException($"Order size {request.QuantityShares} is below min-order-size {info.Mos}.");
+                request.QuantityShares, mos, request.MarketExternalId);
+            throw new InvalidOperationException($"Order size {request.QuantityShares} is below min-order-size {mos}.");
         }
 
         // V2 salt = random positive uint256 truncated to long; timestamp = unix ms (also decimal string).
@@ -218,14 +219,15 @@ public sealed class PolymarketExecutionProvider : IPlatformConnector
 
         var info    = await _marketInfo.GetMarketInfoAsync(request.MarketExternalId, ct);
         var tokenId = request.Side == OrderSide.Yes ? info.YesTokenId : info.NoTokenId;
+        var (mts, mos) = ResolveMinSizes(info);
 
         // SELL V2 amounts: makerAmount=floor(size*1e6), takerAmount=floor(price*size*1e6).
         var rawPrice = decimal.Round(request.LimitPrice, 4, MidpointRounding.ToZero);
-        var amounts  = OrderMath.SizeSell(rawPrice, request.QuantityShares, info.Mts, info.Mos);
+        var amounts  = OrderMath.SizeSell(rawPrice, request.QuantityShares, mts, mos);
         if (amounts is null)
         {
             _logger.LogWarning("SELL order skipped: size {Qty} below min-order-size {Mos} or price rounded to zero on {Market}",
-                request.QuantityShares, info.Mos, request.MarketExternalId);
+                request.QuantityShares, mos, request.MarketExternalId);
             return null;
         }
 
@@ -444,6 +446,29 @@ public sealed class PolymarketExecutionProvider : IPlatformConnector
 
     private static decimal ParseDec(string? s)
         => decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : 0m;
+
+    // ── Min-size safety floor ─────────────────────────────────────────────────────
+
+    // Conservative fallbacks used ONLY when the venue did not report real min tick/order sizes.
+    // Better to refuse a tiny order than to submit one below the exchange minimum and have it rejected
+    // (or, worse, partially mis-fill). ConservativeMos ≈ a few dollars of shares at a ~0.5 price.
+    private const decimal ConservativeMts = 0.01m;
+    private const decimal ConservativeMos = 5m;
+
+    /// <summary>
+    /// Resolve the min tick/order sizes to enforce. When the venue reported usable values
+    /// (<see cref="ClobMarketInfo.MinSizesTrusted"/>) they are used as-is; otherwise a conservative
+    /// floor is applied and a warning logged, so an order is never silently submitted below an unknown
+    /// minimum.
+    /// </summary>
+    private (decimal Mts, decimal Mos) ResolveMinSizes(ClobMarketInfo info)
+    {
+        if (info.MinSizesTrusted) return (info.Mts, info.Mos);
+        _logger.LogWarning(
+            "Market {Market}: venue did not report min tick/order size — applying conservative floor (mts={Mts}, mos={Mos}) to avoid a sub-minimum order.",
+            info.ConditionId, ConservativeMts, ConservativeMos);
+        return (Math.Max(info.Mts, ConservativeMts), Math.Max(info.Mos, ConservativeMos));
+    }
 
     // ── Market info cache (lazy-initialised) ─────────────────────────────────────
 

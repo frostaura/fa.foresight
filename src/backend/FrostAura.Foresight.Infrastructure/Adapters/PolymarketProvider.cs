@@ -633,9 +633,19 @@ public sealed class PolymarketProvider : IPredictionMarketProvider
     {
         var question = dto.Question ?? dto.Slug ?? "(unknown)";
         var category = categoryOverride ?? dto.TagSlug ?? dto.Category ?? "general";
-        var status = dto.Closed == true
-            ? MarketStatus.ResolvedYes
-            : MarketStatus.Open;
+        // A closed market resolves to whichever outcome the venue settled — read the actual YES/NO
+        // result from outcomePrices (post-resolution this is ["1","0"] for YES or ["0","1"] for NO)
+        // rather than blindly assuming YES.
+        MarketStatus status;
+        if (dto.Closed == true)
+        {
+            var (yes, no) = ParsePrices(dto.OutcomePrices);
+            status = yes >= no ? MarketStatus.ResolvedYes : MarketStatus.ResolvedNo;
+        }
+        else
+        {
+            status = MarketStatus.Open;
+        }
         return new Market
         {
             Id = Guid.NewGuid(),

@@ -72,7 +72,10 @@ public class TradingNotifierTests
 
         await notifier.NotifyBetResolvedAsync(
             TenantId, SessionId, BetId,
-            side: "UP", size: 2m, payout: 3.6m, won: true, balanceAfter: 103.6m,
+            symbol: "BTCUSDT", interval: "5m", targetOpenTimeMs: 0L,
+            stake: 2m, payout: 3.6m, won: true,
+            balanceAfter: 103.6m, initialBalance: 100m,
+            betsWon: 1, betsPlaced: 1,
             CancellationToken.None);
 
         var notification = channel.Received.Should().ContainSingle().Subject;
@@ -87,7 +90,10 @@ public class TradingNotifierTests
 
         await notifier.NotifyBetResolvedAsync(
             TenantId, SessionId, BetId,
-            side: "UP", size: 2m, payout: 0m, won: false, balanceAfter: 98m,
+            symbol: "BTCUSDT", interval: "5m", targetOpenTimeMs: 0L,
+            stake: 2m, payout: 0m, won: false,
+            balanceAfter: 98m, initialBalance: 100m,
+            betsWon: 0, betsPlaced: 1,
             CancellationToken.None);
 
         var notification = channel.Received.Should().ContainSingle().Subject;
@@ -162,7 +168,7 @@ public class TradingNotifierTests
         var (notifier, _) = BuildThrowing();
 
         var act = async () => await notifier.NotifyBetResolvedAsync(
-            TenantId, SessionId, BetId, "UP", 1m, 0m, false, 99m, CancellationToken.None);
+            TenantId, SessionId, BetId, "BTCUSDT", "5m", 0L, 1m, 0m, false, 99m, 100m, 0, 1, CancellationToken.None);
 
         await act.Should().NotThrowAsync("channel errors must be swallowed");
     }

@@ -70,6 +70,10 @@ export interface PlatformConnection {
   chainId: number;
   liveTrading: boolean;
   maxTradeUsd: number;
+  /** Conservative effective entry price ∈ (0.50,0.95) — the fee/payoff model for the BTC up/down contract. */
+  effectivePrice: number;
+  /** Polygon JSON-RPC endpoint used for the on-chain pUSD balance read during reconciliation. */
+  rpcUrl?: string | null;
 }
 
 /**
@@ -86,6 +90,28 @@ export interface UpdatePlatformConnectionRequest {
   chainId?: number;
   liveTrading?: boolean;
   maxTradeUsd?: number;
+  effectivePrice?: number;
+  rpcUrl?: string;
+}
+
+/**
+ * Account-level live-trading balance. `walletPusd` is the on-chain pUSD (0 when no wallet/unconfirmed);
+ * `reserved` is Σ active live-session balances (meaningful even pre-funding); `free = wallet − reserved`.
+ */
+export interface AccountBalance {
+  walletPusd: number;
+  reserved: number;
+  free: number;
+}
+
+/**
+ * Per-tenant notification settings. The Telegram bot is global (`botConfigured` = a token is set on
+ * the server); the destination `telegramChatId` is per-tenant and editable. Null = use the global
+ * default chat (seeded from env for the admin/dev tenant).
+ */
+export interface NotificationSettings {
+  telegramChatId: number | null;
+  botConfigured: boolean;
 }
 
 const baseUrl = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
@@ -100,7 +126,7 @@ export const api = createApi({
       return headers;
     }
   }),
-  tagTypes: ["Tenant", "LivePrediction", "Model", "ActiveModel", "Backtest", "Session", "Chaos", "Strategy", "GoLive", "PlatformConnection"],
+  tagTypes: ["Tenant", "LivePrediction", "Model", "ActiveModel", "Backtest", "Session", "Chaos", "Strategy", "GoLive", "PlatformConnection", "Notifications"],
   endpoints: (b) => ({
     getMe: b.query<TenantInfo, void>({ query: () => "tenants/me", providesTags: ["Tenant"] }),
     listTenants: b.query<TenantInfo[], void>({ query: () => "tenants", providesTags: ["Tenant"] }),
@@ -234,6 +260,24 @@ export const api = createApi({
     updatePlatformConnection: b.mutation<PlatformConnection, UpdatePlatformConnectionRequest>({
       query: (body) => ({ url: "platform-connections/default", method: "PUT", body }),
       invalidatesTags: ["PlatformConnection"],
+    }),
+    // Account-level wallet / reserved / free for the live-trading view. Refetches when live sessions
+    // change (reserved is derived from active live-session balances) or the connection changes.
+    getAccountBalance: b.query<AccountBalance, void>({
+      query: () => "account/balance",
+      providesTags: ["Session", "PlatformConnection"],
+    }),
+    // Per-tenant notification settings (Telegram chat id; bot is global). Test send is fire-and-forget.
+    getNotificationSettings: b.query<NotificationSettings, void>({
+      query: () => "notifications/settings",
+      providesTags: ["Notifications"],
+    }),
+    updateNotificationSettings: b.mutation<NotificationSettings, { telegramChatId: number | null }>({
+      query: (body) => ({ url: "notifications/settings", method: "PUT", body }),
+      invalidatesTags: ["Notifications"],
+    }),
+    testNotification: b.mutation<{ sent: boolean }, void>({
+      query: () => ({ url: "notifications/test", method: "POST" }),
     }),
 
     // iter-4 — prediction models CRUD.
@@ -410,6 +454,10 @@ export const {
   useKillswitchMutation,
   useGetPlatformConnectionQuery,
   useUpdatePlatformConnectionMutation,
+  useGetAccountBalanceQuery,
+  useGetNotificationSettingsQuery,
+  useUpdateNotificationSettingsMutation,
+  useTestNotificationMutation,
   useListModelsQuery,
   useGetModelQuery,
   useCreateModelMutation,

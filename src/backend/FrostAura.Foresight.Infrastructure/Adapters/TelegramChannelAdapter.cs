@@ -2,6 +2,9 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json.Serialization;
 using FrostAura.Foresight.Domain.Ports;
+using FrostAura.Foresight.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -41,26 +44,49 @@ public sealed class TelegramChannelAdapter : IChannelAdapter
 {
     private readonly HttpClient _http;
     private readonly TelegramBotOptions _opts;
+    private readonly IServiceScopeFactory _scopes;
     private readonly ILogger<TelegramChannelAdapter> _logger;
 
     public string ChannelId => "telegram";
     public bool SupportsRichContent => true;
 
-    public TelegramChannelAdapter(HttpClient http, IOptions<TelegramBotOptions> opts, ILogger<TelegramChannelAdapter> logger)
+    public TelegramChannelAdapter(HttpClient http, IOptions<TelegramBotOptions> opts, IServiceScopeFactory scopes, ILogger<TelegramChannelAdapter> logger)
     {
         _http = http;
         _opts = opts.Value;
+        _scopes = scopes;
         _logger = logger;
         // Token is guaranteed present: DI only registers this adapter when TelegramBotOptions.Enabled.
         _http.BaseAddress = new Uri($"https://api.telegram.org/bot{_opts.Token}/");
     }
 
+    /// <summary>
+    /// Resolve the destination chat for a tenant: the bot is global, but the chat id is per-tenant
+    /// (TenantSettings.TelegramChatId, editable in-app). Falls back to the global env-seeded default
+    /// when the tenant hasn't set one, so the admin/dev tenant keeps working out of the box.
+    /// </summary>
+    private async Task<long?> ResolveChatIdAsync(Guid tenantId, CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ForesightDbContext>();
+            var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Id == tenantId, ct);
+            if (tenant?.Settings.TelegramChatId is { } perTenant) return perTenant;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Telegram: could not read per-tenant chat id for {Tenant}; using global default", tenantId);
+        }
+        return _opts.ResolvedNotifyChatId;
+    }
+
     public async Task SendAsync(Guid tenantId, OutboundNotification notification, CancellationToken ct)
     {
-        var chatId = _opts.ResolvedNotifyChatId;
+        var chatId = await ResolveChatIdAsync(tenantId, ct);
         if (chatId is null)
         {
-            _logger.LogWarning("Telegram notification dropped — no NotifyChatId/AllowedChatIds configured.");
+            _logger.LogWarning("Telegram notification dropped — no chat id configured for tenant {Tenant} and no global default.", tenantId);
             return;
         }
         var text = string.IsNullOrWhiteSpace(notification.Title)
@@ -69,11 +95,11 @@ public sealed class TelegramChannelAdapter : IChannelAdapter
         await SendMessageAsync(chatId.Value, text, ct);
     }
 
-    public Task SendRichAsync(Guid tenantId, NotificationKind kind, string title, RichContent content, CancellationToken ct)
+    public async Task SendRichAsync(Guid tenantId, NotificationKind kind, string title, RichContent content, CancellationToken ct)
     {
-        var chatId = _opts.ResolvedNotifyChatId;
-        if (chatId is null) { _logger.LogWarning("Telegram rich notification dropped — no chat configured."); return Task.CompletedTask; }
-        return SendRichToChatAsync(chatId.Value, title, content, ct);
+        var chatId = await ResolveChatIdAsync(tenantId, ct);
+        if (chatId is null) { _logger.LogWarning("Telegram rich notification dropped — no chat configured for tenant {Tenant}.", tenantId); return; }
+        await SendRichToChatAsync(chatId.Value, title, content, ct);
     }
 
     /// <summary>
@@ -87,6 +113,7 @@ public sealed class TelegramChannelAdapter : IChannelAdapter
         if (!string.IsNullOrWhiteSpace(title)) sb.Append("<b>").Append(Html(title)).Append("</b>\n");
         if (!string.IsNullOrWhiteSpace(content.Text)) sb.Append(Html(content.Text)).Append('\n');
         var mono = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(content.Monospace)) mono.AppendLine(content.Monospace);
         if (content.Table is not null) mono.AppendLine(StripFences(content.Table.RenderMonospace()));
         if (content.Chart is not null && content.ImagePng is null) mono.AppendLine(content.Chart.RenderAscii());
         if (mono.Length > 0) sb.Append("<pre>").Append(Html(mono.ToString().TrimEnd())).Append("</pre>");
@@ -115,7 +142,12 @@ public sealed class TelegramChannelAdapter : IChannelAdapter
             ? new { inline_keyboard = content.Buttons.Select(r => r.Buttons.Select(b => new { text = b.Label, callback_data = Truncate64(b.Arg is null ? b.Command : $"{b.Command} {b.Arg}") }).ToArray()).ToArray() }
             : null;
 
-        await PostSendMessageAsync(new { chat_id = chatId, text = sb.ToString(), parse_mode = "HTML", reply_markup = replyMarkup }, ct);
+        // Only attach reply_markup when there are actually buttons — Telegram rejects a null/empty
+        // reply_markup with "object expected as reply markup" (the JSON serialiser emits null otherwise).
+        if (replyMarkup is null)
+            await PostSendMessageAsync(new { chat_id = chatId, text = sb.ToString(), parse_mode = "HTML" }, ct);
+        else
+            await PostSendMessageAsync(new { chat_id = chatId, text = sb.ToString(), parse_mode = "HTML", reply_markup = replyMarkup }, ct);
     }
 
     /// <summary>
@@ -158,6 +190,81 @@ public sealed class TelegramChannelAdapter : IChannelAdapter
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { _logger.LogWarning(ex, "Telegram sendPhoto error to chat {ChatId}", chatId); }
+    }
+
+    // ── Single chart widget (sendPhoto returning the message id + editMessageMedia in place) ──────
+
+    /// <summary>Send a PNG with an optional caption + single URL button; returns the new message id.</summary>
+    public async Task<long?> SendPhotoReturningIdAsync(long chatId, byte[] png, string? caption, string? buttonText, string? buttonUrl, CancellationToken ct)
+    {
+        try
+        {
+            using var form = new MultipartFormDataContent
+            {
+                { new StringContent(chatId.ToString(System.Globalization.CultureInfo.InvariantCulture)), "chat_id" },
+            };
+            if (!string.IsNullOrWhiteSpace(caption)) { form.Add(new StringContent(caption), "caption"); form.Add(new StringContent("HTML"), "parse_mode"); }
+            var kb = UrlKeyboardJson(buttonText, buttonUrl);
+            if (kb is not null) form.Add(new StringContent(kb), "reply_markup");
+            var photo = new ByteArrayContent(png);
+            photo.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+            form.Add(photo, "photo", "chart.png");
+
+            using var resp = await _http.PostAsync("sendPhoto", form, ct);
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            if (!resp.IsSuccessStatusCode) { _logger.LogWarning("Telegram sendPhoto failed: {Status} {Body}", resp.StatusCode, body); return null; }
+            return ParseMessageId(body);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { _logger.LogWarning(ex, "Telegram sendPhoto (chart) error"); return null; }
+    }
+
+    /// <summary>Replace an existing message's photo + caption + button in place (editMessageMedia).
+    /// Returns false when the message can't be edited (e.g. deleted) so the caller can re-send.</summary>
+    public async Task<bool> EditMessagePhotoAsync(long chatId, long messageId, byte[] png, string? caption, string? buttonText, string? buttonUrl, CancellationToken ct)
+    {
+        try
+        {
+            var media = new { type = "photo", media = "attach://photo", caption = caption ?? "", parse_mode = "HTML" };
+            using var form = new MultipartFormDataContent
+            {
+                { new StringContent(chatId.ToString(System.Globalization.CultureInfo.InvariantCulture)), "chat_id" },
+                { new StringContent(messageId.ToString(System.Globalization.CultureInfo.InvariantCulture)), "message_id" },
+                { new StringContent(System.Text.Json.JsonSerializer.Serialize(media)), "media" },
+            };
+            var kb = UrlKeyboardJson(buttonText, buttonUrl);
+            if (kb is not null) form.Add(new StringContent(kb), "reply_markup");
+            var photo = new ByteArrayContent(png);
+            photo.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+            form.Add(photo, "photo", "chart.png");
+
+            using var resp = await _http.PostAsync("editMessageMedia", form, ct);
+            if (resp.IsSuccessStatusCode) return true;
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            _logger.LogDebug("Telegram editMessageMedia failed: {Status} {Body}", resp.StatusCode, body);
+            return false;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { _logger.LogWarning(ex, "Telegram editMessageMedia error"); return false; }
+    }
+
+    private static string? UrlKeyboardJson(string? text, string? url)
+    {
+        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(url)) return null;
+        var kb = new { inline_keyboard = new[] { new[] { new { text, url } } } };
+        return System.Text.Json.JsonSerializer.Serialize(kb);
+    }
+
+    private static long? ParseMessageId(string body)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("result", out var r) && r.TryGetProperty("message_id", out var mid))
+                return mid.GetInt64();
+        }
+        catch { /* unparseable — no id */ }
+        return null;
     }
 
     /// <summary>Acknowledge a tapped inline-keyboard button so Telegram clears the loading state.</summary>
@@ -226,7 +333,65 @@ public sealed class TelegramChannelAdapter : IChannelAdapter
         }
     }
 
-    // Listening is handled by TelegramCommandListenerService (scope-safe). These satisfy the port.
+    /// <summary>Send a pre-built HTML message (parse_mode=HTML) — used by the command listener for the
+    /// /start and /connect replies (so the chat id can be a tap-to-copy &lt;code&gt; span).</summary>
+    public Task SendHtmlAsync(long chatId, string html, CancellationToken ct)
+        => PostSendMessageAsync(new { chat_id = chatId, text = html, parse_mode = "HTML" }, ct);
+
+    /// <summary>
+    /// Long-poll getUpdates for inbound messages. Returns the (possibly empty) update list on a clean
+    /// 200, or NULL on any error/non-success (e.g. 409 Conflict when another instance is polling the
+    /// same bot) so the caller can back off instead of hammering the API.
+    /// </summary>
+    public async Task<IReadOnlyList<TelegramUpdate>?> GetUpdatesAsync(long offset, CancellationToken ct)
+    {
+        try
+        {
+            // allowed_updates=["message"] — we only care about typed commands, not callbacks/edits.
+            var url = $"getUpdates?offset={offset}&timeout=25&allowed_updates=%5B%22message%22%5D";
+            using var resp = await _http.GetAsync(url, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                if ((int)resp.StatusCode == 409)
+                    _logger.LogWarning("Telegram getUpdates 409 Conflict — another instance is polling this bot. Backing off. Only one instance should run the command listener (set Telegram__EnableCommandListener=false here, or stop the other).");
+                return null;
+            }
+            var parsed = await resp.Content.ReadFromJsonAsync<TelegramUpdatesResponse>(cancellationToken: ct);
+            return parsed?.Result ?? (IReadOnlyList<TelegramUpdate>)Array.Empty<TelegramUpdate>();
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { _logger.LogDebug(ex, "Telegram getUpdates failed"); return null; }
+    }
+
+    /// <summary>Replace the bot's command menu with a clean slate — only /start and /connect.</summary>
+    public async Task SetMyCommandsAsync(CancellationToken ct)
+    {
+        var payload = new
+        {
+            commands = new[]
+            {
+                new { command = "start",   description = "Connect, or see your P&L stats" },
+                new { command = "connect", description = "Show your chat id to connect" },
+            }
+        };
+        try
+        {
+            using var resp = await _http.PostAsJsonAsync("setMyCommands", payload, ct);
+            if (!resp.IsSuccessStatusCode)
+                _logger.LogWarning("Telegram setMyCommands failed: {Status}", resp.StatusCode);
+        }
+        catch (Exception ex) { _logger.LogWarning(ex, "Telegram setMyCommands error"); }
+    }
+
+    /// <summary>Ensure no webhook is set so long-polling getUpdates works (a stale webhook 409s it).</summary>
+    public async Task DeleteWebhookAsync(CancellationToken ct)
+    {
+        try { using var _ = await _http.PostAsync("deleteWebhook", content: null, ct); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Telegram deleteWebhook failed (non-fatal)"); }
+    }
+
+    // Inbound command listening is driven by the TelegramCommandListenerService hosted service (it
+    // owns the getUpdates poll loop + per-command DI scope). These port members are intentional no-ops.
     public Task RegisterCommandHandlerAsync(string command, Func<InboundCommand, CancellationToken, Task<CommandResponse>> handler) => Task.CompletedTask;
     public Task StartListeningAsync(Guid tenantId, CancellationToken ct) => Task.CompletedTask;
     public Task StopListeningAsync(Guid tenantId, CancellationToken ct) => Task.CompletedTask;
