@@ -584,7 +584,7 @@ public sealed class ModelTrainingService : IModelTrainingService
     private readonly ITenantContext _tenant;
     private readonly ModelTrainer _trainer;
     private readonly IServiceScopeFactory _scopes;
-    private readonly ITrainingEventHub _trainingHub;
+    private readonly IModelEventHub _events;
     private readonly ILogger<ModelTrainingService> _logger;
 
     public ModelTrainingService(
@@ -592,27 +592,15 @@ public sealed class ModelTrainingService : IModelTrainingService
         ITenantContext tenant,
         ModelTrainer trainer,
         IServiceScopeFactory scopes,
-        ITrainingEventHub trainingHub,
+        IModelEventHub events,
         ILogger<ModelTrainingService> logger)
     {
         _db = db;
         _tenant = tenant;
         _trainer = trainer;
         _scopes = scopes;
-        _trainingHub = trainingHub;
+        _events = events;
         _logger = logger;
-    }
-
-    /// <summary>
-    /// Adapts the trainer's synchronous <see cref="IProgress{T}"/> ticks straight onto the SSE hub
-    /// without bouncing through a captured SynchronizationContext (which <see cref="Progress{T}"/>
-    /// would do — reordering events and adding thread-pool hops we don't want on a hot training loop).
-    /// </summary>
-    private sealed class SyncProgress<T> : IProgress<T>
-    {
-        private readonly Action<T> _on;
-        public SyncProgress(Action<T> on) => _on = on;
-        public void Report(T value) => _on(value);
     }
 
     /// <summary>
@@ -754,11 +742,7 @@ public sealed class ModelTrainingService : IModelTrainingService
                 var microProvider = scope.ServiceProvider.GetService<IHistoricalMicrostructureProvider>();
                 await HydrateTrainingDataAsync(flow, candleProvider, microProvider, symbol, iv, startMs, endMs, ct, _logger);
                 _logger.LogInformation("Training variant {Symbol}/{Interval} on {Days}d", symbol, iv, LookbackDaysFor(iv));
-                // Stream per-phase progress to the SSE hub so the UI fills a real bar per interval
-                // instead of sitting on a bare spinner for minutes.
-                var progress = new SyncProgress<TrainProgress>(p =>
-                    _trainingHub.Publish(new TrainingEvent(modelId, TrainingEventKind.Progress, p.Interval, p.Phase, p.Processed, p.Total, null)));
-                var result = await trainer.TrainAsync(flow, tenantId, modelId, symbol, iv, startMs, endMs, ct, progress: progress);
+                var result = await trainer.TrainAsync(flow, tenantId, modelId, symbol, iv, startMs, endMs, ct);
                 _logger.LogInformation("Variant {Symbol}/{Interval} fit complete — WF accuracy {Pct:P2}", symbol, iv, result.ValidationAccuracy);
                 return (Interval: iv, StartMs: startMs, EndMs: endMs, Json: result.TrainedStateJson, Accuracy: result.ValidationAccuracy);
             })
@@ -848,6 +832,11 @@ public sealed class ModelTrainingService : IModelTrainingService
         model.UpdatedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
 
+        // Push the "training" transition to any open SSE subscriber so the UI flips state without
+        // polling. The hub is a singleton, so it stays valid for the background task below even
+        // after this request's scope is disposed.
+        _events.Publish(new ModelEvent(tenantId, modelId, ModelEventKind.Training, null));
+
         // Fire-and-forget on a fresh DI scope with CancellationToken.None so the fit outlives the
         // HTTP request (and the browser tab) that started it. The UI watches TrainingStatus.
         _ = Task.Run(() => RunTrainingInBackgroundAsync(modelId, tenantId, tenantSlug, symbol, holdoutDays, interval), CancellationToken.None);
@@ -868,10 +857,6 @@ public sealed class ModelTrainingService : IModelTrainingService
         // request middleware to populate it on a background thread.
         scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(tenantId, tenantSlug);
         var trainingSvc = scope.ServiceProvider.GetRequiredService<IModelTrainingService>();
-        // Lifecycle events bracket the per-phase Progress ticks the trainer publishes. The interval
-        // here is informational ("all" for a full sweep) — Progress events carry the real per-variant
-        // interval. Completed/Failed close the SSE stream client-side.
-        _trainingHub.Publish(new TrainingEvent(modelId, TrainingEventKind.Started, interval ?? "all", "queued", 0, 1, null));
         try
         {
             await trainingSvc.TrainAsync(modelId, symbol, holdoutDays, interval, CancellationToken.None);
@@ -880,13 +865,12 @@ public sealed class ModelTrainingService : IModelTrainingService
             m.TrainingError = null;
             m.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync();
-            _trainingHub.Publish(new TrainingEvent(modelId, TrainingEventKind.Completed, interval ?? "all", "done", 1, 1, null));
+            // Success transition → UI invalidates its model cache and the train gate resolves.
+            _events.Publish(new ModelEvent(tenantId, modelId, ModelEventKind.Trained, null));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Training {Id} failed in background", modelId);
-            _trainingHub.Publish(new TrainingEvent(modelId, TrainingEventKind.Failed, interval ?? "all", "failed", 0, 1,
-                ex.Message.Length > 2000 ? ex.Message[..2000] : ex.Message));
             try
             {
                 var m = await db.Models.FirstAsync(x => x.Id == modelId);
@@ -894,6 +878,7 @@ public sealed class ModelTrainingService : IModelTrainingService
                 m.TrainingError = ex.Message.Length > 2000 ? ex.Message[..2000] : ex.Message;
                 m.UpdatedAt = DateTimeOffset.UtcNow;
                 await db.SaveChangesAsync();
+                _events.Publish(new ModelEvent(tenantId, modelId, ModelEventKind.Failed, m.TrainingError));
             }
             catch (Exception saveEx) { _logger.LogError(saveEx, "Failed to mark training {Id} as failed", modelId); }
         }

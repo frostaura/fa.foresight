@@ -1,7 +1,8 @@
 /**
  * Trading → Live
  *
- * Drives off the in-memory go-live arm gate (GET /api/golive/status, polled). When disarmed the
+ * Drives off the in-memory go-live arm gate (GET /api/golive/status, pushed via the /api/live/events
+ * SSE stream — no polling). When disarmed the
  * page surfaces the arm flow (request code → confirm) and a contextual amber "disarmed" cue. When
  * armed it shows an emerald pill + killswitch and focuses the active live sessions, each rendered
  * as a LiveBitcoinChart card with a real-money numbers strip. The new-session form lives inside a
@@ -998,14 +999,17 @@ function LiveSetupDialog({ onClose, onOpenConnection }: { onClose: () => void; o
 }
 
 export default function Live() {
-  const { data: status } = useGetGoLiveStatusQuery(undefined, { pollingInterval: 5000 });
+  // Arm status and the live-session list are kept fresh push-style by the /api/live/events SSE stream
+  // (see RealtimeSync): an `arm` event invalidates "GoLive", a `session` event invalidates "Session".
+  // No polling — the server only pushes when the arm flips or a session actually changes.
+  const { data: status } = useGetGoLiveStatusQuery();
   const armed = status?.armed ?? false;
 
   const {
     data: allSessions,
     isLoading,
     isError,
-  } = useListSessionsQuery({ kind: "live", active: true }, { pollingInterval: 4000 });
+  } = useListSessionsQuery({ kind: "live", active: true });
 
   const liveSessions = (allSessions ?? []).filter((s) => !s.stoppedAt);
   const hasSessions = liveSessions.length > 0;

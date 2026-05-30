@@ -113,7 +113,7 @@ public static class SessionsEndpoints
                 {
                     var s = await paperSvc.StartAsync(
                         req.Symbol, req.Interval, req.InitialBalance, req.InitialBetSize,
-                        req.StrategyId, req.Gated, ct);
+                        req.StrategyId, req.Gated, ct, startedAt: req.StartTime);
                     var betsPlaced = s.Bets.Count;
                     var betsWon = s.Bets.Count(b => b.Outcome == "win");
                     var dto = new SessionDto(
@@ -300,5 +300,8 @@ public sealed record CreateSessionRequest(
     decimal InitialBalance,
     decimal InitialBetSize,
     string? StrategyId,
-    bool Gated = false
+    bool Gated = false,
+    // Optional back-dated start for PAPER sessions only (ignored for live — live trades a real venue
+    // in real time). Past instant → the session back-bets from there up to now; null = start now.
+    DateTimeOffset? StartTime = null
 );

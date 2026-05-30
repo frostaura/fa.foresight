@@ -77,14 +77,11 @@ function TrainDialog({ model: initial, onResolve }: { model: Model; onResolve: (
   const [error, setError] = useState<string | null>(initial.trainingError ?? null);
   const resolvedRef = useRef(false);
 
-  // While a background fit is in flight, poll the model list so we can react to the server-side
-  // TrainingStatus transition. This shares the `listModels(undefined)` cache key with the rest of
-  // the app, so the dropdown that triggered us refreshes its score the moment training completes.
-  const polling = phase === "training";
-  const { data: models } = useListModelsQuery(void 0, {
-    pollingInterval: polling ? 2500 : 0,
-    skipPollingIfUnfocused: true,
-  });
+  // While a background fit is in flight we react to the server-side TrainingStatus transition. The
+  // model cache is invalidated push-style by the /api/models SSE stream (see RealtimeSync) the moment
+  // training starts/completes/fails — no polling. This shares the `listModels(undefined)` cache key
+  // with the rest of the app, so the dropdown that triggered us refreshes its score on the same event.
+  const { data: models } = useListModelsQuery(void 0);
   const live = models?.find((m) => m.id === initial.id) ?? initial;
 
   const resolve = useCallback((ok: boolean) => {
@@ -109,7 +106,8 @@ function TrainDialog({ model: initial, onResolve }: { model: Model; onResolve: (
     setPhase("training");
     try {
       await train({ id: initial.id, symbol: TRAIN_SYMBOL }).unwrap();
-      // 202 Accepted — the fit runs server-side. The polling effect resolves us on completion.
+      // 202 Accepted — the fit runs server-side. The model SSE stream invalidates the model cache on
+      // completion (see RealtimeSync), which re-runs the effect below and resolves us.
     } catch (e) {
       const err = e as { data?: { error?: string }; message?: string };
       setError(err.data?.error ?? err.message ?? "Could not start training.");

@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using FrostAura.Foresight.Application.Backtesting;
 using FrostAura.Foresight.Application.Models;
 using FrostAura.Foresight.Application.Tenancy;
@@ -81,6 +83,67 @@ public static class ModelsEndpoints
             }).ToList();
 
             return Results.Ok(enriched);
+        });
+
+        // SSE delta stream of model-lifecycle events (training started/completed/failed) for the
+        // tenant. One shared socket per browser tab; the client invalidates its model cache on each
+        // event. Replaces the old fixed-interval poll of GET /api/models that ran while any model was
+        // training. Heartbeat comment every 15s so intermediaries don't idle-close the connection.
+        g.MapGet("/stream", async (HttpContext ctx, ITenantContext tc, IModelEventHub hub, CancellationToken ct) =>
+        {
+            if (!tc.IsResolved) return Results.NotFound();
+            var tenantId = tc.TenantId!.Value;
+
+            ctx.Response.Headers.ContentType = "text/event-stream";
+            ctx.Response.Headers.CacheControl = "no-cache";
+            ctx.Response.Headers["X-Accel-Buffering"] = "no";
+            await ctx.Response.Body.FlushAsync(ct);
+
+            var jsonOpts = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+            using var heartbeat = new CancellationTokenSource();
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, heartbeat.Token);
+
+            var pulse = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!linked.IsCancellationRequested)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(15), linked.Token);
+                        await ctx.Response.WriteAsync(": ping\n\n", linked.Token);
+                        await ctx.Response.Body.FlushAsync(linked.Token);
+                    }
+                }
+                catch { /* expected on shutdown */ }
+            }, linked.Token);
+
+            try
+            {
+                await foreach (var evt in hub.Subscribe(linked.Token))
+                {
+                    if (evt.TenantId != tenantId) continue;
+                    var name = evt.Kind switch
+                    {
+                        ModelEventKind.Training => "training",
+                        ModelEventKind.Trained => "trained",
+                        ModelEventKind.Failed => "failed",
+                        _ => "unknown"
+                    };
+                    var payload = JsonSerializer.Serialize(new { modelId = evt.ModelId, error = evt.Error }, jsonOpts);
+                    var sb = new StringBuilder()
+                        .Append("event: ").Append(name).Append('\n')
+                        .Append("data: ").Append(payload).Append("\n\n");
+                    await ctx.Response.WriteAsync(sb.ToString(), linked.Token);
+                    await ctx.Response.Body.FlushAsync(linked.Token);
+                }
+            }
+            catch (OperationCanceledException) { /* client disconnected */ }
+            finally
+            {
+                heartbeat.Cancel();
+                try { await pulse; } catch { }
+            }
+            return Results.Empty;
         });
 
         g.MapGet("/catalogue", (FrostAura.Foresight.Application.Flow.NodeRegistry registry) =>

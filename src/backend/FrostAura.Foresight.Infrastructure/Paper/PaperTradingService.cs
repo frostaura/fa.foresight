@@ -22,7 +22,12 @@ namespace FrostAura.Foresight.Infrastructure.Paper;
 /// </summary>
 public interface IPaperTradingService
 {
-    Task<PaperSession> StartAsync(string symbol, string interval, decimal initialBalance, decimal initialBetSize, string? strategyId, bool gated, CancellationToken ct, string label = "");
+    /// <param name="startedAt">Optional back-dated trading start. When supplied (and in the past), the
+    /// session is created as if it had started then: the processor back-bets every closed candle from
+    /// that boundary up to the live forming candle on its first ticks, so the ledger, balance and chart
+    /// read as a continuous run. Null = start now (the default). Bounded to the same backfill lookback
+    /// window the gap-recovery engine enforces.</param>
+    Task<PaperSession> StartAsync(string symbol, string interval, decimal initialBalance, decimal initialBetSize, string? strategyId, bool gated, CancellationToken ct, string label = "", DateTimeOffset? startedAt = null);
     Task<PaperSession?> StopAsync(string symbol, string interval, CancellationToken ct, string label = "");
     Task<PaperSession?> GetAsync(string symbol, string interval, CancellationToken ct);
     /// <summary>Fetch one session by its id (with bets). Used by the processor to drive every active
@@ -102,12 +107,34 @@ public sealed class PaperTradingService : IPaperTradingService
         _logger = logger;
     }
 
-    public async Task<PaperSession> StartAsync(string symbol, string interval, decimal initialBalance, decimal initialBetSize, string? strategyId, bool gated, CancellationToken ct, string label = "")
+    public async Task<PaperSession> StartAsync(string symbol, string interval, decimal initialBalance, decimal initialBetSize, string? strategyId, bool gated, CancellationToken ct, string label = "", DateTimeOffset? startedAt = null)
     {
         if (!_tenant.IsResolved) throw new InvalidOperationException("Tenant not resolved.");
         if (initialBalance <= 0) throw new ArgumentException("initialBalance must be > 0");
         if (initialBetSize <= 0 || initialBetSize > initialBalance)
             throw new ArgumentException("initialBetSize must be > 0 and <= initialBalance");
+
+        // Resolve the (optional) back-dated trading start. A null start means "now" — identical to the
+        // historical behaviour. A supplied start must be in the past and no older than the backfill
+        // lookback window, since the gap-recovery engine can only reconstruct that many candles; we
+        // reject out-of-window starts up front with a clear message rather than silently clamping.
+        var now = DateTimeOffset.UtcNow;
+        var resolvedStart = now;
+        if (startedAt is { } requestedStart)
+        {
+            // Small forward skew tolerance for clock differences between client and server.
+            if (requestedStart > now.AddSeconds(30))
+                throw new ArgumentException("startTime cannot be in the future.");
+            long intervalMsForBound;
+            try { intervalMsForBound = BinanceMarketDataClient.IntervalMs(interval); }
+            catch (ArgumentException) { throw new ArgumentException($"Unsupported interval: {interval}"); }
+            var oldestAllowed = now.AddMilliseconds(-(double)MaxBackfillLookbackCandles * intervalMsForBound);
+            if (requestedStart < oldestAllowed)
+                throw new ArgumentException(
+                    $"startTime is too far in the past — back-betting is limited to the most recent {MaxBackfillLookbackCandles} {interval} candles (no earlier than {oldestAllowed:u}).");
+            // Never record a start later than now (a near-now request within the skew window).
+            resolvedStart = requestedStart > now ? now : requestedStart;
+        }
 
         // Resolve and persist the strategy id. Built-in ids are validated against the catalogue
         // and collapsed to the default on unknown; custom DAG strategy Guids are accepted as-is
@@ -151,7 +178,7 @@ public sealed class PaperTradingService : IPaperTradingService
             Symbol = symbol,
             Interval = interval,
             Label = label,
-            StartedAt = DateTimeOffset.UtcNow,
+            StartedAt = resolvedStart,
             InitialBalance = initialBalance,
             InitialBetSize = initialBetSize,
             StrategyId = resolvedStrategy,
@@ -247,10 +274,14 @@ public sealed class PaperTradingService : IPaperTradingService
         if (!tracked.Bust && tracked.StoppedAt is null && openBet is null)
         {
             var lastTarget = tracked.Bets.Count > 0 ? tracked.Bets.Max(b => b.TargetOpenTime) : (long?)null;
-            // Catch-up begins at the candle after the last bet — or, for a session with no bets yet,
-            // just the forming candle (no pre-start backfill). Never start before the session itself.
+            // Catch-up begins at the candle after the last bet — or, for a session with no bets yet, at
+            // the session's own start slot. For an ordinary "start now" session that slot IS the forming
+            // candle, so nothing changes; for a BACK-DATED session (StartedAt set in the past at
+            // creation) it is a past boundary, so the same gap-recovery path that fills downtime holes
+            // also back-bets the whole window from the chosen start up to the live candle. Never start
+            // before the session itself, and never after the forming candle.
             var sessionStartSlot = tracked.StartedAt.ToUnixTimeMilliseconds() / intervalMs * intervalMs;
-            var firstSlot = lastTarget.HasValue ? lastTarget.Value + intervalMs : currentCandleOpenMs;
+            var firstSlot = lastTarget.HasValue ? lastTarget.Value + intervalMs : sessionStartSlot;
             if (firstSlot < sessionStartSlot) firstSlot = sessionStartSlot;
             if (firstSlot > currentCandleOpenMs) firstSlot = currentCandleOpenMs;
 

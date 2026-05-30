@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Star, Lock, FlaskConical, Brain, Plus, Loader2, Cpu, Trash2, Archive, ArchiveRestore, BookOpen } from "lucide-react";
 import { useConfirm } from "../components/ConfirmDialog";
@@ -88,20 +88,13 @@ type ArchiveView = "active" | "archived";
 export default function Models() {
   const [archiveView, setArchiveView] = useLocalStorageState<ArchiveView>("fa.models.archiveView", "active");
 
-  // Fetch all models when showing archived view, otherwise only active
+  // Fetch all models when showing archived view, otherwise only active. Training-status changes are
+  // pushed by the /api/models SSE stream (see RealtimeSync), which invalidates this cache — so a
+  // training model flips to trained here with no polling.
   const includeArchived = archiveView === "archived";
-  const [pollTraining, setPollTraining] = useState(false);
   const { data: allModels, isLoading } = useListModelsQuery(
-    includeArchived ? { includeArchived: true } : void 0,
-    {
-      pollingInterval: pollTraining ? 3000 : 0,
-      skipPollingIfUnfocused: true,
-    }
+    includeArchived ? { includeArchived: true } : void 0
   );
-
-  useEffect(() => {
-    setPollTraining((allModels ?? []).some((m) => m.trainingStatus === "training"));
-  }, [allModels]);
 
   // Filter to the correct view
   const models = useMemo(() => {
