@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none" role="img" aria-label="FrostAura Foresight — Frost Lens mark">
+  <defs>
+    <linearGradient id="a2-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0E1B33"/>
+      <stop offset="100%" stop-color="#070D1A"/>
+    </linearGradient>
+    <linearGradient id="a2-facet" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#BAE6FD"/>
+      <stop offset="100%" stop-color="#3B82F6"/>
+    </linearGradient>
+    <radialGradient id="a2-pupil" cx="50%" cy="42%" r="60%">
+      <stop offset="0%" stop-color="#E0F2FE"/>
+      <stop offset="100%" stop-color="#60A5FA"/>
+    </radialGradient>
+    <radialGradient id="a2-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#3B82F6" stop-opacity="0.40"/>
+      <stop offset="100%" stop-color="#3B82F6" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="a2-soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#a2-bg)"/>
+  <rect x="8.5" y="8.5" width="239" height="239" rx="53.5" fill="none" stroke="#7DD3FC" stroke-opacity="0.16"/>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#a2-glow)"/>
+  <!-- outer angular aperture ring (hexagonal frost facet) -->
+  <g stroke-linejoin="round" fill="none">
+    <polygon points="128,44 196,84 196,164 128,204 60,164 60,84" stroke="#7DD3FC" stroke-opacity="0.45" stroke-width="3"/>
+    <polygon points="128,70 174,97 174,151 128,178 82,151 82,97" stroke="url(#a2-facet)" stroke-width="4"/>
+  </g>
+  <!-- facet spokes -->
+  <g stroke="#7DD3FC" stroke-opacity="0.30" stroke-width="2.2">
+    <line x1="128" y1="44" x2="128" y2="70"/>
+    <line x1="196" y1="84" x2="174" y2="97"/>
+    <line x1="196" y1="164" x2="174" y2="151"/>
+    <line x1="128" y1="204" x2="128" y2="178"/>
+    <line x1="60" y1="164" x2="82" y2="151"/>
+    <line x1="60" y1="84" x2="82" y2="97"/>
+  </g>
+  <!-- focused pupil: a four-point star DNA inside the lens -->
+  <g transform="translate(128 124)" filter="url(#a2-soft)">
+    <circle cx="0" cy="0" r="30" fill="url(#a2-pupil)" opacity="0.16"/>
+    <path d="M0 -30 L 6 -6 L 30 0 L 6 6 L 0 30 L -6 6 L -30 0 L -6 -6 Z" fill="url(#a2-pupil)"/>
+    <circle cx="0" cy="0" r="4.2" fill="#0B1220"/>
+  </g>
+</svg>

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none" role="img" aria-label="FrostAura Foresight — Forecast Curve mark">
+  <defs>
+    <linearGradient id="a1-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0E1B33"/>
+      <stop offset="100%" stop-color="#070D1A"/>
+    </linearGradient>
+    <linearGradient id="a1-line" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#60A5FA"/>
+      <stop offset="100%" stop-color="#BAE6FD"/>
+    </linearGradient>
+    <linearGradient id="a1-star" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#E0F2FE"/>
+      <stop offset="100%" stop-color="#7DD3FC"/>
+    </linearGradient>
+    <radialGradient id="a1-glow" cx="78%" cy="26%" r="55%">
+      <stop offset="0%" stop-color="#3B82F6" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#3B82F6" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="a1-soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#a1-bg)"/>
+  <rect x="8.5" y="8.5" width="239" height="239" rx="53.5" fill="none" stroke="#7DD3FC" stroke-opacity="0.16"/>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#a1-glow)"/>
+  <!-- baseline -->
+  <line x1="48" y1="196" x2="208" y2="196" stroke="#7DD3FC" stroke-opacity="0.18" stroke-width="2"/>
+  <!-- known history: solid rising line -->
+  <path d="M52 184 L 92 168 L 124 178 L 150 138" stroke="url(#a1-line)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" filter="url(#a1-soft)"/>
+  <!-- projected forecast: dashed, climbing to the north-star -->
+  <path d="M150 138 L 190 86" stroke="#BAE6FD" stroke-width="8" stroke-linecap="round" stroke-dasharray="2 16" opacity="0.9"/>
+  <!-- handoff node -->
+  <circle cx="150" cy="138" r="6.5" fill="#0B1220" stroke="#BAE6FD" stroke-width="3"/>
+  <!-- four-point north-star: FrostAura DNA, the predicted target -->
+  <g transform="translate(196 78)" filter="url(#a1-soft)">
+    <path d="M0 -26 L 5.2 -5.2 L 26 0 L 5.2 5.2 L 0 26 L -5.2 5.2 L -26 0 L -5.2 -5.2 Z" fill="url(#a1-star)"/>
+    <circle cx="0" cy="0" r="3.6" fill="#0B1220"/>
+  </g>
+</svg>
