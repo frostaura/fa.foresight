@@ -63,6 +63,7 @@ app.MapTenantEndpoints();
 app.MapLiveEndpoints();
 app.MapPaperEndpoints();
 app.MapSessionsEndpoints();
+app.MapSessionsTransferEndpoints();
 app.MapModelsEndpoints();
 app.MapBacktestsEndpoints();
 app.MapStrategiesEndpoints();

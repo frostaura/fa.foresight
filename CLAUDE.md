@@ -40,7 +40,7 @@ Graduated from **FrostAura Labs → FrostAura Technologies** on 2026-05-29 as a 
 ## Dependencies on other FrostAura projects
 
 - No hard runtime dependency on other FrostAura projects.
-- Shares FrostAura brand tokens and the mandated tech stack (`.NET 10 + EF Core + PostgreSQL + React 19 + Tailwind + shadcn/ui`) with `fa.startup`, `fa.lifeos`, and other Technologies products.
+- Shares FrostAura brand tokens and the mandated tech stack (`.NET 10 + EF Core + PostgreSQL + React 19 + Tailwind + shadcn/ui`) with `fa.startup`, `fa.lifeos`, `fa.foresight`, and other Technologies products.
 - Portainer deploy infrastructure shared with Technologies division (same Portainer instance; separate stack ID).
 - Docker Hub images: `${DOCKERHUB_USERNAME}/foresight-backend`, `foresight-frontend`, `foresight-sandbox`.
 
@@ -49,7 +49,7 @@ Graduated from **FrostAura Labs → FrostAura Technologies** on 2026-05-29 as a 
 - **Prediction-market red-line carve-out applies:** this platform is positioned as an automated trading system operating on information markets (Polymarket). It is greenlit under the FrostAura red-lines carve-out for prediction markets / event futures (`docs/governance/red-lines.md` §1, revised 2026-05-06). It must never be repositioned as a gambling product.
 - **Polymarket CLOB V2 only.** V1 was decommissioned 2026-04-28. All execution code targets V2 wire facts (see `docs/mvp-plan.md` §6).
 - **Purity contract is non-negotiable.** Code nodes are pure functions of declared inputs. Any deviation breaks the chaos/bust test faithfulness guarantee.
-- **Auth posture:** multi-tenant data model, single-user auth for MVP (no passkey/JWT build yet). Single tenant resolved via header/local identity.
+- **Auth posture:** multi-tenant data model, single-user auth for MVP (no passkey/JWT build yet). **Single-tenant mode:** `TenantResolutionMiddleware` pins every request to one shared tenant (slug `default`) regardless of any `X-Tenant-Slug` header / `?tenant=` query — anyone who opens the site sees the same data. Tenant-scoped entities are retained for future B2B; to re-enable per-tenant routing, honour the header/query again instead of forcing the shared slug.
 - **Live trading gate:** `Polymarket__LiveTrading=false` in `.env.example`. This must be explicitly set to `true` only after the supervised $1 validation order passes.
 
 ## Working notes
