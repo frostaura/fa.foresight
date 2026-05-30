@@ -32,13 +32,13 @@ services:
       Polymarket__WalletAddress: ${Polymarket__WalletAddress:-}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8088}
       # Telegram bot — outbound notifications + the inbound /start /connect command listener.
-      # This stack owns the bot, so the command listener defaults ON (only one poller may exist
-      # per bot, else 409). Token + admin chat id come from .env; PublicUrl powers the deep-link
-      # button on chart messages.
+      # Only ONE instance may poll the bot (a second gets 409 Conflict). PROD owns the command
+      # listener, so it defaults OFF locally. Outbound notifications + the live-chart deep-link
+      # still work with it off. Token + admin chat id come from .env.
       TelegramBot__Token: ${TelegramBot__Token:-}
       TelegramBot__NotifyChatId: ${TelegramBot__NotifyChatId:-}
       TelegramBot__DefaultTenantSlug: ${TelegramBot__DefaultTenantSlug:-dean}
-      Telegram__EnableCommandListener: ${Telegram__EnableCommandListener:-true}
+      Telegram__EnableCommandListener: ${Telegram__EnableCommandListener:-false}
       Foresight__PublicUrl: ${Foresight__PublicUrl:-}
     healthcheck:
       test: [ "CMD-SHELL", "curl --fail --silent http://127.0.0.1:5000/health >/dev/null || exit 1" ]
