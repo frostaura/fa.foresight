@@ -54,3 +54,6 @@ src/frontend/.playwright-mcp/
 # TS incremental build cache
 src/frontend/tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+# Production compose holds deploy secrets (Cloudflare token, DB password, keys) — never commit.
+docker-compose.prod.yml
