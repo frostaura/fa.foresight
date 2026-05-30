@@ -144,6 +144,35 @@ public static class BacktestsEndpoints
             catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        // Live training progress (SSE). Mirrors the backtest stream: the trainer publishes Started +
+        // N Progress (per interval/phase) + Completed/Failed to the in-process hub; we forward the
+        // events for this model id so the UI fills a real progress bar instead of a bare spinner.
+        // The stream closes on Completed/Failed. listModels polling remains the completion fallback.
+        m.MapGet("/{id:guid}/train/stream", async (Guid id, HttpContext ctx, ITrainingEventHub hub, CancellationToken ct) =>
+        {
+            ctx.Response.Headers["Content-Type"] = "text/event-stream";
+            ctx.Response.Headers["Cache-Control"] = "no-cache";
+            ctx.Response.Headers["X-Accel-Buffering"] = "no";
+            await ctx.Response.Body.FlushAsync(ct);
+            var opts = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+            await foreach (var evt in hub.Subscribe(ct))
+            {
+                if (evt.ModelId != id) continue;
+                var json = JsonSerializer.Serialize(new
+                {
+                    kind = evt.Kind.ToString().ToLowerInvariant(),
+                    interval = evt.Interval,
+                    phase = evt.Phase,
+                    processed = evt.Processed,
+                    total = evt.Total,
+                    error = evt.Error,
+                }, opts);
+                await ctx.Response.WriteAsync($"data: {json}\n\n", ct);
+                await ctx.Response.Body.FlushAsync(ct);
+                if (evt.Kind == TrainingEventKind.Completed || evt.Kind == TrainingEventKind.Failed) break;
+            }
+        });
+
         // Honest out-of-sample walk-forward: rolling-origin retrain + embargo, multi-fold OOS. Returns
         // the aggregate metrics + the guard verdict (the iteration loop's accept/reject). Synchronous
         // and potentially slow (each fold retrains) — keep folds modest and the window focused.
