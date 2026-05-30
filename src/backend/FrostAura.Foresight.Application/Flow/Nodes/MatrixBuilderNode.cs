@@ -44,8 +44,8 @@ public sealed class MatrixBuilderNode : IFlowNode
             {
                 decimal d => (double)d,
                 double dd => dd,
-                int n     => n,
-                long l    => l,
+                int n => n,
+                long l => l,
                 _ => double.NaN,
             };
         }

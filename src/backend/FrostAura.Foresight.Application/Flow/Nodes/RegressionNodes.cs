@@ -72,8 +72,8 @@ public sealed class LinearRegressionNode : IFlowNode
 
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["predicted"]  = predicted,
-            ["pUp"]        = pUp,
+            ["predicted"] = predicted,
+            ["pUp"] = pUp,
             ["confidence"] = confidence,
         });
     }
@@ -156,7 +156,7 @@ public sealed class LogisticRegressionNode : IFlowNode
         // `min_confidence` to compute a secondary gated hit-rate next to the headline ungated one.
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["pUp"]        = pUp,
+            ["pUp"] = pUp,
             ["confidence"] = confidence,
         });
     }
@@ -210,14 +210,14 @@ public sealed class GradientBoostedTreesNode : IFlowNode
         },
         Params: new Dictionary<string, ParamDef>
         {
-            ["n_estimators"]     = new("int", false, 150, "Number of boosting rounds (trees)."),
-            ["max_depth"]        = new("int", false, 3, "Max tree depth — keep shallow to resist overfitting."),
-            ["learning_rate"]    = new("decimal", false, 0.04m, "Shrinkage applied to each tree."),
+            ["n_estimators"] = new("int", false, 150, "Number of boosting rounds (trees)."),
+            ["max_depth"] = new("int", false, 3, "Max tree depth — keep shallow to resist overfitting."),
+            ["learning_rate"] = new("decimal", false, 0.04m, "Shrinkage applied to each tree."),
             ["min_samples_leaf"] = new("int", false, 200, "Minimum rows per leaf — large values regularise on thin-edge data."),
-            ["subsample"]        = new("decimal", false, 0.7m, "Row subsample fraction per tree."),
-            ["colsample"]        = new("decimal", false, 0.7m, "Feature subsample fraction per split."),
-            ["l2"]               = new("decimal", false, 1.0m, "L2 leaf-weight penalty (lambda)."),
-            ["min_confidence"]   = new("decimal", false, 0m,
+            ["subsample"] = new("decimal", false, 0.7m, "Row subsample fraction per tree."),
+            ["colsample"] = new("decimal", false, 0.7m, "Feature subsample fraction per split."),
+            ["l2"] = new("decimal", false, 1.0m, "L2 leaf-weight penalty (lambda)."),
+            ["min_confidence"] = new("decimal", false, 0m,
                 "Confidence threshold for the high-conviction REPORTING subset (confidence = |pUp - 0.5| * 2). The node never abstains on it (always emits pUp, so live == backtest); BacktestRunner reads it to compute a secondary gated hit-rate alongside the headline ungated one."),
         });
 
@@ -241,7 +241,7 @@ public sealed class GradientBoostedTreesNode : IFlowNode
         var confidence = Math.Abs(pUp - 0.5m) * 2m;
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["pUp"]        = pUp,
+            ["pUp"] = pUp,
             ["confidence"] = confidence,
         });
     }
@@ -309,7 +309,7 @@ public sealed class MajorityVoteNode : IFlowNode
         }
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["pUp"]        = pUp,
+            ["pUp"] = pUp,
             ["confidence"] = confidence,
         });
     }

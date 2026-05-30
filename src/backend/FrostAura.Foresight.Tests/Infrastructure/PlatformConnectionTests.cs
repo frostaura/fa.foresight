@@ -48,7 +48,7 @@ public class PlatformConnectionTests
         var protector = NewProtector();
 
         var cipher = protector.Protect(TestPrivateKey);
-        var plain  = protector.Unprotect(cipher);
+        var plain = protector.Unprotect(cipher);
 
         cipher.Should().NotBeNullOrEmpty();
         cipher.Should().NotBe(TestPrivateKey, "the stored value must be ciphertext, not the raw key");
@@ -76,21 +76,21 @@ public class PlatformConnectionTests
 
         db.PlatformConnections.Add(new PlatformConnection
         {
-            Id                  = Guid.NewGuid(),
-            TenantId            = TenantId,
-            ConnectorId         = "polymarket",
-            IsDefault           = true,
+            Id = Guid.NewGuid(),
+            TenantId = TenantId,
+            ConnectorId = "polymarket",
+            IsDefault = true,
             PrivateKeyEncrypted = protector.Protect(TestPrivateKey),
-            WalletAddress       = "0xAbC",
-            SignatureType       = 1,
-            Funder              = "0xFunder",
-            ClobBaseUrl         = "https://clob.example",
-            GammaBaseUrl        = "https://gamma.example",
-            ChainId             = 137,
-            LiveTrading         = true,
-            MaxTradeUsd         = 5m,
-            CreatedAt           = DateTimeOffset.UtcNow,
-            UpdatedAt           = DateTimeOffset.UtcNow
+            WalletAddress = "0xAbC",
+            SignatureType = 1,
+            Funder = "0xFunder",
+            ClobBaseUrl = "https://clob.example",
+            GammaBaseUrl = "https://gamma.example",
+            ChainId = 137,
+            LiveTrading = true,
+            MaxTradeUsd = 5m,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
         });
         await db.SaveChangesAsync();
 
@@ -147,19 +147,19 @@ public class PlatformConnectionTests
 
     private static PlatformConnection Conn(ISecretProtector protector, bool withKey, bool liveTrading) => new()
     {
-        Id                  = Guid.NewGuid(),
-        TenantId            = TenantId,
-        ConnectorId         = "polymarket",
-        IsDefault           = true,
+        Id = Guid.NewGuid(),
+        TenantId = TenantId,
+        ConnectorId = "polymarket",
+        IsDefault = true,
         PrivateKeyEncrypted = withKey ? protector.Protect(TestPrivateKey) : null,
-        WalletAddress       = withKey ? "0xAbC" : null,
-        SignatureType       = 0,
-        ClobBaseUrl         = "https://clob.polymarket.com",
-        GammaBaseUrl        = "https://gamma-api.polymarket.com",
-        ChainId             = 137,
-        LiveTrading         = liveTrading,
-        CreatedAt           = DateTimeOffset.UtcNow,
-        UpdatedAt           = DateTimeOffset.UtcNow
+        WalletAddress = withKey ? "0xAbC" : null,
+        SignatureType = 0,
+        ClobBaseUrl = "https://clob.polymarket.com",
+        GammaBaseUrl = "https://gamma-api.polymarket.com",
+        ChainId = 137,
+        LiveTrading = liveTrading,
+        CreatedAt = DateTimeOffset.UtcNow,
+        UpdatedAt = DateTimeOffset.UtcNow
     };
 
     [Fact]

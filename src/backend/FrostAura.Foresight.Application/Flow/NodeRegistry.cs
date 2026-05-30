@@ -65,9 +65,9 @@ public sealed class NodeRegistry
             doc[typeId] = new
             {
                 category = spec.Category,
-                inputs   = spec.Inputs,
-                outputs  = spec.Outputs,
-                @params  = spec.Params,
+                inputs = spec.Inputs,
+                outputs = spec.Outputs,
+                @params = spec.Params,
                 acceptsAdditionalInputs = spec.AcceptsAdditionalInputs,
                 requiresLiveData = spec.RequiresLiveData,
             };

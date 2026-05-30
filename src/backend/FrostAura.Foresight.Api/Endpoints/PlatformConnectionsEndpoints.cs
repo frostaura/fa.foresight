@@ -96,11 +96,11 @@ public static class PlatformConnectionsEndpoints
             {
                 conn = new PlatformConnection
                 {
-                    Id          = Guid.NewGuid(),
-                    TenantId    = tenantId,
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
                     ConnectorId = DefaultConnectorId,
-                    IsDefault   = true,
-                    CreatedAt   = now
+                    IsDefault = true,
+                    CreatedAt = now
                 };
             }
 
@@ -123,12 +123,12 @@ public static class PlatformConnectionsEndpoints
             }
 
             if (req.SignatureType.HasValue) conn.SignatureType = req.SignatureType.Value;
-            if (req.Funder is not null)      conn.Funder = string.IsNullOrWhiteSpace(req.Funder) ? null : req.Funder.Trim();
-            if (!string.IsNullOrWhiteSpace(req.ClobBaseUrl))  conn.ClobBaseUrl  = req.ClobBaseUrl.Trim();
+            if (req.Funder is not null) conn.Funder = string.IsNullOrWhiteSpace(req.Funder) ? null : req.Funder.Trim();
+            if (!string.IsNullOrWhiteSpace(req.ClobBaseUrl)) conn.ClobBaseUrl = req.ClobBaseUrl.Trim();
             if (!string.IsNullOrWhiteSpace(req.GammaBaseUrl)) conn.GammaBaseUrl = req.GammaBaseUrl.Trim();
-            if (req.ChainId.HasValue)        conn.ChainId = req.ChainId.Value;
-            if (req.LiveTrading.HasValue)    conn.LiveTrading = req.LiveTrading.Value;
-            if (req.MaxTradeUsd.HasValue)    conn.MaxTradeUsd = req.MaxTradeUsd.Value;
+            if (req.ChainId.HasValue) conn.ChainId = req.ChainId.Value;
+            if (req.LiveTrading.HasValue) conn.LiveTrading = req.LiveTrading.Value;
+            if (req.MaxTradeUsd.HasValue) conn.MaxTradeUsd = req.MaxTradeUsd.Value;
             if (req.EffectivePrice.HasValue)
             {
                 // Guard the fee/price into a sane band: must be a probability strictly in (0,1), and
@@ -138,7 +138,7 @@ public static class PlatformConnectionsEndpoints
                     return Results.BadRequest(new { error = "effectivePrice must be between 0.50 and 0.95 (the conservative fee/price for a near-50/50 contract)." });
                 conn.EffectivePrice = p;
             }
-            if (req.RpcUrl is not null)      conn.RpcUrl = string.IsNullOrWhiteSpace(req.RpcUrl) ? null : req.RpcUrl.Trim();
+            if (req.RpcUrl is not null) conn.RpcUrl = string.IsNullOrWhiteSpace(req.RpcUrl) ? null : req.RpcUrl.Trim();
             conn.UpdatedAt = now;
 
             if (isNew) db.PlatformConnections.Add(conn);
@@ -166,30 +166,30 @@ public static class PlatformConnectionsEndpoints
 
     /// <summary>Masked view — never carries the raw private key or any secret material.</summary>
     private sealed record PlatformConnectionView(
-        string  ConnectorId,
-        bool    IsDefault,
-        bool    HasPrivateKey,
+        string ConnectorId,
+        bool IsDefault,
+        bool HasPrivateKey,
         string? WalletAddress,
-        int     SignatureType,
+        int SignatureType,
         string? Funder,
-        string  ClobBaseUrl,
-        string  GammaBaseUrl,
-        int     ChainId,
-        bool    LiveTrading,
+        string ClobBaseUrl,
+        string GammaBaseUrl,
+        int ChainId,
+        bool LiveTrading,
         decimal MaxTradeUsd,
         decimal EffectivePrice,
         string? RpcUrl);
 
     /// <summary>Upsert body. All fields optional; omitted = unchanged. privateKey is write-only.</summary>
     private sealed record UpdatePlatformConnectionRequest(
-        string?  PrivateKey,
-        int?     SignatureType,
-        string?  Funder,
-        string?  ClobBaseUrl,
-        string?  GammaBaseUrl,
-        int?     ChainId,
-        bool?    LiveTrading,
+        string? PrivateKey,
+        int? SignatureType,
+        string? Funder,
+        string? ClobBaseUrl,
+        string? GammaBaseUrl,
+        int? ChainId,
+        bool? LiveTrading,
         decimal? MaxTradeUsd,
         decimal? EffectivePrice,
-        string?  RpcUrl);
+        string? RpcUrl);
 }

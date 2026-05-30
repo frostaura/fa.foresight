@@ -254,13 +254,25 @@ public sealed class BinanceHistoricalMicrostructureAdapter : IHistoricalMicrostr
         return bars.Select(b => metrics.TryGetValue(b.OpenTime, out var m)
             ? new MicrostructureBar
             {
-                Symbol = b.Symbol, Interval = b.Interval, OpenTime = b.OpenTime,
-                TradeCount = b.TradeCount, BuyVolume = b.BuyVolume, SellVolume = b.SellVolume,
-                BuyTradeCount = b.BuyTradeCount, LargeBuyVolume = b.LargeBuyVolume, LargeSellVolume = b.LargeSellVolume,
-                LateBuyVolume = b.LateBuyVolume, LateSellVolume = b.LateSellVolume,
-                EarlyBuyVolume = b.EarlyBuyVolume, EarlySellVolume = b.EarlySellVolume, LateTradeCount = b.LateTradeCount,
-                OpenInterest = m.Oi, OpenInterestValue = m.OiVal,
-                TopTraderLongShortRatio = m.TopLS, LongShortRatio = m.GlobalLS, TakerLongShortVolRatio = m.TakerLS,
+                Symbol = b.Symbol,
+                Interval = b.Interval,
+                OpenTime = b.OpenTime,
+                TradeCount = b.TradeCount,
+                BuyVolume = b.BuyVolume,
+                SellVolume = b.SellVolume,
+                BuyTradeCount = b.BuyTradeCount,
+                LargeBuyVolume = b.LargeBuyVolume,
+                LargeSellVolume = b.LargeSellVolume,
+                LateBuyVolume = b.LateBuyVolume,
+                LateSellVolume = b.LateSellVolume,
+                EarlyBuyVolume = b.EarlyBuyVolume,
+                EarlySellVolume = b.EarlySellVolume,
+                LateTradeCount = b.LateTradeCount,
+                OpenInterest = m.Oi,
+                OpenInterestValue = m.OiVal,
+                TopTraderLongShortRatio = m.TopLS,
+                LongShortRatio = m.GlobalLS,
+                TakerLongShortVolRatio = m.TakerLS,
             }
             : b).ToList();
     }

@@ -37,13 +37,13 @@ public sealed class OutputPredictionNode : IFlowNode
         // map them into the persisted LivePrediction row.
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["pUp"]        = inputs.GetValueOrDefault("pUp"),
+            ["pUp"] = inputs.GetValueOrDefault("pUp"),
             ["confidence"] = inputs.GetValueOrDefault("confidence") ?? 0.5m,
-            ["predicted"]  = inputs.GetValueOrDefault("predicted"),
-            ["p05"]        = inputs.GetValueOrDefault("p05"),
-            ["p50"]        = inputs.GetValueOrDefault("p50"),
-            ["p95"]        = inputs.GetValueOrDefault("p95"),
-            ["reasoning"]  = inputs.GetValueOrDefault("reasoning"),
+            ["predicted"] = inputs.GetValueOrDefault("predicted"),
+            ["p05"] = inputs.GetValueOrDefault("p05"),
+            ["p50"] = inputs.GetValueOrDefault("p50"),
+            ["p95"] = inputs.GetValueOrDefault("p95"),
+            ["reasoning"] = inputs.GetValueOrDefault("reasoning"),
         });
     }
 }

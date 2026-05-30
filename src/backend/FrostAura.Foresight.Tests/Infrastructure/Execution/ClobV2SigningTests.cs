@@ -27,28 +27,28 @@ public class ClobV2SigningTests
     // ── Test key (throwaway, never funded) ──────────────────────────────────────
     // A known deterministic test key — private key, address, from eth tooling.
     private const string TestPrivateKey = "0x4c0883a69102937d6231471b5dbb6e538eba2ef39a64d09e1caad98bce00f54e";
-    private const string TestAddress    = "0x9ab026dA8Bb29EA61bf15D592c73fc5BcF5dA58C"; // lowercase will match
+    private const string TestAddress = "0x9ab026dA8Bb29EA61bf15D592c73fc5BcF5dA58C"; // lowercase will match
 
     // ── (a) EIP-712 V2 Order sign → ecrecover round-trip ───────────────────────
 
     [Fact]
     public void EIP712_V2_Order_sign_and_ecrecover_roundtrip_standard_market()
     {
-        var key   = new EthECKey(TestPrivateKey);
+        var key = new EthECKey(TestPrivateKey);
         var address = key.GetPublicAddress();
         address.Should().BeEquivalentTo(TestAddress); // sanity
 
         var order = new ClobV2Order
         {
-            Salt          = "12345678901234567890",
-            Maker         = address,
-            Signer        = address,
-            TokenId       = "98765432109876543210987654321098765432109876543210987654321098765",
-            MakerAmount   = "1000000",
-            TakerAmount   = "2000000",
-            Side          = 0,
+            Salt = "12345678901234567890",
+            Maker = address,
+            Signer = address,
+            TokenId = "98765432109876543210987654321098765432109876543210987654321098765",
+            MakerAmount = "1000000",
+            TakerAmount = "2000000",
+            Side = 0,
             SignatureType = 0,
-            Timestamp     = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture)
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture)
         };
 
         var typedDataJson = order.ToEip712Json(negRisk: false);
@@ -58,7 +58,7 @@ public class ClobV2SigningTests
         typedDataJson.Should().Contain(ClobV2Order.CtfExchangeAddress, "standard market routes to CtfExchange");
 
         // Sign with the test key.
-        var signer    = new Eip712TypedDataSigner();
+        var signer = new Eip712TypedDataSigner();
         var signature = signer.SignTypedDataV4(typedDataJson, key);
         signature.Should().NotBeNullOrWhiteSpace();
         signature.Should().StartWith("0x");
@@ -71,20 +71,20 @@ public class ClobV2SigningTests
     [Fact]
     public void EIP712_V2_Order_sign_and_ecrecover_roundtrip_neg_risk_market()
     {
-        var key      = new EthECKey(TestPrivateKey);
-        var address  = key.GetPublicAddress();
+        var key = new EthECKey(TestPrivateKey);
+        var address = key.GetPublicAddress();
 
         var order = new ClobV2Order
         {
-            Salt          = "99999999999999999999",
-            Maker         = address,
-            Signer        = address,
-            TokenId       = "11111111111111111111",
-            MakerAmount   = "500000",
-            TakerAmount   = "1000000",
-            Side          = 0,
+            Salt = "99999999999999999999",
+            Maker = address,
+            Signer = address,
+            TokenId = "11111111111111111111",
+            MakerAmount = "500000",
+            TakerAmount = "1000000",
+            Side = 0,
             SignatureType = 0,
-            Timestamp     = "1700000000000"
+            Timestamp = "1700000000000"
         };
 
         var typedDataJson = order.ToEip712Json(negRisk: true);
@@ -92,7 +92,7 @@ public class ClobV2SigningTests
         typedDataJson.Should().Contain(ClobV2Order.NegRiskCtfExchangeAddress, "negRisk market routes to NegRiskCtfExchange");
         typedDataJson.Should().NotContain(ClobV2Order.CtfExchangeAddress, "must not mix up contracts");
 
-        var signer    = new Eip712TypedDataSigner();
+        var signer = new Eip712TypedDataSigner();
         var signature = signer.SignTypedDataV4(typedDataJson, key);
         var recovered = signer.RecoverFromSignatureV4(typedDataJson, signature, "message");
         recovered.Should().BeEquivalentTo(address);
@@ -101,26 +101,26 @@ public class ClobV2SigningTests
     [Fact]
     public void EIP712_V2_Order_struct_does_NOT_contain_v1_deleted_fields()
     {
-        var key     = new EthECKey(TestPrivateKey);
+        var key = new EthECKey(TestPrivateKey);
         var address = key.GetPublicAddress();
-        var order   = new ClobV2Order { Salt = "1", Maker = address, Signer = address, TokenId = "1", MakerAmount = "1", TakerAmount = "1", Side = 0, SignatureType = 0, Timestamp = "1" };
+        var order = new ClobV2Order { Salt = "1", Maker = address, Signer = address, TokenId = "1", MakerAmount = "1", TakerAmount = "1", Side = 0, SignatureType = 0, Timestamp = "1" };
 
         var json = order.ToEip712Json(false);
         // Check that the V1 struct fields are NOT present as type-definition entries.
-        json.Should().NotContain("\"name\":\"taker\"",      "V2 removes the standalone taker field");
+        json.Should().NotContain("\"name\":\"taker\"", "V2 removes the standalone taker field");
         json.Should().NotContain("\"name\":\"expiration\"", "V2 removes expiration");
-        json.Should().NotContain("\"name\":\"nonce\"",      "V2 removes nonce from Order struct");
+        json.Should().NotContain("\"name\":\"nonce\"", "V2 removes nonce from Order struct");
         json.Should().NotContain("\"name\":\"feeRateBps\"", "V2 removes feeRateBps");
     }
 
     [Fact]
     public void EIP712_V2_Order_uint256_fields_are_decimal_strings_not_numbers()
     {
-        var key     = new EthECKey(TestPrivateKey);
+        var key = new EthECKey(TestPrivateKey);
         var address = key.GetPublicAddress();
         // Use a value large enough to overflow float64 if not stringified.
         var bigSalt = "999999999999999999999999999999";
-        var order   = new ClobV2Order { Salt = bigSalt, Maker = address, Signer = address, TokenId = "12345678901234567890", MakerAmount = "1000000", TakerAmount = "2000000", Side = 0, SignatureType = 0, Timestamp = "1700000000000000" };
+        var order = new ClobV2Order { Salt = bigSalt, Maker = address, Signer = address, TokenId = "12345678901234567890", MakerAmount = "1000000", TakerAmount = "2000000", Side = 0, SignatureType = 0, Timestamp = "1700000000000000" };
 
         var json = order.ToEip712Json(false);
         // The salt appears as a quoted string in the message block.
@@ -132,9 +132,9 @@ public class ClobV2SigningTests
     [Fact]
     public void ClobAuth_sign_and_ecrecover_roundtrip()
     {
-        var key     = new EthECKey(TestPrivateKey);
+        var key = new EthECKey(TestPrivateKey);
         var address = key.GetPublicAddress();
-        var ts      = "1700000000"; // fixed unix seconds string
+        var ts = "1700000000"; // fixed unix seconds string
 
         var json = ClobV2Order.BuildClobAuthTypedData(address, ts);
 
@@ -143,7 +143,7 @@ public class ClobV2SigningTests
         json.Should().Contain("This message attests that I control the given wallet");
         json.Should().Contain("\"nonce\":\"0\"");
 
-        var signer    = new Eip712TypedDataSigner();
+        var signer = new Eip712TypedDataSigner();
         var signature = signer.SignTypedDataV4(json, key);
         signature.Should().NotBeNullOrEmpty();
 
@@ -166,7 +166,7 @@ public class ClobV2SigningTests
 
     [Theory]
     [InlineData("dGVzdC1zZWNyZXQtYmFzZTY0", "1700000000", "GET", "/order", "", "keeps-equals")]
-    [InlineData("YW5vdGhlcnNlY3JldA==",     "1700000001", "POST", "/order", "{\"x\":1}", "with-body")]
+    [InlineData("YW5vdGhlcnNlY3JldA==", "1700000001", "POST", "/order", "{\"x\":1}", "with-body")]
     public void L2_HMAC_keeps_equals_padding_and_applies_url_safe_replacements(
         string secret, string ts, string method, string path, string body, string _scenario)
     {
@@ -194,17 +194,17 @@ public class ClobV2SigningTests
         // message = "1700000000GET/order"
         // HMAC-SHA256(base64decode("c2VjcmV0"), "1700000000GET/order") → base64url with padding
         const string secret = "c2VjcmV0"; // base64("secret")
-        const string ts     = "1700000000";
+        const string ts = "1700000000";
         const string method = "GET";
-        const string path   = "/order";
-        const string body   = "";
+        const string path = "/order";
+        const string body = "";
 
         // Compute the expected value using the same algorithm (independent of BuildHmacSignature).
-        var keyBytes  = Convert.FromBase64String("c2VjcmV0"); // = "secret" bytes
-        var message   = ts + method + path + body;
-        using var h   = new HMACSHA256(keyBytes);
-        var hash      = h.ComputeHash(Encoding.UTF8.GetBytes(message));
-        var expected  = Convert.ToBase64String(hash).Replace('+', '-').Replace('/', '_');
+        var keyBytes = Convert.FromBase64String("c2VjcmV0"); // = "secret" bytes
+        var message = ts + method + path + body;
+        using var h = new HMACSHA256(keyBytes);
+        var hash = h.ComputeHash(Encoding.UTF8.GetBytes(message));
+        var expected = Convert.ToBase64String(hash).Replace('+', '-').Replace('/', '_');
 
         var result = PolymarketExecutionProvider.BuildHmacSignature(secret, ts, method, path, body);
         result.Should().Be(expected, "HMAC must match the independently computed golden vector");
@@ -216,9 +216,9 @@ public class ClobV2SigningTests
     [Theory]
     // rawPrice is first tick-rounded then used for makerAmount.
     // BUY: tickPrice = floor(rawPrice/mts)*mts; maker=floor(tickPrice*size*1e6); taker=floor(size*1e6)
-    [InlineData(0.55,  10.0, 0.01, 0.0, 5_500_000L, 10_000_000L)] // tick=0.55; maker=floor(0.55*10*1e6)=5_500_000
-    [InlineData(0.499,  5.0, 0.01, 0.0, 2_450_000L,  5_000_000L)] // tick=floor(0.499/0.01)*0.01=0.49; maker=floor(0.49*5*1e6)=2_450_000
-    [InlineData(0.333333, 3.0, 0.01, 0.0, 990_000L,  3_000_000L)] // tick=floor(0.333333/0.01)*0.01=0.33; maker=floor(0.33*3*1e6)=990_000
+    [InlineData(0.55, 10.0, 0.01, 0.0, 5_500_000L, 10_000_000L)] // tick=0.55; maker=floor(0.55*10*1e6)=5_500_000
+    [InlineData(0.499, 5.0, 0.01, 0.0, 2_450_000L, 5_000_000L)] // tick=floor(0.499/0.01)*0.01=0.49; maker=floor(0.49*5*1e6)=2_450_000
+    [InlineData(0.333333, 3.0, 0.01, 0.0, 990_000L, 3_000_000L)] // tick=floor(0.333333/0.01)*0.01=0.33; maker=floor(0.33*3*1e6)=990_000
     public void OrderMath_BUY_amounts_are_floor_scaled(
         double rawPrice, double sizeShares, double mts, double mos,
         long expectedMaker, long expectedTaker)
@@ -226,12 +226,12 @@ public class ClobV2SigningTests
         var result = OrderMath.SizeBuy((decimal)rawPrice, (decimal)sizeShares, (decimal)mts, (decimal)mos);
         result.Should().NotBeNull();
         result!.MakerAmount.Should().Be(expectedMaker, "makerAmount = floor(tickPrice*size*1e6)");
-        result.TakerAmount.Should().Be(expectedTaker,  "takerAmount = floor(size*1e6)");
+        result.TakerAmount.Should().Be(expectedTaker, "takerAmount = floor(size*1e6)");
     }
 
     [Theory]
-    [InlineData(0.55, 10.0,  0.01, 0.0, 10_000_000L, 5_500_000L)] // SELL: floor(10*1e6), floor(0.55*10*1e6)
-    [InlineData(0.499, 5.0,  0.01, 0.0,  5_000_000L, 2_450_000L)] // tick = floor(0.499/0.01)*0.01=0.49; taker=floor(0.49*5*1e6)=2_450_000
+    [InlineData(0.55, 10.0, 0.01, 0.0, 10_000_000L, 5_500_000L)] // SELL: floor(10*1e6), floor(0.55*10*1e6)
+    [InlineData(0.499, 5.0, 0.01, 0.0, 5_000_000L, 2_450_000L)] // tick = floor(0.499/0.01)*0.01=0.49; taker=floor(0.49*5*1e6)=2_450_000
     public void OrderMath_SELL_amounts_are_floor_scaled(
         double rawPrice, double sizeShares, double mts, double mos,
         long expectedMaker, long expectedTaker)
@@ -239,7 +239,7 @@ public class ClobV2SigningTests
         var result = OrderMath.SizeSell((decimal)rawPrice, (decimal)sizeShares, (decimal)mts, (decimal)mos);
         result.Should().NotBeNull();
         result!.MakerAmount.Should().Be(expectedMaker, "SELL makerAmount = floor(size*1e6)");
-        result.TakerAmount.Should().Be(expectedTaker,  "SELL takerAmount = floor(price*size*1e6)");
+        result.TakerAmount.Should().Be(expectedTaker, "SELL takerAmount = floor(price*size*1e6)");
     }
 
     [Theory]
@@ -282,7 +282,7 @@ public class ClobV2SigningTests
     public void ClobV2Order_negRisk_routes_to_NegRiskCtfExchange()
     {
         var order = new ClobV2Order { Salt = "1", Maker = "0x1", Signer = "0x1", TokenId = "1", MakerAmount = "1", TakerAmount = "1", Side = 0, SignatureType = 0, Timestamp = "1" };
-        var json  = order.ToEip712Json(negRisk: true);
+        var json = order.ToEip712Json(negRisk: true);
         json.Should().Contain(ClobV2Order.NegRiskCtfExchangeAddress);
         json.Should().NotContain(ClobV2Order.CtfExchangeAddress);
     }
@@ -291,7 +291,7 @@ public class ClobV2SigningTests
     public void ClobV2Order_standard_routes_to_CtfExchange()
     {
         var order = new ClobV2Order { Salt = "1", Maker = "0x1", Signer = "0x1", TokenId = "1", MakerAmount = "1", TakerAmount = "1", Side = 0, SignatureType = 0, Timestamp = "1" };
-        var json  = order.ToEip712Json(negRisk: false);
+        var json = order.ToEip712Json(negRisk: false);
         json.Should().Contain(ClobV2Order.CtfExchangeAddress);
         json.Should().NotContain(ClobV2Order.NegRiskCtfExchangeAddress);
     }
@@ -323,14 +323,14 @@ public class ClobV2SigningTests
     public void ClobV2Order_typed_data_has_no_v1_deleted_type_members()
     {
         var order = new ClobV2Order { Salt = "1", Maker = "0xA", Signer = "0xA", TokenId = "1", MakerAmount = "1", TakerAmount = "1", Side = 0, SignatureType = 0, Timestamp = "1" };
-        var json  = order.ToEip712Json(false);
+        var json = order.ToEip712Json(false);
 
         // Type definition must not include V1 fields as standalone field names.
         // Note: "taker" appears inside "takerAmount" — check for the exact field-name patterns.
-        json.Should().NotContain("\"name\":\"taker\"",       "V2 type definition must not include the standalone 'taker' field");
-        json.Should().NotContain("\"name\":\"expiration\"",  "V2 type definition must not include expiration");
-        json.Should().NotContain("\"name\":\"feeRateBps\"",  "V2 type definition must not include feeRateBps");
-        json.Should().NotContain("\"name\":\"nonce\"",       "V2 type definition must not include nonce (removed from Order struct)");
+        json.Should().NotContain("\"name\":\"taker\"", "V2 type definition must not include the standalone 'taker' field");
+        json.Should().NotContain("\"name\":\"expiration\"", "V2 type definition must not include expiration");
+        json.Should().NotContain("\"name\":\"feeRateBps\"", "V2 type definition must not include feeRateBps");
+        json.Should().NotContain("\"name\":\"nonce\"", "V2 type definition must not include nonce (removed from Order struct)");
     }
 
     // ── (g) OrderMath.ConfigHash helper ─────────────────────────────────────────
@@ -347,7 +347,7 @@ public class ClobV2SigningTests
     [Fact]
     public void ConfigHash_differs_for_different_params()
     {
-        var hash1 = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "5m",  "flat", 100m, 5m);
+        var hash1 = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "5m", "flat", 100m, 5m);
         var hash2 = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "15m", "flat", 100m, 5m);
         hash1.Should().NotBe(hash2, "different intervals must produce different hashes");
     }
@@ -389,10 +389,15 @@ public class ClobV2SigningTests
         // The signed ClobV2Order struct: Side=1 for SELL (uint8).
         var order = new ClobV2Order
         {
-            Salt = "1", Maker = "0xA", Signer = "0xA", TokenId = "1",
-            MakerAmount = "1", TakerAmount = "1",
+            Salt = "1",
+            Maker = "0xA",
+            Signer = "0xA",
+            TokenId = "1",
+            MakerAmount = "1",
+            TakerAmount = "1",
             Side = 1, // SELL
-            SignatureType = 0, Timestamp = "1"
+            SignatureType = 0,
+            Timestamp = "1"
         };
         var json = order.ToEip712Json(false);
         json.Should().Contain("\"side\":1", "signed struct: SELL side must be uint8 = 1");
@@ -492,8 +497,8 @@ public class ClobV2SigningTests
         var cleanHex = hexResult.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? hexResult[2..] : hexResult;
         System.Numerics.BigInteger.TryParse(cleanHex, System.Globalization.NumberStyles.HexNumber, null, out var raw).Should().BeTrue();
         var divisor = System.Numerics.BigInteger.Pow(10, 6); // PusdDecimals=6
-        var whole   = (decimal)(raw / divisor);
-        var frac    = (decimal)(raw % divisor) / (decimal)divisor;
+        var whole = (decimal)(raw / divisor);
+        var frac = (decimal)(raw % divisor) / (decimal)divisor;
         var balance = whole + frac;
         balance.Should().BeApproximately((decimal)expectedBalance, 0.000001m,
             $"hex {hexResult} should decode to {expectedBalance} pUSD with 6 decimals");
@@ -507,14 +512,14 @@ public class ClobV2SigningTests
         // Both modes use the same ComputeConfigHash so a paper session and a live session with
         // the same params generate the same hash and the dedup check fires.
         var paperHash = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "5m", "flat", 100m, 5m);
-        var liveHash  = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "5m", "flat", 100m, 5m);
+        var liveHash = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "5m", "flat", 100m, 5m);
         paperHash.Should().Be(liveHash, "same params must collide regardless of mode");
     }
 
     [Fact]
     public void ConfigHash_collision_does_NOT_fire_for_different_strategy()
     {
-        var hash1 = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "5m", "flat",       100m, 5m);
+        var hash1 = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "5m", "flat", 100m, 5m);
         var hash2 = LiveSessionEngine.ComputeConfigHash("polymarket", "BTCUSDT", "5m", "martingale", 100m, 5m);
         hash1.Should().NotBe(hash2, "different strategy must yield different hash");
     }

@@ -30,9 +30,15 @@ public class VenuePriceStoreFixedFeeTests
         {
             db.PlatformConnections.Add(new PlatformConnection
             {
-                Id = Guid.NewGuid(), TenantId = tenantId, ConnectorId = "polymarket", IsDefault = true,
-                ClobBaseUrl = "https://clob.polymarket.com", GammaBaseUrl = "https://gamma-api.polymarket.com",
-                EffectivePrice = ep, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ConnectorId = "polymarket",
+                IsDefault = true,
+                ClobBaseUrl = "https://clob.polymarket.com",
+                GammaBaseUrl = "https://gamma-api.polymarket.com",
+                EffectivePrice = ep,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow,
             });
         }
         db.SaveChanges();

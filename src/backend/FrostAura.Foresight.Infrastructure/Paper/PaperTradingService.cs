@@ -368,132 +368,132 @@ public sealed class PaperTradingService : IPaperTradingService
                             }
                             else
                             {
-                            // ── Odds-based placement ────────────────────────────────────────────
-                            // Fetch entry quote (or synthesise one) at placement time.
-                            var entryQuote = await _venuePrices.EnsureEntryAsync(
-                                "polymarket", tracked.Symbol, tracked.Interval, currentCandleOpenMs, calibratedPUp, ct);
+                                // ── Odds-based placement ────────────────────────────────────────────
+                                // Fetch entry quote (or synthesise one) at placement time.
+                                var entryQuote = await _venuePrices.EnsureEntryAsync(
+                                    "polymarket", tracked.Symbol, tracked.Interval, currentCandleOpenMs, calibratedPUp, ct);
 
-                            var side = StakingEngine.DecideSide(calibratedPUp);
-                            var entryInputs = new StakingInputs(calibratedPUp, entryQuote.YesPrice, entryQuote.NoPrice);
+                                var side = StakingEngine.DecideSide(calibratedPUp);
+                                var entryInputs = new StakingInputs(calibratedPUp, entryQuote.YesPrice, entryQuote.NoPrice);
 
-                            // Derive lastStake and lastWon from the most-recently settled bet.
-                            var lastSettled = tracked.Bets.Where(b => b.Resolved).OrderByDescending(b => b.TargetOpenTime).FirstOrDefault();
-                            var lastStake = lastSettled?.Size ?? tracked.InitialBetSize;
-                            var lastWon = lastSettled?.Outcome == "win";
+                                // Derive lastStake and lastWon from the most-recently settled bet.
+                                var lastSettled = tracked.Bets.Where(b => b.Resolved).OrderByDescending(b => b.TargetOpenTime).FirstOrDefault();
+                                var lastStake = lastSettled?.Size ?? tracked.InitialBetSize;
+                                var lastWon = lastSettled?.Outcome == "win";
 
-                            // Placement-time sizing: use IStrategyEvaluator which handles both
-                            // built-in code strategies and custom DAG strategies transparently.
-                            var strategyCtx = DagStakingStrategyAdapter.MakeStrategyFlowContext(
-                                tracked.TenantId, tracked.Id, tracked.Symbol, tracked.Interval);
-                            decimal nextStake;
-                            try
-                            {
-                                nextStake = await _strategyEvaluator.NextStakeAsync(
-                                    tracked.StrategyId,
-                                    new StrategyStep(lastStake, lastWon, tracked.InitialBetSize, tracked.CurrentBalance, entryInputs),
-                                    strategyCtx, ct);
-                            }
-                            catch (StrategyEvaluationException ex)
-                            {
-                                // A BROKEN strategy must stop the session, not silently no-bet forever.
-                                _logger.LogError(ex, "Paper session {SessionId}: strategy {Strategy} failed to evaluate — stopping session", tracked.Id, tracked.StrategyId);
-                                tracked.StoppedAt = DateTimeOffset.UtcNow;
-                                await _db.SaveChangesAsync(ct);
-                                _events.Publish(new PaperTradingEvent(PaperTradingEventKind.SessionStopped, tracked, null));
-                                await _notifier.NotifySessionErrorAsync(tracked.TenantId, tracked.Id, "paper", ex.Message, ct);
-                                return tracked;
-                            }
-
-                            if (nextStake > 0m)
-                            {
-                                // Escalation bust: if the sizing exceeds the bankroll end the session.
-                                if (nextStake > tracked.CurrentBalance)
+                                // Placement-time sizing: use IStrategyEvaluator which handles both
+                                // built-in code strategies and custom DAG strategies transparently.
+                                var strategyCtx = DagStakingStrategyAdapter.MakeStrategyFlowContext(
+                                    tracked.TenantId, tracked.Id, tracked.Symbol, tracked.Interval);
+                                decimal nextStake;
+                                try
                                 {
-                                    tracked.Bust = true;
+                                    nextStake = await _strategyEvaluator.NextStakeAsync(
+                                        tracked.StrategyId,
+                                        new StrategyStep(lastStake, lastWon, tracked.InitialBetSize, tracked.CurrentBalance, entryInputs),
+                                        strategyCtx, ct);
+                                }
+                                catch (StrategyEvaluationException ex)
+                                {
+                                    // A BROKEN strategy must stop the session, not silently no-bet forever.
+                                    _logger.LogError(ex, "Paper session {SessionId}: strategy {Strategy} failed to evaluate — stopping session", tracked.Id, tracked.StrategyId);
                                     tracked.StoppedAt = DateTimeOffset.UtcNow;
                                     await _db.SaveChangesAsync(ct);
-                                    _events.Publish(new PaperTradingEvent(PaperTradingEventKind.SessionBust, tracked, null));
-                                    await _notifier.NotifySessionBustAsync(tracked.TenantId, tracked.Id, "paper", tracked.CurrentBalance, ct);
+                                    _events.Publish(new PaperTradingEvent(PaperTradingEventKind.SessionStopped, tracked, null));
+                                    await _notifier.NotifySessionErrorAsync(tracked.TenantId, tracked.Id, "paper", ex.Message, ct);
+                                    return tracked;
+                                }
+
+                                if (nextStake > 0m)
+                                {
+                                    // Escalation bust: if the sizing exceeds the bankroll end the session.
+                                    if (nextStake > tracked.CurrentBalance)
+                                    {
+                                        tracked.Bust = true;
+                                        tracked.StoppedAt = DateTimeOffset.UtcNow;
+                                        await _db.SaveChangesAsync(ct);
+                                        _events.Publish(new PaperTradingEvent(PaperTradingEventKind.SessionBust, tracked, null));
+                                        await _notifier.NotifySessionBustAsync(tracked.TenantId, tracked.Id, "paper", tracked.CurrentBalance, ct);
+                                    }
+                                    else
+                                    {
+                                        var entryPrice = side == "UP" ? entryQuote.YesPrice : entryQuote.NoPrice;
+                                        var shares = StakingEngine.Shares(nextStake, entryPrice);
+                                        tracked.CurrentBetSize = nextStake;
+
+                                        var notes = JsonSerializer.Serialize(new
+                                        {
+                                            iterationTag = "iter-3",
+                                            action = "placed",
+                                            rawPUp = pred.DirectionUpProbability,
+                                            calibratedPUp,
+                                            p50 = pred.ClosePercentile50,
+                                            anchor = pred.AnchorClose,
+                                            decidedSide = side,
+                                            entryPrice,
+                                            synthetic = entryQuote.Synthetic
+                                        });
+                                        var bet = new PaperBet
+                                        {
+                                            Id = Guid.NewGuid(),
+                                            TenantId = tracked.TenantId,
+                                            SessionId = tracked.Id,
+                                            TargetOpenTime = currentCandleOpenMs,
+                                            Side = side,
+                                            PredictedProbUp = pred.DirectionUpProbability,
+                                            AnchorClose = pred.AnchorClose,
+                                            Size = nextStake,
+                                            BalanceBefore = tracked.CurrentBalance,
+                                            NotesJson = notes,
+                                            EntryPrice = entryPrice,
+                                            Shares = shares,
+                                            Synthetic = entryQuote.Synthetic,
+                                            MarketExternalId = entryQuote.MarketExternalId,
+                                            // Logical entry time — the candle's open. Survives a delayed
+                                            // processor tick so the ledger always reads as round boundaries.
+                                            PlacedAt = DateTimeOffset.FromUnixTimeMilliseconds(currentCandleOpenMs)
+                                        };
+                                        // Add via the DbSet, NOT via the navigation. The navigation path
+                                        // (`tracked.Bets.Add(bet)`) was historically chosen to dedupe with
+                                        // explicit `_db.PaperBets.Add(bet)`, but on its own it triggers EF
+                                        // Core's collection-change detection in a way that issues a spurious
+                                        // UPDATE on the parent session — observed as a persistent
+                                        // DbUpdateConcurrencyException ("expected 1, got 0") that stalled the
+                                        // session for ~90 min. DbSet.Add inserts the new row cleanly; EF's
+                                        // relationship fixup still appends it to `tracked.Bets` exactly once,
+                                        // so the SSE payload stays correct without manual duplication.
+                                        _db.PaperBets.Add(bet);
+                                        try
+                                        {
+                                            await _db.SaveChangesAsync(ct);
+                                            _events.Publish(new PaperTradingEvent(PaperTradingEventKind.BetPlaced, tracked, bet));
+                                        }
+                                        catch (DbUpdateConcurrencyException ex)
+                                        {
+                                            // Optimistic-concurrency loss (a parallel scope mutated the session
+                                            // between load and save — e.g. an HTTP DELETE or another tick).
+                                            // The bet didn't insert; detach so the next tick reloads fresh and
+                                            // tries again on the next candle. WITHOUT this catch, the exception
+                                            // bubbles to the processor loop and the whole tick gets dropped,
+                                            // which historically silenced the session for 90+ minutes after a
+                                            // restart-time race condition.
+                                            _db.Entry(bet).State = EntityState.Detached;
+                                            _logger.LogWarning(ex, "Bet placement concurrency loss for session {SessionId} candle {Tgt} — retrying next tick", tracked.Id, currentCandleOpenMs);
+                                        }
+                                        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) == true)
+                                        {
+                                            // Two processor ticks racing for the same candle slot — partial
+                                            // unique index resolves the collision; we just discard the second.
+                                            _db.Entry(bet).State = EntityState.Detached;
+                                            _logger.LogDebug(ex, "Bet placement race for session {SessionId} candle {Tgt}", tracked.Id, currentCandleOpenMs);
+                                        }
+                                    }
                                 }
                                 else
                                 {
-                                    var entryPrice = side == "UP" ? entryQuote.YesPrice : entryQuote.NoPrice;
-                                    var shares = StakingEngine.Shares(nextStake, entryPrice);
-                                    tracked.CurrentBetSize = nextStake;
-
-                                    var notes = JsonSerializer.Serialize(new
-                                    {
-                                        iterationTag = "iter-3",
-                                        action = "placed",
-                                        rawPUp = pred.DirectionUpProbability,
-                                        calibratedPUp,
-                                        p50 = pred.ClosePercentile50,
-                                        anchor = pred.AnchorClose,
-                                        decidedSide = side,
-                                        entryPrice,
-                                        synthetic = entryQuote.Synthetic
-                                    });
-                                    var bet = new PaperBet
-                                    {
-                                        Id = Guid.NewGuid(),
-                                        TenantId = tracked.TenantId,
-                                        SessionId = tracked.Id,
-                                        TargetOpenTime = currentCandleOpenMs,
-                                        Side = side,
-                                        PredictedProbUp = pred.DirectionUpProbability,
-                                        AnchorClose = pred.AnchorClose,
-                                        Size = nextStake,
-                                        BalanceBefore = tracked.CurrentBalance,
-                                        NotesJson = notes,
-                                        EntryPrice = entryPrice,
-                                        Shares = shares,
-                                        Synthetic = entryQuote.Synthetic,
-                                        MarketExternalId = entryQuote.MarketExternalId,
-                                        // Logical entry time — the candle's open. Survives a delayed
-                                        // processor tick so the ledger always reads as round boundaries.
-                                        PlacedAt = DateTimeOffset.FromUnixTimeMilliseconds(currentCandleOpenMs)
-                                    };
-                                    // Add via the DbSet, NOT via the navigation. The navigation path
-                                    // (`tracked.Bets.Add(bet)`) was historically chosen to dedupe with
-                                    // explicit `_db.PaperBets.Add(bet)`, but on its own it triggers EF
-                                    // Core's collection-change detection in a way that issues a spurious
-                                    // UPDATE on the parent session — observed as a persistent
-                                    // DbUpdateConcurrencyException ("expected 1, got 0") that stalled the
-                                    // session for ~90 min. DbSet.Add inserts the new row cleanly; EF's
-                                    // relationship fixup still appends it to `tracked.Bets` exactly once,
-                                    // so the SSE payload stays correct without manual duplication.
-                                    _db.PaperBets.Add(bet);
-                                    try
-                                    {
-                                        await _db.SaveChangesAsync(ct);
-                                        _events.Publish(new PaperTradingEvent(PaperTradingEventKind.BetPlaced, tracked, bet));
-                                    }
-                                    catch (DbUpdateConcurrencyException ex)
-                                    {
-                                        // Optimistic-concurrency loss (a parallel scope mutated the session
-                                        // between load and save — e.g. an HTTP DELETE or another tick).
-                                        // The bet didn't insert; detach so the next tick reloads fresh and
-                                        // tries again on the next candle. WITHOUT this catch, the exception
-                                        // bubbles to the processor loop and the whole tick gets dropped,
-                                        // which historically silenced the session for 90+ minutes after a
-                                        // restart-time race condition.
-                                        _db.Entry(bet).State = EntityState.Detached;
-                                        _logger.LogWarning(ex, "Bet placement concurrency loss for session {SessionId} candle {Tgt} — retrying next tick", tracked.Id, currentCandleOpenMs);
-                                    }
-                                    catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) == true)
-                                    {
-                                        // Two processor ticks racing for the same candle slot — partial
-                                        // unique index resolves the collision; we just discard the second.
-                                        _db.Entry(bet).State = EntityState.Detached;
-                                        _logger.LogDebug(ex, "Bet placement race for session {SessionId} candle {Tgt}", tracked.Id, currentCandleOpenMs);
-                                    }
+                                    _logger.LogDebug("Session {SessionId}: strategy returned 0 stake — skipping candle {Tgt}", tracked.Id, currentCandleOpenMs);
                                 }
-                            }
-                            else
-                            {
-                                _logger.LogDebug("Session {SessionId}: strategy returned 0 stake — skipping candle {Tgt}", tracked.Id, currentCandleOpenMs);
-                            }
-                        } // end else (not gated out)
+                            } // end else (not gated out)
                         } // end else (not 5m disabled)
                     } // end if pred is not null
                 } // end if !alreadyOnThisCandle

@@ -38,7 +38,7 @@ public class LiveTradingArmTests
     [Fact]
     public void Confirm_with_correct_code_returns_true_and_arms()
     {
-        var arm  = Build();
+        var arm = Build();
         var code = arm.RequestCode(TenantA);
 
         var result = arm.Confirm(TenantA, code);
@@ -50,7 +50,7 @@ public class LiveTradingArmTests
     [Fact]
     public void Confirm_with_correct_code_removes_pending_code()
     {
-        var arm  = Build();
+        var arm = Build();
         var code = arm.RequestCode(TenantA);
 
         arm.Confirm(TenantA, code);
@@ -64,7 +64,7 @@ public class LiveTradingArmTests
     [Fact]
     public void Confirm_with_wrong_code_returns_false_and_does_not_arm()
     {
-        var arm  = Build();
+        var arm = Build();
         arm.RequestCode(TenantA);
 
         var result = arm.Confirm(TenantA, "000000");
@@ -89,7 +89,7 @@ public class LiveTradingArmTests
     [Fact]
     public void Disarm_clears_armed_state()
     {
-        var arm  = Build();
+        var arm = Build();
         var code = arm.RequestCode(TenantA);
         arm.Confirm(TenantA, code);
         arm.IsArmed(TenantA).Should().BeTrue("pre-condition: was armed");
@@ -102,7 +102,7 @@ public class LiveTradingArmTests
     [Fact]
     public void Disarm_clears_pending_code_so_subsequent_confirm_fails()
     {
-        var arm  = Build();
+        var arm = Build();
         var code = arm.RequestCode(TenantA);
 
         arm.Disarm(TenantA); // disarm before confirming
@@ -127,7 +127,7 @@ public class LiveTradingArmTests
     [Fact]
     public void Re_arm_cycle_after_disarm_works_correctly()
     {
-        var arm  = Build();
+        var arm = Build();
 
         var code1 = arm.RequestCode(TenantA);
         arm.Confirm(TenantA, code1);
@@ -146,7 +146,7 @@ public class LiveTradingArmTests
     [Fact]
     public void Arming_tenant_A_does_not_arm_tenant_B()
     {
-        var arm   = Build();
+        var arm = Build();
         var codeA = arm.RequestCode(TenantA);
         arm.Confirm(TenantA, codeA);
 
@@ -157,7 +157,7 @@ public class LiveTradingArmTests
     [Fact]
     public void Code_for_tenant_A_does_not_arm_tenant_B()
     {
-        var arm   = Build();
+        var arm = Build();
         var codeA = arm.RequestCode(TenantA);
         arm.RequestCode(TenantB); // B has its own pending code
 
@@ -171,7 +171,7 @@ public class LiveTradingArmTests
     [Fact]
     public void Disarming_tenant_A_does_not_affect_tenant_B()
     {
-        var arm   = Build();
+        var arm = Build();
         var codeA = arm.RequestCode(TenantA);
         arm.Confirm(TenantA, codeA);
         var codeB = arm.RequestCode(TenantB);
@@ -188,7 +188,7 @@ public class LiveTradingArmTests
     [Fact]
     public void RequestCode_returns_six_digit_numeric_string()
     {
-        var arm  = Build();
+        var arm = Build();
         var code = arm.RequestCode(TenantA);
 
         code.Should().MatchRegex(@"^\d{6}$", "code must be a 6-digit decimal string");

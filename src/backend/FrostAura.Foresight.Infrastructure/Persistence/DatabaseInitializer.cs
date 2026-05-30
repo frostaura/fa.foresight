@@ -1046,18 +1046,18 @@ public static class DatabaseInitializer
         var exists = await db.PlatformConnections.AnyAsync(c => c.TenantId == defaultTenant.Id, ct);
         if (exists) return;
 
-        var key       = config.GetSection("KeyVault")["PrivateKey"]?.Trim() ?? "";
+        var key = config.GetSection("KeyVault")["PrivateKey"]?.Trim() ?? "";
         var sigTypeRaw = config.GetSection("KeyVault")["SignatureType"];
-        var sigType   = int.TryParse(sigTypeRaw, out var st) ? st : 0;
-        var funder    = config.GetSection("KeyVault")["Funder"];
-        var clobUrl   = config.GetSection("Polymarket")["ClobBaseUrl"]  ?? "https://clob.polymarket.com";
-        var gammaUrl  = config.GetSection("Polymarket")["GammaBaseUrl"] ?? "https://gamma-api.polymarket.com";
-        var chainRaw  = config.GetSection("Polymarket")["ChainId"];
-        var chainId   = int.TryParse(chainRaw, out var ci) ? ci : 137;
+        var sigType = int.TryParse(sigTypeRaw, out var st) ? st : 0;
+        var funder = config.GetSection("KeyVault")["Funder"];
+        var clobUrl = config.GetSection("Polymarket")["ClobBaseUrl"] ?? "https://clob.polymarket.com";
+        var gammaUrl = config.GetSection("Polymarket")["GammaBaseUrl"] ?? "https://gamma-api.polymarket.com";
+        var chainRaw = config.GetSection("Polymarket")["ChainId"];
+        var chainId = int.TryParse(chainRaw, out var ci) ? ci : 137;
         var liveTrading = string.Equals(config.GetSection("Polymarket")["LiveTrading"], "true", StringComparison.OrdinalIgnoreCase);
         var effPriceRaw = config.GetSection("Polymarket")["EffectivePrice"];
-        var effPrice    = decimal.TryParse(effPriceRaw, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var ep) && ep > 0m && ep < 1m ? ep : 0.55m;
-        var rpcUrl      = config.GetSection("Polymarket")["RpcUrl"] ?? "https://polygon-rpc.com";
+        var effPrice = decimal.TryParse(effPriceRaw, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var ep) && ep > 0m && ep < 1m ? ep : 0.55m;
+        var rpcUrl = config.GetSection("Polymarket")["RpcUrl"] ?? "https://polygon-rpc.com";
 
         var hasKey = !string.IsNullOrWhiteSpace(key);
         string? walletAddress = null;
@@ -1077,24 +1077,24 @@ public static class DatabaseInitializer
         var now = DateTimeOffset.UtcNow;
         var connection = new PlatformConnection
         {
-            Id                  = Guid.NewGuid(),
-            TenantId            = defaultTenant.Id,
-            ConnectorId         = "polymarket",
-            IsDefault           = true,
+            Id = Guid.NewGuid(),
+            TenantId = defaultTenant.Id,
+            ConnectorId = "polymarket",
+            IsDefault = true,
             PrivateKeyEncrypted = hasKey ? protector.Protect(key) : null,
-            ApiSecretEncrypted  = null,
-            WalletAddress       = walletAddress,
-            SignatureType       = sigType,
-            Funder              = string.IsNullOrWhiteSpace(funder) ? null : funder,
-            ClobBaseUrl         = clobUrl,
-            GammaBaseUrl        = gammaUrl,
-            ChainId             = chainId,
-            LiveTrading         = liveTrading,
-            MaxTradeUsd         = 0m,
-            EffectivePrice      = effPrice,
-            RpcUrl              = rpcUrl,
-            CreatedAt           = now,
-            UpdatedAt           = now
+            ApiSecretEncrypted = null,
+            WalletAddress = walletAddress,
+            SignatureType = sigType,
+            Funder = string.IsNullOrWhiteSpace(funder) ? null : funder,
+            ClobBaseUrl = clobUrl,
+            GammaBaseUrl = gammaUrl,
+            ChainId = chainId,
+            LiveTrading = liveTrading,
+            MaxTradeUsd = 0m,
+            EffectivePrice = effPrice,
+            RpcUrl = rpcUrl,
+            CreatedAt = now,
+            UpdatedAt = now
         };
         db.PlatformConnections.Add(connection);
         await db.SaveChangesAsync(ct);

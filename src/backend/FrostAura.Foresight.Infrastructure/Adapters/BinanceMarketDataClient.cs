@@ -60,12 +60,12 @@ public sealed class BinanceMarketDataClient
         foreach (var row in arr.EnumerateArray())
         {
             list.Add(new Candle(
-                OpenTime:  row[0].GetInt64(),
-                Open:      decimal.Parse(row[1].GetString()!, CultureInfo.InvariantCulture),
-                High:      decimal.Parse(row[2].GetString()!, CultureInfo.InvariantCulture),
-                Low:       decimal.Parse(row[3].GetString()!, CultureInfo.InvariantCulture),
-                Close:     decimal.Parse(row[4].GetString()!, CultureInfo.InvariantCulture),
-                Volume:    decimal.Parse(row[5].GetString()!, CultureInfo.InvariantCulture),
+                OpenTime: row[0].GetInt64(),
+                Open: decimal.Parse(row[1].GetString()!, CultureInfo.InvariantCulture),
+                High: decimal.Parse(row[2].GetString()!, CultureInfo.InvariantCulture),
+                Low: decimal.Parse(row[3].GetString()!, CultureInfo.InvariantCulture),
+                Close: decimal.Parse(row[4].GetString()!, CultureInfo.InvariantCulture),
+                Volume: decimal.Parse(row[5].GetString()!, CultureInfo.InvariantCulture),
                 CloseTime: row[6].GetInt64()));
         }
         return list;
@@ -239,7 +239,7 @@ public sealed class BinanceMarketDataClient
         var r = doc.RootElement;
         return new FuturesPremiumIndex(
             LastFundingRate: decimal.Parse(r.GetProperty("lastFundingRate").GetString()!, CultureInfo.InvariantCulture),
-            MarkPrice:       decimal.Parse(r.GetProperty("markPrice").GetString()!, CultureInfo.InvariantCulture),
+            MarkPrice: decimal.Parse(r.GetProperty("markPrice").GetString()!, CultureInfo.InvariantCulture),
             NextFundingTime: r.GetProperty("nextFundingTime").GetInt64());
     }
 
@@ -262,8 +262,8 @@ public sealed class BinanceMarketDataClient
         if (pts.Count == 0) return new OpenInterestDelta(0, 0, 0);
         var latest = pts[^1];
         // limit=13 → ~65 min of 5m bins. delta5m = vs one bin back; delta1h = vs ~12 bins back.
-        var d5  = pts.Count >= 2  && pts[^2]  != 0 ? (latest - pts[^2])  / pts[^2]  * 100m : 0m;
-        var d60 = pts.Count >= 13 && pts[0]   != 0 ? (latest - pts[0])   / pts[0]   * 100m : 0m;
+        var d5 = pts.Count >= 2 && pts[^2] != 0 ? (latest - pts[^2]) / pts[^2] * 100m : 0m;
+        var d60 = pts.Count >= 13 && pts[0] != 0 ? (latest - pts[0]) / pts[0] * 100m : 0m;
         return new OpenInterestDelta(latest, Math.Round(d5, 3), Math.Round(d60, 3));
     }
 
@@ -281,8 +281,8 @@ public sealed class BinanceMarketDataClient
         foreach (var r in arr)
         {
             return new TopLongShortRatio(
-                Ratio:           decimal.Parse(r.GetProperty("longShortRatio").GetString()!, CultureInfo.InvariantCulture),
-                LongAccountPct:  decimal.Parse(r.GetProperty("longAccount").GetString()!, CultureInfo.InvariantCulture) * 100m,
+                Ratio: decimal.Parse(r.GetProperty("longShortRatio").GetString()!, CultureInfo.InvariantCulture),
+                LongAccountPct: decimal.Parse(r.GetProperty("longAccount").GetString()!, CultureInfo.InvariantCulture) * 100m,
                 ShortAccountPct: decimal.Parse(r.GetProperty("shortAccount").GetString()!, CultureInfo.InvariantCulture) * 100m);
         }
         return null;

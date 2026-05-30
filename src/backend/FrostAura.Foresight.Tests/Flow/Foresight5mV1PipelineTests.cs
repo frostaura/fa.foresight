@@ -379,8 +379,8 @@ public sealed class Foresight5mV1PipelineTests
         // Scale off-tf counts to cover the same wall-clock span (+ buffer for warmup/embargo).
         var data = new Dictionary<string, List<HistoricalCandle>>
         {
-            ["1m"]  = Walk("1m",  fiveMCount * 5 + 400, baseMs, rng),
-            ["5m"]  = Walk("5m",  fiveMCount,           baseMs, rng),
+            ["1m"] = Walk("1m", fiveMCount * 5 + 400, baseMs, rng),
+            ["5m"] = Walk("5m", fiveMCount, baseMs, rng),
             ["15m"] = Walk("15m", fiveMCount / 3 + 100, baseMs, rng),
         };
         return new InMemoryCandleProvider(data);
@@ -400,8 +400,8 @@ public sealed class Foresight5mV1PipelineTests
         var rng = new Random(5);
         var data = new Dictionary<string, List<HistoricalCandle>>
         {
-            ["1m"]  = Walk("1m", 3_200, baseMs, rng),
-            ["5m"]  = GapDownBody("5m", 600, baseMs),
+            ["1m"] = Walk("1m", 3_200, baseMs, rng),
+            ["5m"] = GapDownBody("5m", 600, baseMs),
             ["15m"] = Walk("15m", 260, baseMs, rng),
         };
         return new InMemoryCandleProvider(data);
@@ -421,9 +421,14 @@ public sealed class Foresight5mV1PipelineTests
             var close = k == 0 ? prevClose : open - 12m;
             candles.Add(new HistoricalCandle
             {
-                Symbol = Symbol, Interval = tf, OpenTime = baseMs + (long)k * ms,
-                Open = open, High = Math.Max(open, close) + 1m, Low = Math.Min(open, close) - 1m,
-                Close = close, Volume = 10m,
+                Symbol = Symbol,
+                Interval = tf,
+                OpenTime = baseMs + (long)k * ms,
+                Open = open,
+                High = Math.Max(open, close) + 1m,
+                Low = Math.Min(open, close) - 1m,
+                Close = close,
+                Volume = 10m,
             });
             prevClose = close;
         }
@@ -451,8 +456,14 @@ public sealed class Foresight5mV1PipelineTests
             var vol = 5m + (decimal)(rng.NextDouble() * 10);
             candles.Add(new HistoricalCandle
             {
-                Symbol = Symbol, Interval = tf, OpenTime = openTime,
-                Open = open, High = high, Low = low, Close = close, Volume = vol,
+                Symbol = Symbol,
+                Interval = tf,
+                OpenTime = openTime,
+                Open = open,
+                High = high,
+                Low = low,
+                Close = close,
+                Volume = vol,
             });
         }
         return candles;
@@ -470,9 +481,12 @@ public sealed class Foresight5mV1PipelineTests
             var tradeCount = 50 + rng.Next(250);
             bars.Add(new MicrostructureBar
             {
-                Symbol = Symbol, Interval = "5m", OpenTime = c.OpenTime,
+                Symbol = Symbol,
+                Interval = "5m",
+                OpenTime = c.OpenTime,
                 TradeCount = tradeCount,
-                BuyVolume = buyVol, SellVolume = sellVol,
+                BuyVolume = buyVol,
+                SellVolume = sellVol,
                 BuyTradeCount = rng.Next(tradeCount + 1),
                 LargeBuyVolume = buyVol * (decimal)rng.NextDouble(),
                 LargeSellVolume = sellVol * (decimal)rng.NextDouble(),

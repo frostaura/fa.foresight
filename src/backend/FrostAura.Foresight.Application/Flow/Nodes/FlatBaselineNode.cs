@@ -27,9 +27,9 @@ public sealed class FlatBaselineNode : IFlowNode
     {
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["pUp"]        = 0.50m,
+            ["pUp"] = 0.50m,
             ["confidence"] = 0.50m,
-            ["predicted"]  = (decimal?)null,
+            ["predicted"] = (decimal?)null,
         });
     }
 }

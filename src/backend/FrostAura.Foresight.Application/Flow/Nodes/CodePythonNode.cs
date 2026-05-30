@@ -47,9 +47,9 @@ public sealed class CodePythonNode : IFlowNode, IDynamicSpecNode
         Outputs: Array.Empty<PortDef>(),
         Params: new Dictionary<string, ParamDef>
         {
-            ["code"]  = new("string",  true,  null, "Python source. Must define run(inputs, params) → dict."),
-            ["ports"] = new("object",  true,  null, "Port schema: {inputs:{name:tag}, outputs:{name:tag}}"),
-            ["seed"]  = new("long",    false, 0L,   "RNG seed for reproducibility."),
+            ["code"] = new("string", true, null, "Python source. Must define run(inputs, params) → dict."),
+            ["ports"] = new("object", true, null, "Port schema: {inputs:{name:tag}, outputs:{name:tag}}"),
+            ["seed"] = new("long", false, 0L, "RNG seed for reproducibility."),
         },
         AcceptsAdditionalInputs: false,
         RequiresLiveData: false);
@@ -69,7 +69,7 @@ public sealed class CodePythonNode : IFlowNode, IDynamicSpecNode
         catch { return Spec; }
         if (schema is null) return Spec;
 
-        var inputs  = (schema.Inputs  ?? new Dictionary<string, string>())
+        var inputs = (schema.Inputs ?? new Dictionary<string, string>())
             .Select(kv => new PortDef(kv.Key, kv.Value, Required: false))
             .ToArray();
         var outputs = (schema.Outputs ?? new Dictionary<string, string>())
@@ -88,7 +88,7 @@ public sealed class CodePythonNode : IFlowNode, IDynamicSpecNode
     // Deserialization helper for the ports param.
     private sealed class PortSchema
     {
-        public Dictionary<string, string>? Inputs  { get; init; }
+        public Dictionary<string, string>? Inputs { get; init; }
         public Dictionary<string, string>? Outputs { get; init; }
     }
 
@@ -102,8 +102,8 @@ public sealed class CodePythonNode : IFlowNode, IDynamicSpecNode
         FlowContext ctx,
         CancellationToken ct)
     {
-        var code   = NodeParams.GetString(nodeParams, "code", string.Empty);
-        var seed   = GetLong(nodeParams, "seed", 0L);
+        var code = NodeParams.GetString(nodeParams, "code", string.Empty);
+        var seed = GetLong(nodeParams, "seed", 0L);
         var nodeId = GetNodeId(ctx);
 
         // Read the output schema from params so we know what tags to send.
@@ -132,13 +132,13 @@ public sealed class CodePythonNode : IFlowNode, IDynamicSpecNode
 
         var req = new SandboxRequest
         {
-            Mode         = mode,
-            NodeId       = nodeId,
-            Code         = code,
-            Seed         = seed,
-            Params       = forwardedParams,
+            Mode = mode,
+            NodeId = nodeId,
+            Code = code,
+            Seed = seed,
+            Params = forwardedParams,
             SeriesLength = seriesLength,
-            Inputs       = sandboxInputs,
+            Inputs = sandboxInputs,
             OutputSchema = outputSchema,
         };
 
@@ -180,11 +180,11 @@ public sealed class CodePythonNode : IFlowNode, IDynamicSpecNode
         {
             var cv = new SandboxCandlesValue(
                 OpenTime: candles.Select(c => c.OpenTime).ToArray(),
-                Open:     candles.Select(c => (double)c.Open).ToArray(),
-                High:     candles.Select(c => (double)c.High).ToArray(),
-                Low:      candles.Select(c => (double)c.Low).ToArray(),
-                Close:    candles.Select(c => (double)c.Close).ToArray(),
-                Volume:   candles.Select(c => (double)c.Volume).ToArray());
+                Open: candles.Select(c => (double)c.Open).ToArray(),
+                High: candles.Select(c => (double)c.High).ToArray(),
+                Low: candles.Select(c => (double)c.Low).ToArray(),
+                Close: candles.Select(c => (double)c.Close).ToArray(),
+                Volume: candles.Select(c => (double)c.Volume).ToArray());
             return new SandboxPortValue("candles", cv);
         }
 
@@ -246,25 +246,25 @@ public sealed class CodePythonNode : IFlowNode, IDynamicSpecNode
             {
                 JsonElement je => je.ValueKind == JsonValueKind.Number
                     ? Quantize(je.GetDouble())
-                    : je.ValueKind == JsonValueKind.True  ? (object?)true
+                    : je.ValueKind == JsonValueKind.True ? (object?)true
                     : je.ValueKind == JsonValueKind.False ? false
                     : je.GetString(),
-                double d  => Quantize(d),
-                float  f  => Quantize(f),
-                bool   b  => b,
+                double d => Quantize(d),
+                float f => Quantize(f),
+                bool b => b,
                 string st => st,
-                _         => pv.Value,
+                _ => pv.Value,
             },
             "series" => pv.Value switch
             {
                 JsonElement je when je.ValueKind == JsonValueKind.Array =>
                     je.EnumerateArray().Select(e => Quantize(e.GetDouble())).ToArray(),
                 double[] da => da.Select(Quantize).ToArray(),
-                _           => pv.Value,
+                _ => pv.Value,
             },
             "candles" => UnmarshalCandles(pv.Value),
-            "matrix"  => UnmarshalMatrix(pv.Value),
-            _         => pv.Value,
+            "matrix" => UnmarshalMatrix(pv.Value),
+            _ => pv.Value,
         };
     }
 
@@ -283,14 +283,14 @@ public sealed class CodePythonNode : IFlowNode, IDynamicSpecNode
         for (var i = 0; i < n; i++)
             arr[i] = new HistoricalCandle
             {
-                Symbol   = "sandbox",
+                Symbol = "sandbox",
                 Interval = "sandbox",
                 OpenTime = cv.OpenTime[i],
-                Open     = (decimal)cv.Open[i],
-                High     = (decimal)cv.High[i],
-                Low      = (decimal)cv.Low[i],
-                Close    = (decimal)cv.Close[i],
-                Volume   = (decimal)cv.Volume[i],
+                Open = (decimal)cv.Open[i],
+                High = (decimal)cv.High[i],
+                Low = (decimal)cv.Low[i],
+                Close = (decimal)cv.Close[i],
+                Volume = (decimal)cv.Volume[i],
             };
         return arr;
     }
@@ -309,8 +309,8 @@ public sealed class CodePythonNode : IFlowNode, IDynamicSpecNode
         var colCount = mv.Columns.Length;
         var mat = new double[rowCount, colCount];
         for (var r = 0; r < rowCount; r++)
-        for (var c = 0; c < Math.Min(colCount, mv.Rows[r].Length); c++)
-            mat[r, c] = mv.Rows[r][c];
+            for (var c = 0; c < Math.Min(colCount, mv.Rows[r].Length); c++)
+                mat[r, c] = mv.Rows[r][c];
         return new FeatureMatrix(mv.Columns, mat);
     }
 
@@ -352,11 +352,11 @@ public sealed class CodePythonNode : IFlowNode, IDynamicSpecNode
             dict[prop.Name] = prop.Value.ValueKind switch
             {
                 JsonValueKind.Number => prop.Value.TryGetInt64(out var l) ? (object?)l : prop.Value.GetDouble(),
-                JsonValueKind.True   => true,
-                JsonValueKind.False  => false,
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
                 JsonValueKind.String => prop.Value.GetString(),
-                JsonValueKind.Null   => null,
-                _                    => prop.Value.GetRawText(),
+                JsonValueKind.Null => null,
+                _ => prop.Value.GetRawText(),
             };
         }
         return dict;

@@ -16,11 +16,11 @@ public static class BetCardFormatter
         decimal balanceAfter, decimal initialBalance,
         int betsWon, int betsPlaced)
     {
-        var net          = payout - stake;
-        var overall      = balanceAfter - initialBalance;
-        var overallPct   = initialBalance > 0m ? overall / initialBalance * 100m : 0m;
-        var hitRate      = betsPlaced > 0 ? (decimal)betsWon / betsPlaced * 100m : 0m;
-        var time         = DateTimeOffset.FromUnixTimeMilliseconds(targetOpenTimeMs).ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
+        var net = payout - stake;
+        var overall = balanceAfter - initialBalance;
+        var overallPct = initialBalance > 0m ? overall / initialBalance * 100m : 0m;
+        var hitRate = betsPlaced > 0 ? (decimal)betsWon / betsPlaced * 100m : 0m;
+        var time = DateTimeOffset.FromUnixTimeMilliseconds(targetOpenTimeMs).ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
         var overallArrow = overall >= 0m ? "▲" : "▼";
 
         var title = $"{(won ? "🟢 WIN" : "🔴 LOSS")} · {ShortSymbol(symbol)} {interval} · {time}";
@@ -35,7 +35,7 @@ public static class BetCardFormatter
             Row("Balance",  $"{Money(balanceAfter)}  {overallArrow} {Signed(overall)} ({SignedPct(overallPct)})"),
         };
         var width = lines.Max(l => l.Length) + 3; // common width + 3-space right gutter (clears the copy icon)
-        var body  = string.Join("\n", lines.Select(l => l.PadRight(width)));
+        var body = string.Join("\n", lines.Select(l => l.PadRight(width)));
         return (title, body);
     }
 

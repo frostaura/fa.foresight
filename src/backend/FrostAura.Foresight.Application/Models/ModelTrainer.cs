@@ -76,7 +76,7 @@ public sealed class ModelTrainer
         // also serves off-tf candles from the pre-fetched dict (clamped to the current boundary).
         var X = new List<double[]>();
         var yClose = new List<double>();    // for LR — predict the target candle (i+2) close
-        var yDir   = new List<int>();       // for LogReg — direction = target candle's own body (close > open)
+        var yDir = new List<int>();       // for LogReg — direction = target candle's own body (close > open)
         var refOpens = new List<double>();  // open(i+horizon) per row — the target candle's OPEN reference
         var columns = new List<string>();
 
@@ -143,9 +143,9 @@ public sealed class ModelTrainer
         const int targetFolds = 5;
         var actualFolds = Math.Min(targetFolds, Math.Max(2, X.Count / 60));
         var bucketSize = X.Count / (actualFolds + 1);
-        var lrFoldAccs   = new List<double>(actualFolds);
+        var lrFoldAccs = new List<double>(actualFolds);
         var logrFoldAccs = new List<double>(actualFolds);
-        var gbtFoldAccs  = new List<double>(actualFolds);
+        var gbtFoldAccs = new List<double>(actualFolds);
         // LR predicts the target candle's CLOSE; its direction is derived by comparing that predicted
         // close against the target candle's OPEN — the same Polymarket close-vs-open reference the
         // LogReg/GBT label uses — so the two estimators' fold accuracies stay comparable.
@@ -159,18 +159,18 @@ public sealed class ModelTrainer
         for (var k = 1; k <= actualFolds; k++)
         {
             var trainEnd = bucketSize * k;
-            var valEnd   = Math.Min(bucketSize * (k + 1), X.Count);
+            var valEnd = Math.Min(bucketSize * (k + 1), X.Count);
 
-            var XtrainFold      = X.Take(trainEnd).ToArray();
-            var XvalFold        = X.Skip(trainEnd).Take(valEnd - trainEnd).ToArray();
+            var XtrainFold = X.Take(trainEnd).ToArray();
+            var XvalFold = X.Skip(trainEnd).Take(valEnd - trainEnd).ToArray();
             var yCloseTrainFold = yClose.Take(trainEnd).ToArray();
-            var yDirTrainFold   = yDir.Take(trainEnd).ToArray();
-            var yDirValFold     = yDir.Skip(trainEnd).Take(valEnd - trainEnd).ToArray();
-            var openValFold     = allOpensForLrAnchor.Skip(trainEnd).Take(valEnd - trainEnd).ToArray();
+            var yDirTrainFold = yDir.Take(trainEnd).ToArray();
+            var yDirValFold = yDir.Skip(trainEnd).Take(valEnd - trainEnd).ToArray();
+            var openValFold = allOpensForLrAnchor.Skip(trainEnd).Take(valEnd - trainEnd).ToArray();
 
-            var lrFold   = FitLinearRegression(XtrainFold, yCloseTrainFold);
+            var lrFold = FitLinearRegression(XtrainFold, yCloseTrainFold);
             var logrFold = FitLogisticRegression(XtrainFold, yDirTrainFold);
-            var gbtFold  = gbtParams is null ? null : GradientBoostedTrees.Fit(XtrainFold, yDirTrainFold, gbtParams);
+            var gbtFold = gbtParams is null ? null : GradientBoostedTrees.Fit(XtrainFold, yDirTrainFold, gbtParams);
 
             int lrHitsK = 0, logrHitsK = 0, gbtHitsK = 0;
             for (var v = 0; v < XvalFold.Length; v++)
@@ -187,21 +187,21 @@ public sealed class ModelTrainer
 
                 if (gbtFold is not null && (GradientBoostedTrees.PredictProba(gbtFold, row) >= 0.5 ? 1 : 0) == yDirValFold[v]) gbtHitsK++;
             }
-            lrFoldAccs.Add  (XvalFold.Length == 0 ? 0.0 : (double)lrHitsK   / XvalFold.Length);
+            lrFoldAccs.Add(XvalFold.Length == 0 ? 0.0 : (double)lrHitsK / XvalFold.Length);
             logrFoldAccs.Add(XvalFold.Length == 0 ? 0.0 : (double)logrHitsK / XvalFold.Length);
             if (gbtFold is not null) gbtFoldAccs.Add(XvalFold.Length == 0 ? 0.0 : (double)gbtHitsK / XvalFold.Length);
         }
 
-        var lrAcc   = lrFoldAccs.Average();
+        var lrAcc = lrFoldAccs.Average();
         var logrAcc = logrFoldAccs.Average();
-        var gbtAcc  = gbtFoldAccs.Count > 0 ? gbtFoldAccs.Average() : 0.0;
+        var gbtAcc = gbtFoldAccs.Count > 0 ? gbtFoldAccs.Average() : 0.0;
 
         // Final coefficients fit on the entire training window. The deployed model carries these,
         // not the per-fold coefficients — walk-forward validates the procedure's robustness; the
         // final model uses all the data.
-        var lr   = FitLinearRegression(X.ToArray(), yClose.ToArray());
+        var lr = FitLinearRegression(X.ToArray(), yClose.ToArray());
         var logr = FitLogisticRegression(X.ToArray(), yDir.ToArray());
-        var gbt  = gbtParams is null ? null : GradientBoostedTrees.Fit(X.ToArray(), yDir.ToArray(), gbtParams);
+        var gbt = gbtParams is null ? null : GradientBoostedTrees.Fit(X.ToArray(), yDir.ToArray(), gbtParams);
 
         var trainedState = JsonSerializer.Serialize(new
         {
@@ -213,12 +213,12 @@ public sealed class ModelTrainer
             {
                 folds = actualFolds,
                 bucketSize,
-                lrFoldAccs   = lrFoldAccs.Select(a => Math.Round(a, 4)).ToArray(),
+                lrFoldAccs = lrFoldAccs.Select(a => Math.Round(a, 4)).ToArray(),
                 logrFoldAccs = logrFoldAccs.Select(a => Math.Round(a, 4)).ToArray(),
-                gbtFoldAccs  = gbtFoldAccs.Select(a => Math.Round(a, 4)).ToArray(),
-                lrMean   = Math.Round(lrAcc, 4),
+                gbtFoldAccs = gbtFoldAccs.Select(a => Math.Round(a, 4)).ToArray(),
+                lrMean = Math.Round(lrAcc, 4),
                 logrMean = Math.Round(logrAcc, 4),
-                gbtMean  = Math.Round(gbtAcc, 4),
+                gbtMean = Math.Round(gbtAcc, 4),
             },
             modelLinearRegression = new
             {
@@ -255,15 +255,15 @@ public sealed class ModelTrainer
         if (node is null) return null;
         var p = node.Params;
         return new GbtParams(
-            NEstimators:    Flow.Nodes.NodeParams.GetInt(p, "n_estimators", 150),
-            MaxDepth:       Flow.Nodes.NodeParams.GetInt(p, "max_depth", 3),
-            LearningRate:   (double)Flow.Nodes.NodeParams.GetDecimal(p, "learning_rate", 0.04m),
+            NEstimators: Flow.Nodes.NodeParams.GetInt(p, "n_estimators", 150),
+            MaxDepth: Flow.Nodes.NodeParams.GetInt(p, "max_depth", 3),
+            LearningRate: (double)Flow.Nodes.NodeParams.GetDecimal(p, "learning_rate", 0.04m),
             MinSamplesLeaf: Flow.Nodes.NodeParams.GetInt(p, "min_samples_leaf", 200),
-            Subsample:      (double)Flow.Nodes.NodeParams.GetDecimal(p, "subsample", 0.7m),
-            ColSample:      (double)Flow.Nodes.NodeParams.GetDecimal(p, "colsample", 0.7m),
-            Lambda:         (double)Flow.Nodes.NodeParams.GetDecimal(p, "l2", 1.0m),
-            Gamma:          0.0,
-            Seed:           1);
+            Subsample: (double)Flow.Nodes.NodeParams.GetDecimal(p, "subsample", 0.7m),
+            ColSample: (double)Flow.Nodes.NodeParams.GetDecimal(p, "colsample", 0.7m),
+            Lambda: (double)Flow.Nodes.NodeParams.GetDecimal(p, "l2", 1.0m),
+            Gamma: 0.0,
+            Seed: 1);
     }
 
     /// <summary>
@@ -386,8 +386,8 @@ public sealed class ModelTrainer
 
     private static long IntervalMs(string interval) => interval switch
     {
-        "1m"  => 60_000L,
-        "5m"  => 300_000L,
+        "1m" => 60_000L,
+        "5m" => 300_000L,
         "15m" => 900_000L,
         _ => throw new ArgumentException($"Unsupported interval '{interval}'.", nameof(interval)),
     };

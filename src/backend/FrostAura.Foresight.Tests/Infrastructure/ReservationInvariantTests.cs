@@ -22,7 +22,7 @@ namespace FrostAura.Foresight.Tests.Infrastructure;
 /// </summary>
 public class ReservationInvariantTests
 {
-    private static readonly Guid TenantId  = Guid.NewGuid();
+    private static readonly Guid TenantId = Guid.NewGuid();
 
     // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -54,7 +54,7 @@ public class ReservationInvariantTests
 
         await SimulateStartAsync(ledger, initialBalance: 50m, sessionId);
 
-        var freeCallIndex  = ledger.CallOrder.IndexOf(nameof(IAccountLedger.GetFreeAsync));
+        var freeCallIndex = ledger.CallOrder.IndexOf(nameof(IAccountLedger.GetFreeAsync));
         var auditCallIndex = ledger.CallOrder.IndexOf(nameof(IAccountLedger.WriteReserveAuditAsync));
 
         freeCallIndex.Should().BeGreaterThanOrEqualTo(0, "GetFreeAsync must be called");
@@ -65,7 +65,7 @@ public class ReservationInvariantTests
     public async Task StartAsync_throws_InsufficientPusdException_when_balance_is_insufficient()
     {
         // walletPusd=100, otherActive=60 → free=40, but initialBalance=50 > 40.
-        var ledger    = new CapturingLedger(walletPusd: 100m, otherActiveBalance: 60m);
+        var ledger = new CapturingLedger(walletPusd: 100m, otherActiveBalance: 60m);
         var sessionId = Guid.NewGuid();
 
         var act = async () => await SimulateStartAsync(ledger, initialBalance: 50m, sessionId);
@@ -76,7 +76,7 @@ public class ReservationInvariantTests
     [Fact]
     public async Task StartAsync_does_not_write_audit_row_when_affordability_check_fails()
     {
-        var ledger    = new CapturingLedger(walletPusd: 30m, otherActiveBalance: 0m);
+        var ledger = new CapturingLedger(walletPusd: 30m, otherActiveBalance: 0m);
         var sessionId = Guid.NewGuid();
 
         try { await SimulateStartAsync(ledger, initialBalance: 50m, sessionId); }
@@ -90,7 +90,7 @@ public class ReservationInvariantTests
     [Fact]
     public async Task Exactly_one_WriteReserveAudit_call_per_session_start()
     {
-        var ledger    = new CapturingLedger(walletPusd: 200m, otherActiveBalance: 0m);
+        var ledger = new CapturingLedger(walletPusd: 200m, otherActiveBalance: 0m);
         var sessionId = Guid.NewGuid();
 
         await SimulateStartAsync(ledger, initialBalance: 100m, sessionId);
@@ -101,7 +101,7 @@ public class ReservationInvariantTests
     [Fact]
     public async Task WriteReserveAudit_uses_real_session_id_not_Guid_Empty()
     {
-        var ledger    = new CapturingLedger(walletPusd: 200m, otherActiveBalance: 0m);
+        var ledger = new CapturingLedger(walletPusd: 200m, otherActiveBalance: 0m);
         var sessionId = Guid.NewGuid();
 
         await SimulateStartAsync(ledger, initialBalance: 100m, sessionId);
@@ -114,7 +114,7 @@ public class ReservationInvariantTests
     [Fact]
     public async Task ReserveAsync_is_never_called_in_the_new_start_path()
     {
-        var ledger    = new CapturingLedger(walletPusd: 200m, otherActiveBalance: 0m);
+        var ledger = new CapturingLedger(walletPusd: 200m, otherActiveBalance: 0m);
         var sessionId = Guid.NewGuid();
 
         await SimulateStartAsync(ledger, initialBalance: 100m, sessionId);
@@ -129,7 +129,7 @@ public class ReservationInvariantTests
     public async Task Session_can_start_when_walletPusd_equals_initialBalance_plus_otherActive()
     {
         // walletPusd=200, otherActive=100 → free=100, initialBalance=100 → exactly affordable.
-        var ledger    = new CapturingLedger(walletPusd: 200m, otherActiveBalance: 100m);
+        var ledger = new CapturingLedger(walletPusd: 200m, otherActiveBalance: 100m);
         var sessionId = Guid.NewGuid();
 
         var act = async () => await SimulateStartAsync(ledger, initialBalance: 100m, sessionId);
@@ -141,7 +141,7 @@ public class ReservationInvariantTests
     public async Task Session_cannot_start_when_initialBalance_exceeds_free_by_one_cent()
     {
         // walletPusd=200, otherActive=100 → free=100, initialBalance=100.01 → not affordable.
-        var ledger    = new CapturingLedger(walletPusd: 200m, otherActiveBalance: 100m);
+        var ledger = new CapturingLedger(walletPusd: 200m, otherActiveBalance: 100m);
         var sessionId = Guid.NewGuid();
 
         var act = async () => await SimulateStartAsync(ledger, initialBalance: 100.01m, sessionId);
@@ -164,13 +164,13 @@ internal sealed class CapturingLedger : IAccountLedger
     private readonly decimal _walletPusd;
     private readonly decimal _otherActiveBalance;
 
-    public List<string>      CallOrder              { get; } = new();
-    public List<LedgerCall>  WriteReserveAuditCalls { get; } = new();
-    public List<LedgerCall>  ReserveAsyncCalls      { get; } = new();
+    public List<string> CallOrder { get; } = new();
+    public List<LedgerCall> WriteReserveAuditCalls { get; } = new();
+    public List<LedgerCall> ReserveAsyncCalls { get; } = new();
 
     public CapturingLedger(decimal walletPusd, decimal otherActiveBalance)
     {
-        _walletPusd         = walletPusd;
+        _walletPusd = walletPusd;
         _otherActiveBalance = otherActiveBalance;
     }
 

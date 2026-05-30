@@ -143,8 +143,8 @@ public sealed class TrainingDataHydrationTests
         var rng = new Random(seed);
         var data = new Dictionary<string, List<HistoricalCandle>>
         {
-            ["1m"]  = Walk("1m", 1_000 * 5 + 400, baseMs, rng),
-            ["5m"]  = Walk("5m", 1_000, baseMs, rng),
+            ["1m"] = Walk("1m", 1_000 * 5 + 400, baseMs, rng),
+            ["5m"] = Walk("5m", 1_000, baseMs, rng),
             ["15m"] = Walk("15m", 1_000 / 3 + 100, baseMs, rng),
         };
         return new SyntheticCandleProvider(data);
@@ -164,9 +164,14 @@ public sealed class TrainingDataHydrationTests
             close = up ? open * (1 + mag) : open * (1 - mag);
             candles.Add(new HistoricalCandle
             {
-                Symbol = Symbol, Interval = tf, OpenTime = openTime,
-                Open = open, High = Math.Max(open, close) * 1.0002m, Low = Math.Min(open, close) * 0.9998m,
-                Close = close, Volume = 5m + (decimal)(rng.NextDouble() * 10),
+                Symbol = Symbol,
+                Interval = tf,
+                OpenTime = openTime,
+                Open = open,
+                High = Math.Max(open, close) * 1.0002m,
+                Low = Math.Min(open, close) * 0.9998m,
+                Close = close,
+                Volume = 5m + (decimal)(rng.NextDouble() * 10),
             });
         }
         return candles;

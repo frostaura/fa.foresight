@@ -50,13 +50,31 @@ public static class ModelsEndpoints
                 decimal? avg = scores is { Count: > 0 } ? scores.Values.Average() : null;
                 return new
                 {
-                    m.Id, m.TenantId, m.Name, m.Description, m.Kind, m.SupportsBacktesting,
-                    m.IsBuiltIn, m.IsDefault, m.IsArchived, m.Definition, m.TrainedState,
-                    m.TrainingValidationAccuracy, m.BacktestAccuracy, m.LastTrainedAt,
-                    m.TrainStartMs, m.TrainEndMs, m.TrainSymbol, m.TrainInterval,
-                    m.TrainingStatus, m.TrainingStartedAt, m.TrainingError,
-                    m.SimpleDescription, m.TechnicalDescription,
-                    m.CreatedAt, m.UpdatedAt,
+                    m.Id,
+                    m.TenantId,
+                    m.Name,
+                    m.Description,
+                    m.Kind,
+                    m.SupportsBacktesting,
+                    m.IsBuiltIn,
+                    m.IsDefault,
+                    m.IsArchived,
+                    m.Definition,
+                    m.TrainedState,
+                    m.TrainingValidationAccuracy,
+                    m.BacktestAccuracy,
+                    m.LastTrainedAt,
+                    m.TrainStartMs,
+                    m.TrainEndMs,
+                    m.TrainSymbol,
+                    m.TrainInterval,
+                    m.TrainingStatus,
+                    m.TrainingStartedAt,
+                    m.TrainingError,
+                    m.SimpleDescription,
+                    m.TechnicalDescription,
+                    m.CreatedAt,
+                    m.UpdatedAt,
                     ScoresByInterval = scores ?? new Dictionary<string, decimal>(),
                     AverageScore = avg,
                 };
@@ -195,23 +213,23 @@ public static class ModelsEndpoints
             // possible regardless of which one we pick.
             var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             const long maxLookbackMs = 365L * 86_400_000L;
-            const long minRangeMs    = 30L  * 86_400_000L;
+            const long minRangeMs = 30L * 86_400_000L;
 
             var afterStart = model.TrainEndMs.Value + 1;
-            var afterEnd   = nowMs;
-            var beforeEnd   = model.TrainStartMs.Value - 1;
+            var afterEnd = nowMs;
+            var beforeEnd = model.TrainStartMs.Value - 1;
             var beforeStart = Math.Max(nowMs - maxLookbackMs, 0);
 
             long oosStart, oosEnd;
             if (afterEnd - afterStart >= minRangeMs)
             {
                 oosStart = afterStart;
-                oosEnd   = afterEnd;
+                oosEnd = afterEnd;
             }
             else if (beforeEnd - beforeStart >= minRangeMs)
             {
                 oosStart = beforeStart;
-                oosEnd   = beforeEnd;
+                oosEnd = beforeEnd;
             }
             else
             {
@@ -219,8 +237,8 @@ public static class ModelsEndpoints
                 {
                     error = "Not enough out-of-sample data outside the training range to run an honest backtest (need at least 30 days on one side). Retrain on a smaller window or wait for more candles to accrue.",
                     trainStartMs = model.TrainStartMs.Value,
-                    trainEndMs   = model.TrainEndMs.Value,
-                    afterRangeDays  = (afterEnd  - afterStart)  / 86_400_000.0,
+                    trainEndMs = model.TrainEndMs.Value,
+                    afterRangeDays = (afterEnd - afterStart) / 86_400_000.0,
                     beforeRangeDays = (beforeEnd - beforeStart) / 86_400_000.0,
                 });
             }
@@ -245,9 +263,9 @@ public static class ModelsEndpoints
                 {
                     backtestId = bt.Id,
                     trainStartMs = model.TrainStartMs.Value,
-                    trainEndMs   = model.TrainEndMs.Value,
+                    trainEndMs = model.TrainEndMs.Value,
                     outOfSampleStartMs = oosStart,
-                    outOfSampleEndMs   = oosEnd,
+                    outOfSampleEndMs = oosEnd,
                     trainingValidationAccuracy = model.TrainingValidationAccuracy,
                 });
             }

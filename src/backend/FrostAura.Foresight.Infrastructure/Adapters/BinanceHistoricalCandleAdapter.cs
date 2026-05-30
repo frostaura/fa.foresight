@@ -91,7 +91,7 @@ public sealed class BinanceHistoricalCandleAdapter : IHistoricalCandleProvider
         // Cap the end at the most recent fully-closed candle. The currently-forming candle has
         // mutating OHLCV, so it must never enter the cache (it would freeze as a stale partial).
         var lastClosed = LastClosedOpen(intervalMs);
-        var snapEnd   = Math.Min((endMs / intervalMs) * intervalMs, lastClosed);
+        var snapEnd = Math.Min((endMs / intervalMs) * intervalMs, lastClosed);
 
         // Whole requested window is in the future / has no closed candle yet — nothing to serve.
         if (snapEnd < snapStart) return Array.Empty<HistoricalCandle>();
@@ -116,131 +116,131 @@ public sealed class BinanceHistoricalCandleAdapter : IHistoricalCandleProvider
         try
         {
 
-        // 1+2. Read whatever is cached.
-        var existing = await db.HistoricalCandles
-            .AsNoTracking()
-            .Where(c => c.Symbol == symbol && c.Interval == interval &&
-                        c.OpenTime >= snapStart && c.OpenTime <= snapEnd)
-            .OrderBy(c => c.OpenTime)
-            .ToListAsync(ct);
-
-        // 3. Identify gaps below the freshness window. Walk the expected sequence and group misses
-        // into contiguous windows. Candles at/after freshFrom are handled by the forced re-fetch.
-        var present = new HashSet<long>(existing.Where(c => c.OpenTime < freshFrom).Select(c => c.OpenTime));
-        var gaps = new List<(long Start, long End)>();
-        long? gapStart = null;
-        for (var t = snapStart; t < freshFrom; t += intervalMs)
-        {
-            if (!present.Contains(t))
-            {
-                gapStart ??= t;
-            }
-            else if (gapStart is not null)
-            {
-                gaps.Add((gapStart.Value, t - intervalMs));
-                gapStart = null;
-            }
-        }
-        if (gapStart is not null) gaps.Add((gapStart.Value, freshFrom - intervalMs));
-
-        var backfillGapCount = gaps.Count;
-
-        // 4. At the live edge only: force-refetch the trailing window. Drop any cached rows in it
-        // first so the fresh fetch overwrites them rather than colliding on the primary key. For
-        // historical ranges this block is skipped entirely — no delete, no re-fetch, no race.
-        if (nearLiveEdge)
-        {
-            gaps.Add((freshFrom, snapEnd));
-            await db.HistoricalCandles
+            // 1+2. Read whatever is cached.
+            var existing = await db.HistoricalCandles
+                .AsNoTracking()
                 .Where(c => c.Symbol == symbol && c.Interval == interval &&
-                            c.OpenTime >= freshFrom && c.OpenTime <= snapEnd)
-                .ExecuteDeleteAsync(ct);
-        }
+                            c.OpenTime >= snapStart && c.OpenTime <= snapEnd)
+                .OrderBy(c => c.OpenTime)
+                .ToListAsync(ct);
 
-        // Cold-fill backfill is worth an Information line; the routine trailing freshness re-fetch is
-        // every-call background noise, so it logs at Debug (only when we actually did one).
-        if (backfillGapCount > 0)
-            _logger.LogInformation("Historical candle backfill {Symbol}/{Interval}: {GapCount} gap(s) covering {Total} candles",
-                symbol, interval, backfillGapCount, gaps.Take(backfillGapCount).Sum(g => (g.End - g.Start) / intervalMs + 1));
-        else if (nearLiveEdge)
-            _logger.LogDebug("Historical candle freshness refresh {Symbol}/{Interval}: {Candles} trailing candle(s)",
-                symbol, interval, (snapEnd - freshFrom) / intervalMs + 1);
-
-        // 5. Split gaps into Binance-sized pages (max 1000 candles each) and fetch with bounded parallelism.
-        var pages = new List<(long Start, long End)>();
-        foreach (var (gs, ge) in gaps)
-        {
-            for (var p = gs; p <= ge; p += intervalMs * BinanceMaxLimit)
+            // 3. Identify gaps below the freshness window. Walk the expected sequence and group misses
+            // into contiguous windows. Candles at/after freshFrom are handled by the forced re-fetch.
+            var present = new HashSet<long>(existing.Where(c => c.OpenTime < freshFrom).Select(c => c.OpenTime));
+            var gaps = new List<(long Start, long End)>();
+            long? gapStart = null;
+            for (var t = snapStart; t < freshFrom; t += intervalMs)
             {
-                var pageEnd = Math.Min(p + intervalMs * (BinanceMaxLimit - 1), ge);
-                pages.Add((p, pageEnd));
-            }
-        }
-
-        using var sem = new SemaphoreSlim(ConcurrencyLimit, ConcurrencyLimit);
-        var fetched = new List<HistoricalCandle>();
-        var fetchedLock = new object();
-
-        await Task.WhenAll(pages.Select(async page =>
-        {
-            await sem.WaitAsync(ct);
-            try
-            {
-                var raw = await _binance.GetKlinesRangeAsync(symbol, interval, page.Start, page.End, BinanceMaxLimit, ct);
-                lock (fetchedLock)
+                if (!present.Contains(t))
                 {
-                    foreach (var c in raw)
-                        fetched.Add(new HistoricalCandle
-                        {
-                            Symbol = symbol,
-                            Interval = interval,
-                            OpenTime = c.OpenTime,
-                            Open = c.Open,
-                            High = c.High,
-                            Low = c.Low,
-                            Close = c.Close,
-                            Volume = c.Volume,
-                        });
+                    gapStart ??= t;
+                }
+                else if (gapStart is not null)
+                {
+                    gaps.Add((gapStart.Value, t - intervalMs));
+                    gapStart = null;
                 }
             }
-            finally { sem.Release(); }
-        }));
+            if (gapStart is not null) gaps.Add((gapStart.Value, freshFrom - intervalMs));
 
-        // 6. Bulk-insert. Dedup defensively in case Binance overlapped a page boundary, and clamp to
-        // [snapStart, snapEnd] so a forming candle Binance may tack on never reaches the cache.
-        var deduped = fetched
-            .Where(c => c.OpenTime >= snapStart && c.OpenTime <= snapEnd)
-            .GroupBy(c => c.OpenTime)
-            .Select(g => g.First())
-            .ToList();
-        await db.HistoricalCandles.AddRangeAsync(deduped, ct);
-        try
-        {
-            await db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateException ex)
-        {
-            // PK collision with concurrent fillers — fall back to a per-row upsert via raw SQL.
-            // Acceptable cost since the racing fill is rare and recovery preserves the cache.
-            _logger.LogWarning(ex, "Bulk historical-candle insert collided; falling back to row-by-row");
-            foreach (var entry in db.ChangeTracker.Entries<HistoricalCandle>().ToList())
-                entry.State = EntityState.Detached;
-            foreach (var c in deduped)
+            var backfillGapCount = gaps.Count;
+
+            // 4. At the live edge only: force-refetch the trailing window. Drop any cached rows in it
+            // first so the fresh fetch overwrites them rather than colliding on the primary key. For
+            // historical ranges this block is skipped entirely — no delete, no re-fetch, no race.
+            if (nearLiveEdge)
             {
-                db.HistoricalCandles.Attach(c);
-                db.Entry(c).State = EntityState.Added;
-                try { await db.SaveChangesAsync(ct); }
-                catch (DbUpdateException) { db.Entry(c).State = EntityState.Detached; }
+                gaps.Add((freshFrom, snapEnd));
+                await db.HistoricalCandles
+                    .Where(c => c.Symbol == symbol && c.Interval == interval &&
+                                c.OpenTime >= freshFrom && c.OpenTime <= snapEnd)
+                    .ExecuteDeleteAsync(ct);
             }
-        }
 
-        // 7. Re-read so the caller sees the merged (cache + freshly-fetched) view in order.
-        return await db.HistoricalCandles
-            .AsNoTracking()
-            .Where(c => c.Symbol == symbol && c.Interval == interval &&
-                        c.OpenTime >= snapStart && c.OpenTime <= snapEnd)
-            .OrderBy(c => c.OpenTime)
-            .ToListAsync(ct);
+            // Cold-fill backfill is worth an Information line; the routine trailing freshness re-fetch is
+            // every-call background noise, so it logs at Debug (only when we actually did one).
+            if (backfillGapCount > 0)
+                _logger.LogInformation("Historical candle backfill {Symbol}/{Interval}: {GapCount} gap(s) covering {Total} candles",
+                    symbol, interval, backfillGapCount, gaps.Take(backfillGapCount).Sum(g => (g.End - g.Start) / intervalMs + 1));
+            else if (nearLiveEdge)
+                _logger.LogDebug("Historical candle freshness refresh {Symbol}/{Interval}: {Candles} trailing candle(s)",
+                    symbol, interval, (snapEnd - freshFrom) / intervalMs + 1);
+
+            // 5. Split gaps into Binance-sized pages (max 1000 candles each) and fetch with bounded parallelism.
+            var pages = new List<(long Start, long End)>();
+            foreach (var (gs, ge) in gaps)
+            {
+                for (var p = gs; p <= ge; p += intervalMs * BinanceMaxLimit)
+                {
+                    var pageEnd = Math.Min(p + intervalMs * (BinanceMaxLimit - 1), ge);
+                    pages.Add((p, pageEnd));
+                }
+            }
+
+            using var sem = new SemaphoreSlim(ConcurrencyLimit, ConcurrencyLimit);
+            var fetched = new List<HistoricalCandle>();
+            var fetchedLock = new object();
+
+            await Task.WhenAll(pages.Select(async page =>
+            {
+                await sem.WaitAsync(ct);
+                try
+                {
+                    var raw = await _binance.GetKlinesRangeAsync(symbol, interval, page.Start, page.End, BinanceMaxLimit, ct);
+                    lock (fetchedLock)
+                    {
+                        foreach (var c in raw)
+                            fetched.Add(new HistoricalCandle
+                            {
+                                Symbol = symbol,
+                                Interval = interval,
+                                OpenTime = c.OpenTime,
+                                Open = c.Open,
+                                High = c.High,
+                                Low = c.Low,
+                                Close = c.Close,
+                                Volume = c.Volume,
+                            });
+                    }
+                }
+                finally { sem.Release(); }
+            }));
+
+            // 6. Bulk-insert. Dedup defensively in case Binance overlapped a page boundary, and clamp to
+            // [snapStart, snapEnd] so a forming candle Binance may tack on never reaches the cache.
+            var deduped = fetched
+                .Where(c => c.OpenTime >= snapStart && c.OpenTime <= snapEnd)
+                .GroupBy(c => c.OpenTime)
+                .Select(g => g.First())
+                .ToList();
+            await db.HistoricalCandles.AddRangeAsync(deduped, ct);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException ex)
+            {
+                // PK collision with concurrent fillers — fall back to a per-row upsert via raw SQL.
+                // Acceptable cost since the racing fill is rare and recovery preserves the cache.
+                _logger.LogWarning(ex, "Bulk historical-candle insert collided; falling back to row-by-row");
+                foreach (var entry in db.ChangeTracker.Entries<HistoricalCandle>().ToList())
+                    entry.State = EntityState.Detached;
+                foreach (var c in deduped)
+                {
+                    db.HistoricalCandles.Attach(c);
+                    db.Entry(c).State = EntityState.Added;
+                    try { await db.SaveChangesAsync(ct); }
+                    catch (DbUpdateException) { db.Entry(c).State = EntityState.Detached; }
+                }
+            }
+
+            // 7. Re-read so the caller sees the merged (cache + freshly-fetched) view in order.
+            return await db.HistoricalCandles
+                .AsNoTracking()
+                .Where(c => c.Symbol == symbol && c.Interval == interval &&
+                            c.OpenTime >= snapStart && c.OpenTime <= snapEnd)
+                .OrderBy(c => c.OpenTime)
+                .ToListAsync(ct);
 
         }
         finally { gate?.Release(); }

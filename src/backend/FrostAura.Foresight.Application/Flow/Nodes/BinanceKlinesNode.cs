@@ -19,11 +19,11 @@ public sealed class BinanceKlinesNode : IFlowNode
 
     public NodePortSpec Spec { get; } = new(
         Category: "data",
-        Inputs:  Array.Empty<PortDef>(),
+        Inputs: Array.Empty<PortDef>(),
         Outputs: new[] { new PortDef("candles", "Candle[]") },
         Params: new Dictionary<string, ParamDef>
         {
-            ["tf"]    = new("string", false, "target",
+            ["tf"] = new("string", false, "target",
                 "Interval to fetch. \"target\" resolves to the runtime card interval."),
             ["limit"] = new("int", false, 60,
                 "Number of candles ending at the target. Capped at 1000 by Binance."),
@@ -52,8 +52,8 @@ public sealed class BinanceKlinesNode : IFlowNode
     /// <summary>Mirror of BinanceMarketDataClient.IntervalMs so the Application project doesn't pull Infrastructure.</summary>
     private static long ToIntervalMs(string interval) => interval switch
     {
-        "1m"  => 60_000L,
-        "5m"  => 300_000L,
+        "1m" => 60_000L,
+        "5m" => 300_000L,
         "15m" => 900_000L,
         _ => throw new ArgumentException($"Unsupported interval '{interval}'.", nameof(interval)),
     };

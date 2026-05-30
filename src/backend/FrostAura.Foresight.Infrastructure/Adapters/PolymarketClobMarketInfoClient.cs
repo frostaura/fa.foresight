@@ -28,8 +28,8 @@ public sealed class PolymarketClobMarketInfoClient
         PolymarketExecutionOptions opts,
         ILogger logger)
     {
-        _http   = http;
-        _opts   = opts;
+        _http = http;
+        _opts = opts;
         _logger = logger;
     }
 
@@ -100,15 +100,15 @@ public sealed class PolymarketClobMarketInfoClient
             var outcome = t.TryGetProperty("outcome", out var o) ? o.GetString() ?? "" : "";
             var tokenId = t.TryGetProperty("token_id", out var tid) ? tid.GetString() ?? "" : "";
             if (string.Equals(outcome, "Yes", StringComparison.OrdinalIgnoreCase)) yesId = tokenId;
-            if (string.Equals(outcome, "No",  StringComparison.OrdinalIgnoreCase)) noId  = tokenId;
+            if (string.Equals(outcome, "No", StringComparison.OrdinalIgnoreCase)) noId = tokenId;
         }
         if (yesId is null || noId is null) return null;
 
-        var negRisk = root.TryGetProperty("neg_risk",   out var nr) && nr.GetBoolean();
-        var hasMts  = root.TryGetProperty("minimum_tick_size", out var mtsEl);
-        var hasMos  = root.TryGetProperty("minimum_order_size", out var mosEl);
-        var mts     = hasMts ? ParseDecProp(mtsEl) : 0.01m;
-        var mos     = hasMos ? ParseDecProp(mosEl) : 0m;
+        var negRisk = root.TryGetProperty("neg_risk", out var nr) && nr.GetBoolean();
+        var hasMts = root.TryGetProperty("minimum_tick_size", out var mtsEl);
+        var hasMos = root.TryGetProperty("minimum_order_size", out var mosEl);
+        var mts = hasMts ? ParseDecProp(mtsEl) : 0.01m;
+        var mos = hasMos ? ParseDecProp(mosEl) : 0m;
         // Trusted only when BOTH min-size fields parsed to a usable value. Otherwise the caller must
         // apply a conservative floor rather than silently placing a possibly sub-minimum order.
         var trusted = hasMts && mts > 0m && hasMos && mos > 0m;
@@ -130,7 +130,7 @@ public sealed class PolymarketClobMarketInfoClient
             if (idsDoc.RootElement.ValueKind == JsonValueKind.Array && idsDoc.RootElement.GetArrayLength() >= 2)
             {
                 yesId = idsDoc.RootElement[0].GetString() ?? "";
-                noId  = idsDoc.RootElement[1].GetString() ?? "";
+                noId = idsDoc.RootElement[1].GetString() ?? "";
             }
         }
 
@@ -161,7 +161,7 @@ public sealed record ClobMarketInfo(
     string ConditionId,
     string YesTokenId,
     string NoTokenId,
-    bool   NegRisk,
+    bool NegRisk,
     decimal Mts,
     decimal Mos,
-    bool   MinSizesTrusted);
+    bool MinSizesTrusted);

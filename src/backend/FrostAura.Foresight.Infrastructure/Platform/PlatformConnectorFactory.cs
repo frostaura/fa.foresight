@@ -82,10 +82,10 @@ public sealed class PlatformConnectorFactory : IPlatformConnectorFactory
         // Per-tenant signer from the decrypted private key.
         var keyOpts = new KeyVaultOptions
         {
-            PrivateKey    = conn.PrivateKey!,
+            PrivateKey = conn.PrivateKey!,
             SignatureType = conn.SignatureType,
-            Funder        = conn.Funder,
-            LocalAddress  = conn.WalletAddress ?? "0x0000000000000000000000000000000000000000"
+            Funder = conn.Funder,
+            LocalAddress = conn.WalletAddress ?? "0x0000000000000000000000000000000000000000"
         };
         var keyVault = new NethereumKeyVault(
             Options.Create(keyOpts),
@@ -93,10 +93,10 @@ public sealed class PlatformConnectorFactory : IPlatformConnectorFactory
 
         var execOpts = new PolymarketExecutionOptions
         {
-            ClobBaseUrl  = conn.ClobBaseUrl,
+            ClobBaseUrl = conn.ClobBaseUrl,
             GammaBaseUrl = conn.GammaBaseUrl,
-            LiveTrading  = conn.LiveTrading,
-            ChainId      = conn.ChainId
+            LiveTrading = conn.LiveTrading,
+            ChainId = conn.ChainId
         };
 
         _logger.LogInformation("Platform connector → live Polymarket CLOB for wallet {Address}", conn.WalletAddress);

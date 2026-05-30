@@ -38,12 +38,12 @@ public sealed class AccountLedger : IAccountLedger
 {
     private const string Venue = "polymarket";
 
-    private readonly ForesightDbContext  _db;
-    private readonly IChannelAdapter     _channel;
-    private readonly IKeyVault           _vault;
-    private readonly HttpClient          _http;
-    private readonly PolygonOptions      _polygonOpts;
-    private readonly KeyVaultOptions     _keyVaultOpts;
+    private readonly ForesightDbContext _db;
+    private readonly IChannelAdapter _channel;
+    private readonly IKeyVault _vault;
+    private readonly HttpClient _http;
+    private readonly PolygonOptions _polygonOpts;
+    private readonly KeyVaultOptions _keyVaultOpts;
     private readonly ILogger<AccountLedger> _logger;
 
     public AccountLedger(
@@ -55,13 +55,13 @@ public sealed class AccountLedger : IAccountLedger
         IOptions<KeyVaultOptions> keyVaultOpts,
         ILogger<AccountLedger> logger)
     {
-        _db           = db;
-        _channel      = channel;
-        _vault        = vault;
-        _http         = http;
-        _polygonOpts  = polygonOpts.Value;
+        _db = db;
+        _channel = channel;
+        _vault = vault;
+        _http = http;
+        _polygonOpts = polygonOpts.Value;
         _keyVaultOpts = keyVaultOpts.Value;
-        _logger       = logger;
+        _logger = logger;
     }
 
     /// <inheritdoc/>
@@ -143,7 +143,7 @@ public sealed class AccountLedger : IAccountLedger
         var rpcBody = JsonSerializer.Serialize(new
         {
             jsonrpc = "2.0",
-            method  = "eth_call",
+            method = "eth_call",
             @params = new object[]
             {
                 new { to = _polygonOpts.PusdContractAddress, data = callData },
@@ -152,8 +152,8 @@ public sealed class AccountLedger : IAccountLedger
             id = 1
         });
 
-        using var req  = new HttpRequestMessage(HttpMethod.Post, rpcUrl)
-            { Content = new StringContent(rpcBody, Encoding.UTF8, "application/json") };
+        using var req = new HttpRequestMessage(HttpMethod.Post, rpcUrl)
+        { Content = new StringContent(rpcBody, Encoding.UTF8, "application/json") };
         using var resp = await _http.SendAsync(req, ct);
         if (!resp.IsSuccessStatusCode)
         {
@@ -162,7 +162,7 @@ public sealed class AccountLedger : IAccountLedger
         }
 
         var body = await resp.Content.ReadAsStringAsync(ct);
-        using var doc  = JsonDocument.Parse(body);
+        using var doc = JsonDocument.Parse(body);
         if (!doc.RootElement.TryGetProperty("result", out var resultEl))
         {
             _logger.LogWarning("Polygon RPC response missing 'result' field — balance UNKNOWN. Body: {Body}", body[..Math.Min(body.Length, 200)]);
@@ -182,8 +182,8 @@ public sealed class AccountLedger : IAccountLedger
 
         // Scale from integer (6 decimals) to decimal pUSD.
         var divisor = BigInteger.Pow(10, _polygonOpts.PusdDecimals);
-        var whole   = (decimal)(raw / divisor);
-        var frac    = (decimal)(raw % divisor) / (decimal)divisor;
+        var whole = (decimal)(raw / divisor);
+        var frac = (decimal)(raw % divisor) / (decimal)divisor;
         var balance = whole + frac;
 
         _logger.LogDebug("On-chain pUSD balance for {Address}: {Balance} (raw={Raw})", walletAddress, balance, raw);
@@ -198,7 +198,7 @@ public sealed class AccountLedger : IAccountLedger
     public async Task<decimal> GetFreeAsync(Guid tenantId, CancellationToken ct)
     {
         var walletPusd = await GetWalletPusdAsync(tenantId, ct);
-        var reserved   = await ActiveLiveReservedAsync(tenantId, ct);
+        var reserved = await ActiveLiveReservedAsync(tenantId, ct);
         return walletPusd - reserved;
     }
 
@@ -206,7 +206,7 @@ public sealed class AccountLedger : IAccountLedger
     public async Task ReserveAsync(Guid tenantId, Guid sessionId, decimal amount, CancellationToken ct)
     {
         var walletPusd = await GetWalletPusdAsync(tenantId, ct);
-        var free       = await GetFreeAsync(tenantId, ct);
+        var free = await GetFreeAsync(tenantId, ct);
 
         if (amount > free)
             throw new InsufficientPusdException(amount, free);
@@ -214,16 +214,16 @@ public sealed class AccountLedger : IAccountLedger
         var freeAfter = free - amount;
         _db.AccountLedger.Add(new AccountLedgerEntry
         {
-            Id         = Guid.NewGuid(),
-            TenantId   = tenantId,
-            Venue      = Venue,
-            EntryKind  = "reserve",
-            SessionId  = sessionId,
-            Amount     = amount,
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Venue = Venue,
+            EntryKind = "reserve",
+            SessionId = sessionId,
+            Amount = amount,
             WalletPusd = walletPusd,
-            FreeAfter  = freeAfter,
-            Note       = JsonSerializer.Serialize(new { sessionId, amount }),
-            CreatedAt  = DateTimeOffset.UtcNow
+            FreeAfter = freeAfter,
+            Note = JsonSerializer.Serialize(new { sessionId, amount }),
+            CreatedAt = DateTimeOffset.UtcNow
         });
         await _db.SaveChangesAsync(ct);
         _logger.LogInformation("Ledger reserve: tenant {Tenant} session {Session} amount {Amount} free-after {Free}",
@@ -240,20 +240,20 @@ public sealed class AccountLedger : IAccountLedger
     public async Task WriteReserveAuditAsync(Guid tenantId, Guid sessionId, decimal amount, CancellationToken ct)
     {
         var walletPusd = await GetWalletPusdAsync(tenantId, ct);
-        var free       = await GetFreeAsync(tenantId, ct); // free already reflects the saved session
+        var free = await GetFreeAsync(tenantId, ct); // free already reflects the saved session
 
         _db.AccountLedger.Add(new AccountLedgerEntry
         {
-            Id         = Guid.NewGuid(),
-            TenantId   = tenantId,
-            Venue      = Venue,
-            EntryKind  = "reserve",
-            SessionId  = sessionId,
-            Amount     = amount,
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Venue = Venue,
+            EntryKind = "reserve",
+            SessionId = sessionId,
+            Amount = amount,
             WalletPusd = walletPusd,
-            FreeAfter  = free, // correct: session already in sum, no additional deduction needed
-            Note       = JsonSerializer.Serialize(new { sessionId, amount, auditOnly = true }),
-            CreatedAt  = DateTimeOffset.UtcNow
+            FreeAfter = free, // correct: session already in sum, no additional deduction needed
+            Note = JsonSerializer.Serialize(new { sessionId, amount, auditOnly = true }),
+            CreatedAt = DateTimeOffset.UtcNow
         });
         await _db.SaveChangesAsync(ct);
         _logger.LogInformation("Ledger reserve (audit-only): tenant {Tenant} session {Session} amount {Amount} free-after {Free}",
@@ -266,20 +266,20 @@ public sealed class AccountLedger : IAccountLedger
         // The session's current_balance already reflects the new value (caller updated it before calling us).
         // We just append an audit entry so the ledger timeline shows each settlement.
         var walletPusd = await GetWalletPusdAsync(tenantId, ct);
-        var free       = await GetFreeAsync(tenantId, ct);
+        var free = await GetFreeAsync(tenantId, ct);
 
         _db.AccountLedger.Add(new AccountLedgerEntry
         {
-            Id         = Guid.NewGuid(),
-            TenantId   = tenantId,
-            Venue      = Venue,
-            EntryKind  = "recompute",
-            SessionId  = sessionId,
-            Amount     = currentBalance,
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Venue = Venue,
+            EntryKind = "recompute",
+            SessionId = sessionId,
+            Amount = currentBalance,
             WalletPusd = walletPusd,
-            FreeAfter  = free,
-            Note       = JsonSerializer.Serialize(new { sessionId, currentBalance }),
-            CreatedAt  = DateTimeOffset.UtcNow
+            FreeAfter = free,
+            Note = JsonSerializer.Serialize(new { sessionId, currentBalance }),
+            CreatedAt = DateTimeOffset.UtcNow
         });
         await _db.SaveChangesAsync(ct);
     }
@@ -289,20 +289,20 @@ public sealed class AccountLedger : IAccountLedger
     {
         // Session already stopped_at set by caller — it falls out of the active sum automatically.
         var walletPusd = await GetWalletPusdAsync(tenantId, ct);
-        var free       = await GetFreeAsync(tenantId, ct);
+        var free = await GetFreeAsync(tenantId, ct);
 
         _db.AccountLedger.Add(new AccountLedgerEntry
         {
-            Id         = Guid.NewGuid(),
-            TenantId   = tenantId,
-            Venue      = Venue,
-            EntryKind  = "release",
-            SessionId  = sessionId,
-            Amount     = 0m,
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Venue = Venue,
+            EntryKind = "release",
+            SessionId = sessionId,
+            Amount = 0m,
             WalletPusd = walletPusd,
-            FreeAfter  = free,
-            Note       = JsonSerializer.Serialize(new { sessionId, action = "session stopped" }),
-            CreatedAt  = DateTimeOffset.UtcNow
+            FreeAfter = free,
+            Note = JsonSerializer.Serialize(new { sessionId, action = "session stopped" }),
+            CreatedAt = DateTimeOffset.UtcNow
         });
         await _db.SaveChangesAsync(ct);
         _logger.LogInformation("Ledger release: tenant {Tenant} session {Session} free-after {Free}", tenantId, sessionId, free);
@@ -321,16 +321,16 @@ public sealed class AccountLedger : IAccountLedger
         {
             _db.AccountLedger.Add(new AccountLedgerEntry
             {
-                Id         = Guid.NewGuid(),
-                TenantId   = tenantId,
-                Venue      = Venue,
-                EntryKind  = "reconcile",
-                Amount     = 0m,
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                Venue = Venue,
+                EntryKind = "reconcile",
+                Amount = 0m,
                 WalletPusd = 0m,
-                FreeAfter  = -activeReserved,
-                Drift      = null, // unknown — not computed
-                Note       = JsonSerializer.Serialize(new { balanceKnown = false, activeReserved, note = "on-chain pUSD balance unconfirmed (no wallet / RPC error) — drift not computed" }),
-                CreatedAt  = DateTimeOffset.UtcNow
+                FreeAfter = -activeReserved,
+                Drift = null, // unknown — not computed
+                Note = JsonSerializer.Serialize(new { balanceKnown = false, activeReserved, note = "on-chain pUSD balance unconfirmed (no wallet / RPC error) — drift not computed" }),
+                CreatedAt = DateTimeOffset.UtcNow
             });
             await _db.SaveChangesAsync(ct);
             _logger.LogWarning("Ledger reconcile SKIPPED for tenant {Tenant}: on-chain pUSD balance unconfirmed (no wallet or RPC error)", tenantId);
@@ -345,16 +345,16 @@ public sealed class AccountLedger : IAccountLedger
 
         _db.AccountLedger.Add(new AccountLedgerEntry
         {
-            Id         = Guid.NewGuid(),
-            TenantId   = tenantId,
-            Venue      = Venue,
-            EntryKind  = "reconcile",
-            Amount     = walletPusd,
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Venue = Venue,
+            EntryKind = "reconcile",
+            Amount = walletPusd,
             WalletPusd = walletPusd,
-            FreeAfter  = free,
-            Drift      = drift,
-            Note       = JsonSerializer.Serialize(new { balanceKnown = true, walletPusd, activeReserved, free, drift }),
-            CreatedAt  = DateTimeOffset.UtcNow
+            FreeAfter = free,
+            Drift = drift,
+            Note = JsonSerializer.Serialize(new { balanceKnown = true, walletPusd, activeReserved, free, drift }),
+            CreatedAt = DateTimeOffset.UtcNow
         });
         await _db.SaveChangesAsync(ct);
 

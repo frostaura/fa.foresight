@@ -24,7 +24,7 @@ public sealed class TradingNotifier
     public TradingNotifier(IChannelAdapter channel, ILogger<TradingNotifier> logger)
     {
         _channel = channel;
-        _logger  = logger;
+        _logger = logger;
     }
 
     /// <summary>

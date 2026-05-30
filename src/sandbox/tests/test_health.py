@@ -27,13 +27,20 @@ def test_fingerprint_returns_ok():
 
 
 def test_execute_stub_returns_200():
+    # Minimal valid ExecuteRequest (see app/protocol.py): mode, nodeId and code are required.
     payload = {
-        "node_type": "stub",
+        "mode": "batch",
+        "nodeId": "stub",
+        "code": 'outputs["x"] = 1.0',
+        "seed": 0,
         "params": {},
+        "seriesLength": 0,
         "inputs": {},
+        "outputSchema": {"x": "scalar"},
     }
     response = client.post("/execute", json=payload)
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     body = response.json()
+    assert body["ok"] is True, body.get("error")
     assert "outputs" in body
     assert "stdout" in body

@@ -25,8 +25,14 @@ public class CodeNodeDeterminismTests
     private static List<HistoricalCandle> Candles(params double[] closes)
         => closes.Select((c, i) => new HistoricalCandle
         {
-            Symbol = "BTCUSDT", Interval = "5m", OpenTime = i * 300_000L,
-            Open = (decimal)c, High = (decimal)c, Low = (decimal)c, Close = (decimal)c, Volume = 1m,
+            Symbol = "BTCUSDT",
+            Interval = "5m",
+            OpenTime = i * 300_000L,
+            Open = (decimal)c,
+            High = (decimal)c,
+            Low = (decimal)c,
+            Close = (decimal)c,
+            Volume = 1m,
         }).ToList();
 
     private const string PortsJson =
@@ -70,7 +76,7 @@ public class CodeNodeDeterminismTests
         var node = new CodePythonNode(fake);
         var inputs = new Dictionary<string, object?> { ["candles"] = Candles(42) };
 
-        var step  = await node.ExecuteAsync(inputs, Params(PortsJson), Ctx(FlowMode.Live), default);     // mode "step"
+        var step = await node.ExecuteAsync(inputs, Params(PortsJson), Ctx(FlowMode.Live), default);     // mode "step"
         var batch = await node.ExecuteAsync(inputs, Params(PortsJson), Ctx(FlowMode.Backtest), default); // mode "batch"
 
         JsonSerializer.Serialize(step).Should().Be(JsonSerializer.Serialize(batch));

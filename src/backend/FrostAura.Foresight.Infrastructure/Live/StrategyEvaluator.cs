@@ -136,12 +136,12 @@ public sealed class StrategyEvaluator : IStrategyEvaluator
     private static IReadOnlyDictionary<string, object?> BuildAmbientInputs(StrategyStep step) =>
         new Dictionary<string, object?>(StringComparer.Ordinal)
         {
-            ["pUp"]         = step.Inputs.PUp,
-            ["yesPrice"]    = step.Inputs.YesPrice,
-            ["noPrice"]     = step.Inputs.NoPrice,
-            ["balance"]     = step.NextBankroll,
-            ["currentBet"]  = step.CurrentBetSize,
-            ["initialBet"]  = step.InitialBetSize,
+            ["pUp"] = step.Inputs.PUp,
+            ["yesPrice"] = step.Inputs.YesPrice,
+            ["noPrice"] = step.Inputs.NoPrice,
+            ["balance"] = step.NextBankroll,
+            ["currentBet"] = step.CurrentBetSize,
+            ["initialBet"] = step.InitialBetSize,
             ["lastOutcome"] = step.Won,
         };
 }

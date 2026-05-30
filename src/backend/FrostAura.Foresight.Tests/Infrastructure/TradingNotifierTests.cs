@@ -15,22 +15,22 @@ namespace FrostAura.Foresight.Tests.Infrastructure;
 /// </summary>
 public class TradingNotifierTests
 {
-    private static readonly Guid TenantId  = Guid.NewGuid();
+    private static readonly Guid TenantId = Guid.NewGuid();
     private static readonly Guid SessionId = Guid.NewGuid();
-    private static readonly Guid BetId     = Guid.NewGuid();
+    private static readonly Guid BetId = Guid.NewGuid();
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
     private static (TradingNotifier Notifier, CapturingChannelAdapter Channel) Build()
     {
-        var channel  = new CapturingChannelAdapter();
+        var channel = new CapturingChannelAdapter();
         var notifier = new TradingNotifier(channel, NullLogger<TradingNotifier>.Instance);
         return (notifier, channel);
     }
 
     private static (TradingNotifier Notifier, ThrowingChannelAdapter Channel) BuildThrowing()
     {
-        var channel  = new ThrowingChannelAdapter();
+        var channel = new ThrowingChannelAdapter();
         var notifier = new TradingNotifier(channel, NullLogger<TradingNotifier>.Instance);
         return (notifier, channel);
     }

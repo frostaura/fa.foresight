@@ -11,7 +11,7 @@ namespace FrostAura.Foresight.Application.Flow;
 public sealed record FlowDefinition
 {
     [JsonPropertyName("schemaVersion")] public int SchemaVersion { get; init; } = 1;
-    [JsonPropertyName("modelKind")]     public string ModelKind { get; init; } = "deterministic";
+    [JsonPropertyName("modelKind")] public string ModelKind { get; init; } = "deterministic";
     /// <summary>
     /// Determines which terminal node type the validator requires. Defaults to "model" (requires
     /// exactly one <c>output.prediction</c> node). Use "strategy" for strategy DAGs (requires
@@ -23,15 +23,15 @@ public sealed record FlowDefinition
     /// window left by this many candles so indicator warmup is satisfied before the first
     /// predicted candle.</summary>
     [JsonPropertyName("warmupCandles")] public int WarmupCandles { get; init; } = 60;
-    [JsonPropertyName("nodes")]         public required IReadOnlyList<NodeDefinition> Nodes { get; init; }
-    [JsonPropertyName("edges")]         public required IReadOnlyList<EdgeDefinition> Edges { get; init; }
+    [JsonPropertyName("nodes")] public required IReadOnlyList<NodeDefinition> Nodes { get; init; }
+    [JsonPropertyName("edges")] public required IReadOnlyList<EdgeDefinition> Edges { get; init; }
 }
 
 public sealed record NodeDefinition
 {
-    [JsonPropertyName("id")]       public required string Id { get; init; }
-    [JsonPropertyName("type")]     public required string Type { get; init; }
-    [JsonPropertyName("params")]   public JsonElement Params { get; init; }
+    [JsonPropertyName("id")] public required string Id { get; init; }
+    [JsonPropertyName("type")] public required string Type { get; init; }
+    [JsonPropertyName("params")] public JsonElement Params { get; init; }
     [JsonPropertyName("position")] public NodePosition? Position { get; init; }
 }
 
@@ -46,7 +46,7 @@ public sealed record NodePosition([property: JsonPropertyName("x")] double X,
 public sealed record EdgeDefinition
 {
     [JsonPropertyName("from")] public required string From { get; init; }
-    [JsonPropertyName("to")]   public required string To   { get; init; }
+    [JsonPropertyName("to")] public required string To { get; init; }
 }
 
 public static class EdgeEndpointExtensions

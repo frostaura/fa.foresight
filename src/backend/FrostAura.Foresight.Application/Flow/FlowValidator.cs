@@ -51,7 +51,7 @@ public sealed class FlowValidator
         var terminalType = ResolveTerminalType(flow.DefinitionKind);
         var outputs = flow.Nodes.Where(n => n.Type == terminalType).ToList();
         if (outputs.Count == 0) return Err($"Flow must contain exactly one '{terminalType}' node.");
-        if (outputs.Count > 1)  return Err($"Flow must contain exactly one '{terminalType}' node; found {outputs.Count}.");
+        if (outputs.Count > 1) return Err($"Flow must contain exactly one '{terminalType}' node; found {outputs.Count}.");
 
         // 3. Edges resolve to known ports with compatible type tags.
         // For nodes implementing IDynamicSpecNode, derive spec from the instance params.
@@ -65,9 +65,9 @@ public sealed class FlowValidator
         foreach (var e in flow.Edges)
         {
             var (fromNode, fromPort) = e.From.SplitEndpoint();
-            var (toNode,   toPort)   = e.To.SplitEndpoint();
+            var (toNode, toPort) = e.To.SplitEndpoint();
             if (!nodesByType.TryGetValue(fromNode, out var fromSpec)) return Err($"Edge '{e.From}->{e.To}' references missing node '{fromNode}'.");
-            if (!nodesByType.TryGetValue(toNode,   out var toSpec))   return Err($"Edge '{e.From}->{e.To}' references missing node '{toNode}'.");
+            if (!nodesByType.TryGetValue(toNode, out var toSpec)) return Err($"Edge '{e.From}->{e.To}' references missing node '{toNode}'.");
 
             var output = fromSpec.Outputs.FirstOrDefault(p => p.Name == fromPort);
             if (output is null) return Err($"Edge '{e.From}->{e.To}' references missing output port '{fromPort}' on '{fromNode}'.");
@@ -110,7 +110,7 @@ public sealed class FlowValidator
         foreach (var e in flow.Edges)
         {
             var fromId = e.From.SplitEndpoint().NodeId;
-            var toId   = e.To.SplitEndpoint().NodeId;
+            var toId = e.To.SplitEndpoint().NodeId;
             outgoing[fromId].Add(toId);
             indegree[toId]++;
         }
@@ -147,7 +147,7 @@ public sealed class FlowValidator
     private static string ResolveTerminalType(string definitionKind) => definitionKind switch
     {
         "strategy" => "output.stake",
-        _          => "output.prediction",  // default: "model" and legacy null/empty
+        _ => "output.prediction",  // default: "model" and legacy null/empty
     };
 
     /// <summary>
@@ -169,13 +169,13 @@ public sealed class FlowValidator
             {
                 dict[prop.Name] = prop.Value.ValueKind switch
                 {
-                    JsonValueKind.String  => (object?)prop.Value.GetString(),
-                    JsonValueKind.Number  => prop.Value.TryGetInt64(out var l) ? l : prop.Value.GetDouble(),
-                    JsonValueKind.True    => true,
-                    JsonValueKind.False   => false,
-                    JsonValueKind.Null    => null,
+                    JsonValueKind.String => (object?)prop.Value.GetString(),
+                    JsonValueKind.Number => prop.Value.TryGetInt64(out var l) ? l : prop.Value.GetDouble(),
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    JsonValueKind.Null => null,
                     // Objects/arrays fall back to the raw JSON string — dynamic nodes parse them if needed.
-                    _                     => prop.Value.GetRawText(),
+                    _ => prop.Value.GetRawText(),
                 };
             }
         }

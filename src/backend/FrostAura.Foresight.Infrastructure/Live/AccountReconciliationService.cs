@@ -37,7 +37,7 @@ public sealed class AccountReconciliationService : BackgroundService
         ILogger<AccountReconciliationService> logger)
     {
         _scopeFactory = scopeFactory;
-        _logger       = logger;
+        _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

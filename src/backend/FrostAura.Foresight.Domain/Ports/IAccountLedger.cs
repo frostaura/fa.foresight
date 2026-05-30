@@ -65,12 +65,12 @@ public interface IAccountLedger
 public sealed class InsufficientPusdException : Exception
 {
     public decimal Requested { get; }
-    public decimal Free      { get; }
+    public decimal Free { get; }
 
     public InsufficientPusdException(decimal requested, decimal free)
         : base($"Insufficient pUSD: requested {requested:F6} but only {free:F6} is free.")
     {
         Requested = requested;
-        Free      = free;
+        Free = free;
     }
 }

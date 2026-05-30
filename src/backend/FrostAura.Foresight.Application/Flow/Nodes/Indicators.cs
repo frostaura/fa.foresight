@@ -45,7 +45,7 @@ internal static class Indicators
         {
             var delta = closes[i] - closes[i - 1];
             var gain = delta >= 0 ? delta : 0m;
-            var loss = delta <  0 ? -delta : 0m;
+            var loss = delta < 0 ? -delta : 0m;
             avgGain = (avgGain * (period - 1) + gain) / period;
             avgLoss = (avgLoss * (period - 1) + loss) / period;
         }
@@ -177,12 +177,12 @@ public sealed class TechPackNode : IFlowNode
         var last10 = candles.Count > 10 ? candles.Skip(candles.Count - 10).ToList() : candles.ToList();
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["sma10"]    = sma10,
-            ["sma20"]    = sma20,
-            ["rsi14"]    = rsi14,
-            ["atr14"]    = atr14,
+            ["sma10"] = sma10,
+            ["sma20"] = sma20,
+            ["rsi14"] = rsi14,
+            ["atr14"] = atr14,
             ["trendPct"] = trend,
-            ["last10"]   = (IReadOnlyList<HistoricalCandle>)last10,
+            ["last10"] = (IReadOnlyList<HistoricalCandle>)last10,
         });
     }
 }
@@ -225,15 +225,15 @@ public sealed class FeaturePackNode : IFlowNode
         var z20 = Indicators.ZScore(closes, 20);
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["ema12"]  = ema12,
-            ["ema26"]  = ema26,
-            ["macd"]   = macd?.Macd,
+            ["ema12"] = ema12,
+            ["ema26"] = ema26,
+            ["macd"] = macd?.Macd,
             ["signal"] = macd?.Signal,
-            ["hist"]   = macd?.Histogram,
-            ["bbU"]    = boll?.Upper,
-            ["bbL"]    = boll?.Lower,
+            ["hist"] = macd?.Histogram,
+            ["bbU"] = boll?.Upper,
+            ["bbL"] = boll?.Lower,
             ["logret"] = logret,
-            ["z20"]    = z20,
+            ["z20"] = z20,
         });
     }
 }
@@ -285,7 +285,7 @@ public sealed class CrossPackNode : IFlowNode
             decimal? ret3 = closes.Count > 3 && closes[^4] > 0m
                 ? Indicators.LogReturn(closes[^4], closes[^1]) : null;
             var volZ = Indicators.ZScore(volumes, 20);
-            var atr  = Indicators.Atr(candles, 14);
+            var atr = Indicators.Atr(candles, 14);
             var ema12 = Indicators.Ema(closes, 12);
             var ema26 = Indicators.Ema(closes, 26);
             var boll = Indicators.BollingerBands(closes);
@@ -307,11 +307,11 @@ public sealed class CrossPackNode : IFlowNode
 
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["mom_x_vol"]    = momXVol,
-            ["pos_x_mom"]    = posXMom,
+            ["mom_x_vol"] = momXVol,
+            ["pos_x_mom"] = posXMom,
             ["regime_x_mom"] = regimeXMom,
-            ["trend_x_mom"]  = trendXMom,
-            ["vol_x_range"]  = volXRange,
+            ["trend_x_mom"] = trendXMom,
+            ["vol_x_range"] = volXRange,
         });
     }
 }
@@ -352,9 +352,9 @@ public sealed class MomentumPackNode : IFlowNode
                 : null;
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["ret_1"]  = RetAtLag(1),
-            ["ret_3"]  = RetAtLag(3),
-            ["ret_5"]  = RetAtLag(5),
+            ["ret_1"] = RetAtLag(1),
+            ["ret_3"] = RetAtLag(3),
+            ["ret_5"] = RetAtLag(5),
             ["ret_10"] = RetAtLag(10),
             ["ret_20"] = RetAtLag(20),
         });
@@ -406,9 +406,9 @@ public sealed class NormPackNode : IFlowNode
             var closes = candles.Select(c => c.Close).ToList();
             var ema12 = Indicators.Ema(closes, 12);
             var ema26 = Indicators.Ema(closes, 26);
-            var atr   = Indicators.Atr(candles, 14);
-            var boll  = Indicators.BollingerBands(closes);
-            var last  = closes[^1];
+            var atr = Indicators.Atr(candles, 14);
+            var boll = Indicators.BollingerBands(closes);
+            var last = closes[^1];
 
             if (atr is not null && atr.Value > 0m)
             {
@@ -432,9 +432,9 @@ public sealed class NormPackNode : IFlowNode
         {
             ["px_vs_ema12_atr"] = pxVsE12,
             ["px_vs_ema26_atr"] = pxVsE26,
-            ["ema_spread_atr"]  = emaSpread,
-            ["bb_pos"]          = bbPos,
-            ["atr_pct"]         = atrPct,
+            ["ema_spread_atr"] = emaSpread,
+            ["bb_pos"] = bbPos,
+            ["atr_pct"] = atrPct,
         });
     }
 }
@@ -504,8 +504,8 @@ public sealed class VolumePackNode : IFlowNode
 
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["vol_z20"]      = volZ,
-            ["obv_z20"]      = obvZ,
+            ["vol_z20"] = volZ,
+            ["obv_z20"] = obvZ,
             ["vol_vs_range"] = volVsRange,
             ["up_vol_ratio"] = upVolRatio,
         });
@@ -552,21 +552,21 @@ public sealed class TemporalPackNode : IFlowNode
         var dow = (int)t.DayOfWeek; // 0 = Sunday .. 6 = Saturday
         var hourSin = (decimal)Math.Sin(2 * Math.PI * hourFrac / 24.0);
         var hourCos = (decimal)Math.Cos(2 * Math.PI * hourFrac / 24.0);
-        var dowSin  = (decimal)Math.Sin(2 * Math.PI * dow / 7.0);
-        var dowCos  = (decimal)Math.Cos(2 * Math.PI * dow / 7.0);
+        var dowSin = (decimal)Math.Sin(2 * Math.PI * dow / 7.0);
+        var dowCos = (decimal)Math.Cos(2 * Math.PI * dow / 7.0);
         // Coarse UTC session windows: EU ~07:00-16:00, US ~13:00-21:00 (overlap is the high-vol band).
         var isEu = t.Hour is >= 7 and < 16 ? 1m : 0m;
         var isUs = t.Hour is >= 13 and < 21 ? 1m : 0m;
         var isWeekend = dow is 0 or 6 ? 1m : 0m;
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["hour_sin"]      = hourSin,
-            ["hour_cos"]      = hourCos,
-            ["dow_sin"]       = dowSin,
-            ["dow_cos"]       = dowCos,
+            ["hour_sin"] = hourSin,
+            ["hour_cos"] = hourCos,
+            ["dow_sin"] = dowSin,
+            ["dow_cos"] = dowCos,
             ["is_us_session"] = isUs,
             ["is_eu_session"] = isEu,
-            ["is_weekend"]    = isWeekend,
+            ["is_weekend"] = isWeekend,
         });
     }
 }
@@ -609,8 +609,8 @@ public sealed class HtfRegimePackNode : IFlowNode
             var closes = candles.Select(c => c.Close).ToList();
             var ema12 = Indicators.Ema(closes, 12);
             var ema26 = Indicators.Ema(closes, 26);
-            var atr   = Indicators.Atr(candles, 14);
-            var last  = closes[^1];
+            var atr = Indicators.Atr(candles, 14);
+            var last = closes[^1];
             if (atr is not null && atr.Value > 0m)
             {
                 if (ema12 is not null && ema26 is not null) emaSpread = (ema12.Value - ema26.Value) / atr.Value;
@@ -623,11 +623,11 @@ public sealed class HtfRegimePackNode : IFlowNode
 
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["htf_ema_spread_atr"]  = emaSpread,
+            ["htf_ema_spread_atr"] = emaSpread,
             ["htf_px_vs_ema26_atr"] = pxVsE26,
-            ["htf_atr_pct"]         = atrPct,
-            ["htf_rsi"]             = rsi,
-            ["htf_ret_4"]           = ret4,
+            ["htf_atr_pct"] = atrPct,
+            ["htf_rsi"] = rsi,
+            ["htf_ret_4"] = ret4,
         });
     }
 }
@@ -698,10 +698,10 @@ public sealed class SubBarPackNode : IFlowNode
 
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["subbar_rvol"]     = rvol,
+            ["subbar_rvol"] = rvol,
             ["subbar_up_ratio"] = upRatio,
             ["subbar_vol_skew"] = volSkew,
-            ["subbar_ret_5"]    = ret5,
+            ["subbar_ret_5"] = ret5,
         });
     }
 }

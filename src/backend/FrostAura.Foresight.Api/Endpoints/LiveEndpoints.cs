@@ -65,17 +65,30 @@ public static class LiveEndpoints
                 var cal = await calibration.RescaleAsync(tc.TenantId!.Value, interval, p.DirectionUpProbability, ct);
                 enriched.Add(new
                 {
-                    p.Id, p.TenantId, p.Symbol, p.Interval, p.TargetOpenTime,
-                    p.AnchorClose, p.PredictedClose, p.PredictedChangePct,
+                    p.Id,
+                    p.TenantId,
+                    p.Symbol,
+                    p.Interval,
+                    p.TargetOpenTime,
+                    p.AnchorClose,
+                    p.PredictedClose,
+                    p.PredictedChangePct,
                     p.DirectionUpProbability,
                     directionUpProbabilityCalibrated = cal,
                     p.TargetHitProbability,
                     closeP05 = p.ClosePercentile05,
                     closeP50 = p.ClosePercentile50,
                     closeP95 = p.ClosePercentile95,
-                    p.Confidence, p.Reasoning, p.Model,
-                    p.SupportingDataJson, p.PromptTraceJson,
-                    p.CreatedAt, p.ResolvedAt, p.ActualClose, p.AbsoluteErrorPct, p.DirectionHit
+                    p.Confidence,
+                    p.Reasoning,
+                    p.Model,
+                    p.SupportingDataJson,
+                    p.PromptTraceJson,
+                    p.CreatedAt,
+                    p.ResolvedAt,
+                    p.ActualClose,
+                    p.AbsoluteErrorPct,
+                    p.DirectionHit
                 });
             }
             return Results.Ok(enriched);
@@ -129,17 +142,30 @@ public static class LiveEndpoints
                     var cal = await calibration.RescaleAsync(p.TenantId, p.Interval, p.DirectionUpProbability, linked.Token);
                     var enriched = new
                     {
-                        p.Id, p.TenantId, p.Symbol, p.Interval, p.TargetOpenTime,
-                        p.AnchorClose, p.PredictedClose, p.PredictedChangePct,
+                        p.Id,
+                        p.TenantId,
+                        p.Symbol,
+                        p.Interval,
+                        p.TargetOpenTime,
+                        p.AnchorClose,
+                        p.PredictedClose,
+                        p.PredictedChangePct,
                         p.DirectionUpProbability,
                         directionUpProbabilityCalibrated = cal,
                         p.TargetHitProbability,
                         closeP05 = p.ClosePercentile05,
                         closeP50 = p.ClosePercentile50,
                         closeP95 = p.ClosePercentile95,
-                        p.Confidence, p.Reasoning, p.Model,
-                        p.SupportingDataJson, p.PromptTraceJson,
-                        p.CreatedAt, p.ResolvedAt, p.ActualClose, p.AbsoluteErrorPct, p.DirectionHit
+                        p.Confidence,
+                        p.Reasoning,
+                        p.Model,
+                        p.SupportingDataJson,
+                        p.PromptTraceJson,
+                        p.CreatedAt,
+                        p.ResolvedAt,
+                        p.ActualClose,
+                        p.AbsoluteErrorPct,
+                        p.DirectionHit
                     };
                     var payload = JsonSerializer.Serialize(enriched, jsonOpts);
                     var sb = new StringBuilder()

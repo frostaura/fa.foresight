@@ -10,18 +10,18 @@ namespace FrostAura.Foresight.Infrastructure.Platform;
 /// Held only transiently in memory — never logged, never persisted.
 /// </summary>
 public sealed record ResolvedConnection(
-    Guid    Id,
-    Guid    TenantId,
-    string  ConnectorId,
+    Guid Id,
+    Guid TenantId,
+    string ConnectorId,
     string? PrivateKey,
     string? ApiSecret,
     string? WalletAddress,
-    int     SignatureType,
+    int SignatureType,
     string? Funder,
-    string  ClobBaseUrl,
-    string  GammaBaseUrl,
-    int     ChainId,
-    bool    LiveTrading,
+    string ClobBaseUrl,
+    string GammaBaseUrl,
+    int ChainId,
+    bool LiveTrading,
     decimal MaxTradeUsd,
     decimal EffectivePrice,
     string? RpcUrl)
@@ -71,7 +71,7 @@ public sealed class PlatformConnectionResolver : IPlatformConnectionResolver
         try
         {
             privateKey = _protector.Unprotect(row.PrivateKeyEncrypted);
-            apiSecret  = _protector.Unprotect(row.ApiSecretEncrypted);
+            apiSecret = _protector.Unprotect(row.ApiSecretEncrypted);
         }
         catch (Exception ex)
         {

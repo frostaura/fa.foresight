@@ -42,20 +42,20 @@ public static class SessionsEndpoints
                     var betsPlaced = s.Bets.Count;
                     var betsWon = s.Bets.Count(b => b.Outcome == "win");
                     results.Add(new SessionDto(
-                        Id:             s.Id.ToString(),
-                        Mode:           "paper",
-                        Symbol:         s.Symbol,
-                        Interval:       s.Interval,
-                        ModelId:        null,
-                        StrategyId:     s.StrategyId,
-                        StartedAt:      s.StartedAt,
-                        StoppedAt:      s.StoppedAt,
+                        Id: s.Id.ToString(),
+                        Mode: "paper",
+                        Symbol: s.Symbol,
+                        Interval: s.Interval,
+                        ModelId: null,
+                        StrategyId: s.StrategyId,
+                        StartedAt: s.StartedAt,
+                        StoppedAt: s.StoppedAt,
                         InitialBalance: s.InitialBalance,
                         CurrentBalance: s.CurrentBalance,
                         CurrentBetSize: s.CurrentBetSize,
-                        BetsPlaced:     betsPlaced,
-                        BetsWon:        betsWon,
-                        Bust:           s.Bust,
+                        BetsPlaced: betsPlaced,
+                        BetsWon: betsWon,
+                        Bust: s.Bust,
                         ReservedAmount: null
                     ));
                 }
@@ -70,20 +70,20 @@ public static class SessionsEndpoints
                     var betsPlaced = s.Bets.Count;
                     var betsWon = s.Bets.Count(b => b.Outcome == "win");
                     results.Add(new SessionDto(
-                        Id:             s.Id.ToString(),
-                        Mode:           s.Mode, // "live" or "paper" (live engine may hold both)
-                        Symbol:         s.Symbol,
-                        Interval:       s.Interval,
-                        ModelId:        null,
-                        StrategyId:     s.StrategyId,
-                        StartedAt:      s.StartedAt,
-                        StoppedAt:      s.StoppedAt,
+                        Id: s.Id.ToString(),
+                        Mode: s.Mode, // "live" or "paper" (live engine may hold both)
+                        Symbol: s.Symbol,
+                        Interval: s.Interval,
+                        ModelId: null,
+                        StrategyId: s.StrategyId,
+                        StartedAt: s.StartedAt,
+                        StoppedAt: s.StoppedAt,
                         InitialBalance: s.InitialBalance,
                         CurrentBalance: s.CurrentBalance,
                         CurrentBetSize: s.CurrentBetSize,
-                        BetsPlaced:     betsPlaced,
-                        BetsWon:        betsWon,
-                        Bust:           s.Bust,
+                        BetsPlaced: betsPlaced,
+                        BetsWon: betsWon,
+                        Bust: s.Bust,
                         ReservedAmount: s.ReservedAmount
                     ));
                 }
@@ -117,20 +117,20 @@ public static class SessionsEndpoints
                     var betsPlaced = s.Bets.Count;
                     var betsWon = s.Bets.Count(b => b.Outcome == "win");
                     var dto = new SessionDto(
-                        Id:             s.Id.ToString(),
-                        Mode:           "paper",
-                        Symbol:         s.Symbol,
-                        Interval:       s.Interval,
-                        ModelId:        null,
-                        StrategyId:     s.StrategyId,
-                        StartedAt:      s.StartedAt,
-                        StoppedAt:      s.StoppedAt,
+                        Id: s.Id.ToString(),
+                        Mode: "paper",
+                        Symbol: s.Symbol,
+                        Interval: s.Interval,
+                        ModelId: null,
+                        StrategyId: s.StrategyId,
+                        StartedAt: s.StartedAt,
+                        StoppedAt: s.StoppedAt,
                         InitialBalance: s.InitialBalance,
                         CurrentBalance: s.CurrentBalance,
                         CurrentBetSize: s.CurrentBetSize,
-                        BetsPlaced:     betsPlaced,
-                        BetsWon:        betsWon,
-                        Bust:           s.Bust,
+                        BetsPlaced: betsPlaced,
+                        BetsWon: betsWon,
+                        Bust: s.Bust,
                         ReservedAmount: null
                     );
                     return Results.Created($"/api/sessions/{s.Id}", dto);
@@ -148,32 +148,32 @@ public static class SessionsEndpoints
                     }
 
                     var startReq = new LiveSessionStartRequest(
-                        Venue:          "polymarket",
-                        Symbol:         req.Symbol,
-                        Interval:       req.Interval,
+                        Venue: "polymarket",
+                        Symbol: req.Symbol,
+                        Interval: req.Interval,
                         InitialBalance: req.InitialBalance,
                         InitialBetSize: req.InitialBetSize,
-                        StrategyId:     req.StrategyId,
-                        Gated:          req.Gated
+                        StrategyId: req.StrategyId,
+                        Gated: req.Gated
                     );
                     var s = await liveSvc.StartAsync(startReq, ct);
                     var betsPlaced = s.Bets.Count;
                     var betsWon = s.Bets.Count(b => b.Outcome == "win");
                     var dto = new SessionDto(
-                        Id:             s.Id.ToString(),
-                        Mode:           s.Mode,
-                        Symbol:         s.Symbol,
-                        Interval:       s.Interval,
-                        ModelId:        null,
-                        StrategyId:     s.StrategyId,
-                        StartedAt:      s.StartedAt,
-                        StoppedAt:      s.StoppedAt,
+                        Id: s.Id.ToString(),
+                        Mode: s.Mode,
+                        Symbol: s.Symbol,
+                        Interval: s.Interval,
+                        ModelId: null,
+                        StrategyId: s.StrategyId,
+                        StartedAt: s.StartedAt,
+                        StoppedAt: s.StoppedAt,
                         InitialBalance: s.InitialBalance,
                         CurrentBalance: s.CurrentBalance,
                         CurrentBetSize: s.CurrentBetSize,
-                        BetsPlaced:     betsPlaced,
-                        BetsWon:        betsWon,
-                        Bust:           s.Bust,
+                        BetsPlaced: betsPlaced,
+                        BetsWon: betsWon,
+                        Bust: s.Bust,
                         ReservedAmount: s.ReservedAmount
                     );
                     return Results.Created($"/api/sessions/{s.Id}", dto);
@@ -230,20 +230,20 @@ public static class SessionsEndpoints
         var betsPlaced = s.Bets.Count;
         var betsWon = s.Bets.Count(b => b.Outcome == "win");
         return new SessionDto(
-            Id:             s.Id.ToString(),
-            Mode:           s.Mode,
-            Symbol:         s.Symbol,
-            Interval:       s.Interval,
-            ModelId:        null,
-            StrategyId:     s.StrategyId,
-            StartedAt:      s.StartedAt,
-            StoppedAt:      s.StoppedAt,
+            Id: s.Id.ToString(),
+            Mode: s.Mode,
+            Symbol: s.Symbol,
+            Interval: s.Interval,
+            ModelId: null,
+            StrategyId: s.StrategyId,
+            StartedAt: s.StartedAt,
+            StoppedAt: s.StoppedAt,
             InitialBalance: s.InitialBalance,
             CurrentBalance: s.CurrentBalance,
             CurrentBetSize: s.CurrentBetSize,
-            BetsPlaced:     betsPlaced,
-            BetsWon:        betsWon,
-            Bust:           s.Bust,
+            BetsPlaced: betsPlaced,
+            BetsWon: betsWon,
+            Bust: s.Bust,
             ReservedAmount: s.ReservedAmount
         );
     }
@@ -253,20 +253,20 @@ public static class SessionsEndpoints
         var betsPlaced = s.Bets.Count;
         var betsWon = s.Bets.Count(b => b.Outcome == "win");
         return new SessionDto(
-            Id:             s.Id.ToString(),
-            Mode:           "paper",
-            Symbol:         s.Symbol,
-            Interval:       s.Interval,
-            ModelId:        null,
-            StrategyId:     s.StrategyId,
-            StartedAt:      s.StartedAt,
-            StoppedAt:      s.StoppedAt,
+            Id: s.Id.ToString(),
+            Mode: "paper",
+            Symbol: s.Symbol,
+            Interval: s.Interval,
+            ModelId: null,
+            StrategyId: s.StrategyId,
+            StartedAt: s.StartedAt,
+            StoppedAt: s.StoppedAt,
             InitialBalance: s.InitialBalance,
             CurrentBalance: s.CurrentBalance,
             CurrentBetSize: s.CurrentBetSize,
-            BetsPlaced:     betsPlaced,
-            BetsWon:        betsWon,
-            Bust:           s.Bust,
+            BetsPlaced: betsPlaced,
+            BetsWon: betsWon,
+            Bust: s.Bust,
             ReservedAmount: null
         );
     }
@@ -276,29 +276,29 @@ public static class SessionsEndpoints
 /// Normalised session shape returned by all /api/sessions endpoints.
 /// </summary>
 public sealed record SessionDto(
-    string          Id,
-    string          Mode,           // "paper" | "live"
-    string          Symbol,
-    string          Interval,
-    string?         ModelId,
-    string          StrategyId,
-    DateTimeOffset  StartedAt,
+    string Id,
+    string Mode,           // "paper" | "live"
+    string Symbol,
+    string Interval,
+    string? ModelId,
+    string StrategyId,
+    DateTimeOffset StartedAt,
     DateTimeOffset? StoppedAt,
-    decimal         InitialBalance,
-    decimal         CurrentBalance,
-    decimal         CurrentBetSize,
-    int             BetsPlaced,
-    int             BetsWon,
-    bool            Bust,
-    decimal?        ReservedAmount
+    decimal InitialBalance,
+    decimal CurrentBalance,
+    decimal CurrentBetSize,
+    int BetsPlaced,
+    int BetsWon,
+    bool Bust,
+    decimal? ReservedAmount
 );
 
 public sealed record CreateSessionRequest(
-    string  Mode,           // "paper" | "live"
-    string  Symbol,
-    string  Interval,
+    string Mode,           // "paper" | "live"
+    string Symbol,
+    string Interval,
     decimal InitialBalance,
     decimal InitialBetSize,
     string? StrategyId,
-    bool    Gated = false
+    bool Gated = false
 );

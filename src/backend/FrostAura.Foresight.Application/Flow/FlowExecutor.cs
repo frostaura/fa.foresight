@@ -35,7 +35,7 @@ public sealed class FlowExecutor : IFlowExecutor
         foreach (var e in flow.Edges)
         {
             var fromId = e.From.SplitEndpoint().NodeId;
-            var toId   = e.To.SplitEndpoint().NodeId;
+            var toId = e.To.SplitEndpoint().NodeId;
             outgoing[fromId].Add(toId);
             incoming[toId].Add(e);
             indegree[toId]++;
@@ -119,7 +119,7 @@ public sealed class FlowExecutor : IFlowExecutor
         foreach (var e in edges)
         {
             var (fromNode, fromPort) = e.From.SplitEndpoint();
-            var (_,        toPort)   = e.To.SplitEndpoint();
+            var (_, toPort) = e.To.SplitEndpoint();
             bag[toPort] = outputs.TryGetValue((fromNode, fromPort), out var val) ? val : null;
         }
 

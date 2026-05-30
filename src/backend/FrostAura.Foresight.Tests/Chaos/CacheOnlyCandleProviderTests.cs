@@ -34,14 +34,14 @@ public sealed class CacheOnlyCandleProviderTests
 
     private static HistoricalCandle MakeCandle(string interval, long openTime) => new()
     {
-        Symbol   = Symbol,
+        Symbol = Symbol,
         Interval = interval,
         OpenTime = openTime,
-        Open     = 100m,
-        High     = 101m,
-        Low      = 99m,
-        Close    = 100.5m,
-        Volume   = 1000m,
+        Open = 100m,
+        High = 101m,
+        Low = 99m,
+        Close = 100.5m,
+        Volume = 1000m,
     };
 
     private static IReadOnlyList<HistoricalCandle> MakeCandles(string interval, long startMs, int count)
@@ -68,8 +68,8 @@ public sealed class CacheOnlyCandleProviderTests
 
         // Request a sub-range in the middle.
         var startMs = baseMs + 10 * intervalMs;
-        var endMs   = baseMs + 29 * intervalMs;
-        var result  = await provider.GetRangeAsync(Symbol, TargetInterval, startMs, endMs);
+        var endMs = baseMs + 29 * intervalMs;
+        var result = await provider.GetRangeAsync(Symbol, TargetInterval, startMs, endMs);
 
         result.Should().HaveCount(20, "exactly 20 candles fall in [startMs, endMs]");
         result.All(c => c.OpenTime >= startMs && c.OpenTime <= endMs).Should().BeTrue();
@@ -98,11 +98,11 @@ public sealed class CacheOnlyCandleProviderTests
     public async Task GetRangeAsync_returns_off_tf_candles_when_provided()
     {
         var fiveMIntervalMs = BacktestRunner.PublicIntervalMs("5m");
-        var oneMIntervalMs  = BacktestRunner.PublicIntervalMs("1m");
+        var oneMIntervalMs = BacktestRunner.PublicIntervalMs("1m");
         var baseMs = 1_716_000_000_000L;
 
         var targetCandles = MakeCandles("5m", baseMs, 50);
-        var oneMCandles   = MakeCandles("1m", baseMs, 300); // 5 candles per 5m bar
+        var oneMCandles = MakeCandles("1m", baseMs, 300); // 5 candles per 5m bar
 
         var offTf = new Dictionary<string, IReadOnlyList<HistoricalCandle>>
         {
@@ -112,8 +112,8 @@ public sealed class CacheOnlyCandleProviderTests
         var provider = new CacheOnlyCandleProvider(Symbol, "5m", targetCandles, offTf);
 
         var startMs = baseMs + 10 * oneMIntervalMs;
-        var endMs   = baseMs + 59 * oneMIntervalMs;
-        var result  = await provider.GetRangeAsync(Symbol, "1m", startMs, endMs);
+        var endMs = baseMs + 59 * oneMIntervalMs;
+        var result = await provider.GetRangeAsync(Symbol, "1m", startMs, endMs);
 
         result.Should().HaveCount(50, "50 1m candles fall in the requested range");
         result.All(c => c.OpenTime >= startMs && c.OpenTime <= endMs).Should().BeTrue();
@@ -152,7 +152,7 @@ public sealed class CacheOnlyCandleProviderTests
         var targetCandles = MakeCandles(TargetInterval, baseMs, 5_000); // simulate large historical range
         var offTf = new Dictionary<string, IReadOnlyList<HistoricalCandle>>
         {
-            ["1m"]  = MakeCandles("1m",  baseMs, 25_000),
+            ["1m"] = MakeCandles("1m", baseMs, 25_000),
             ["15m"] = MakeCandles("15m", baseMs, 1_500),
         };
 
@@ -162,7 +162,7 @@ public sealed class CacheOnlyCandleProviderTests
         for (var i = 0; i < 1_000; i++)
         {
             var startMs = baseMs + (long)i * intervalMs;
-            var endMs   = startMs + 59 * intervalMs;
+            var endMs = startMs + 59 * intervalMs;
 
             // GetRangeAsync returns a synchronously-completed Task — no await/scheduler hop means no I/O.
             var task = provider.GetRangeAsync(Symbol, TargetInterval, startMs, endMs);

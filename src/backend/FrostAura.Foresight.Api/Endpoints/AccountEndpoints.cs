@@ -24,9 +24,9 @@ public static class AccountEndpoints
             var tenantId = tc.TenantId!.Value;
 
             var walletPusd = await ledger.GetWalletPusdAsync(tenantId, ct);
-            var free       = await ledger.GetFreeAsync(tenantId, ct);
+            var free = await ledger.GetFreeAsync(tenantId, ct);
             // reserved = walletPusd − free holds even when walletPusd is 0/unconfirmed (free goes negative).
-            var reserved   = walletPusd - free;
+            var reserved = walletPusd - free;
 
             return Results.Ok(new AccountBalanceView(
                 WalletPusd: walletPusd,

@@ -312,12 +312,22 @@ public sealed class BacktestsService : IBacktestsService
             var start = nowMs - k * dayMs;
             var bt = new Backtest
             {
-                Id = Guid.NewGuid(), TenantId = tenantId, ModelId = req.ModelId,
-                Symbol = req.Symbol, Interval = req.Interval, StartTime = start, EndTime = nowMs,
-                InitialBalance = req.InitialBalance, InitialBetSize = req.InitialBetSize,
-                Status = "queued", StartedAt = DateTimeOffset.UtcNow,
-                AllowBorrow = req.AllowBorrow, BatchId = batchId, StrategyId = req.StrategyId,
-                BatchKind = "bust-test", LookbackDay = k,
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ModelId = req.ModelId,
+                Symbol = req.Symbol,
+                Interval = req.Interval,
+                StartTime = start,
+                EndTime = nowMs,
+                InitialBalance = req.InitialBalance,
+                InitialBetSize = req.InitialBetSize,
+                Status = "queued",
+                StartedAt = DateTimeOffset.UtcNow,
+                AllowBorrow = req.AllowBorrow,
+                BatchId = batchId,
+                StrategyId = req.StrategyId,
+                BatchKind = "bust-test",
+                LookbackDay = k,
             };
             _db.Backtests.Add(bt);
             created.Add(bt);
@@ -433,12 +443,23 @@ public sealed class BacktestsService : IBacktestsService
             var after = fb.Won ? balance + betSize : balance - betSize;
             derived.Add(new Domain.Backtesting.BacktestBet
             {
-                Id = Guid.NewGuid(), BacktestId = rungId, TargetOpenTime = fb.TargetOpenTime,
-                Side = fb.Side, PUpRaw = fb.PUpRaw, PUpCalibrated = null, Size = betSize,
-                BalanceBefore = before, BalanceAfter = after, Won = fb.Won, BorrowedShortfall = 0m,
+                Id = Guid.NewGuid(),
+                BacktestId = rungId,
+                TargetOpenTime = fb.TargetOpenTime,
+                Side = fb.Side,
+                PUpRaw = fb.PUpRaw,
+                PUpCalibrated = null,
+                Size = betSize,
+                BalanceBefore = before,
+                BalanceAfter = after,
+                Won = fb.Won,
+                BorrowedShortfall = 0m,
                 // Carry odds fields from the full-pass bet (same candle, same prices).
-                EntryPrice = fb.EntryPrice, Shares = fb.Shares, Payout = fb.Payout,
-                Synthetic = fb.Synthetic, MarketExternalId = fb.MarketExternalId,
+                EntryPrice = fb.EntryPrice,
+                Shares = fb.Shares,
+                Payout = fb.Payout,
+                Synthetic = fb.Synthetic,
+                MarketExternalId = fb.MarketExternalId,
             });
             placed++; if (fb.Won) won++;
             balance = after;
@@ -589,16 +610,16 @@ public sealed class ModelTrainingService : IModelTrainingService
     /// </summary>
     private static int LookbackDaysFor(string interval) => interval switch
     {
-        "1m"  => 30,
-        "5m"  => 90,
+        "1m" => 30,
+        "5m" => 90,
         "15m" => 365,
         _ => 90,
     };
 
     private static long IntervalMs(string interval) => interval switch
     {
-        "1m"  => 60_000L,
-        "5m"  => 300_000L,
+        "1m" => 60_000L,
+        "5m" => 300_000L,
         "15m" => 900_000L,
         _ => throw new ArgumentException($"Unsupported interval '{interval}'.", nameof(interval)),
     };
@@ -770,8 +791,8 @@ public sealed class ModelTrainingService : IModelTrainingService
         // when present, else the longest-window interval). Kept for legacy callers that read
         // these columns directly without knowing about variants.
         model.TrainStartMs = variants.Min(v => v.TrainStartMs);
-        model.TrainEndMs   = variants.Max(v => v.TrainEndMs);
-        model.TrainSymbol  = symbol;
+        model.TrainEndMs = variants.Max(v => v.TrainEndMs);
+        model.TrainSymbol = symbol;
         model.TrainInterval = variants.Any(v => v.Interval == "15m") ? "15m" : variants.Last().Interval;
         model.UpdatedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);

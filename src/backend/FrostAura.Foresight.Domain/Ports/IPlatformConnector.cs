@@ -54,8 +54,8 @@ public sealed record SellRequest(
 /// </summary>
 public sealed record MarketResolution(
     string ConditionId,
-    bool   Resolved,
-    int?   WinningOutcomeIndex)
+    bool Resolved,
+    int? WinningOutcomeIndex)
 {
     /// <summary>True when the market resolved with YES winning (outcomeIndex=0).</summary>
     public bool? YesWon => Resolved ? WinningOutcomeIndex == 0 : null;

@@ -86,9 +86,9 @@ public sealed class TelegramCommandListenerService : BackgroundService
 
         switch (token.ToLowerInvariant())
         {
-            case "start":   await HandleStartAsync(chatId, ct); break;
+            case "start": await HandleStartAsync(chatId, ct); break;
             case "connect": await SendConnectAsync(chatId, ct); break;
-            // Anything else is ignored — the bot only speaks /start and /connect.
+                // Anything else is ignored — the bot only speaks /start and /connect.
         }
     }
 
@@ -105,20 +105,20 @@ public sealed class TelegramCommandListenerService : BackgroundService
 
         // Connected → welcome back + overall P&L across the tenant's paper + live sessions.
         var paper = await db.PaperSessions.AsNoTracking().Where(s => s.TenantId == tenant.Id).ToListAsync(ct);
-        var live  = await db.LiveSessions.AsNoTracking().Where(s => s.TenantId == tenant.Id).ToListAsync(ct);
+        var live = await db.LiveSessions.AsNoTracking().Where(s => s.TenantId == tenant.Id).ToListAsync(ct);
 
-        var net     = paper.Sum(s => s.CurrentBalance - s.InitialBalance) + live.Sum(s => s.CurrentBalance - s.InitialBalance);
+        var net = paper.Sum(s => s.CurrentBalance - s.InitialBalance) + live.Sum(s => s.CurrentBalance - s.InitialBalance);
         var initSum = paper.Sum(s => s.InitialBalance) + live.Sum(s => s.InitialBalance);
-        var pct     = initSum > 0m ? net / initSum * 100m : 0m;
-        var active  = paper.Count(s => s.StoppedAt == null) + live.Count(s => s.StoppedAt == null);
+        var pct = initSum > 0m ? net / initSum * 100m : 0m;
+        var active = paper.Count(s => s.StoppedAt == null) + live.Count(s => s.StoppedAt == null);
 
         var pIds = paper.Select(s => s.Id).ToList();
         var lIds = live.Select(s => s.Id).ToList();
         var pBets = await db.PaperBets.AsNoTracking().Where(b => pIds.Contains(b.SessionId) && b.Resolved).ToListAsync(ct);
         var lBets = await db.LiveBets.AsNoTracking().Where(b => lIds.Contains(b.SessionId) && b.Resolved).ToListAsync(ct);
         var placed = pBets.Count + lBets.Count;
-        var won    = pBets.Count(b => b.Outcome == "win") + lBets.Count(b => b.Outcome == "win");
-        var hr     = placed > 0 ? (decimal)won / placed * 100m : 0m;
+        var won = pBets.Count(b => b.Outcome == "win") + lBets.Count(b => b.Outcome == "win");
+        var hr = placed > 0 ? (decimal)won / placed * 100m : 0m;
 
         var sign = net >= 0m ? "🟢" : "🔴";
         // Hit-rate icon: green once it clears the ~55% break-even for the conservative fee, amber if

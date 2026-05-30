@@ -9,23 +9,23 @@ namespace FrostAura.Foresight.Domain.Ledger;
 /// </summary>
 public sealed class AccountLedgerEntry : ITenantScoped
 {
-    public Guid   Id        { get; init; }
-    public Guid   TenantId  { get; init; }
+    public Guid Id { get; init; }
+    public Guid TenantId { get; init; }
     /// <summary>Venue identifier (e.g. "polymarket").</summary>
-    public required string  Venue     { get; init; }
+    public required string Venue { get; init; }
     /// <summary>Event kind: "reserve" | "recompute" | "release" | "reconcile".</summary>
-    public required string  EntryKind { get; init; }
+    public required string EntryKind { get; init; }
     /// <summary>Associated live session id, if applicable.</summary>
-    public Guid?  SessionId { get; init; }
+    public Guid? SessionId { get; init; }
     /// <summary>The amount involved in this event (reservation size, released amount, etc.).</summary>
-    public decimal Amount    { get; init; }
+    public decimal Amount { get; init; }
     /// <summary>Wallet pUSD balance at time of entry (from on-chain query or cache).</summary>
     public decimal WalletPusd { get; init; }
     /// <summary>Computed free balance after this entry.</summary>
     public decimal FreeAfter { get; init; }
     /// <summary>Drift amount (non-zero only on reconcile entries).</summary>
-    public decimal? Drift    { get; init; }
+    public decimal? Drift { get; init; }
     /// <summary>Free-form JSON context note.</summary>
-    public string?  Note     { get; init; }
+    public string? Note { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
 }

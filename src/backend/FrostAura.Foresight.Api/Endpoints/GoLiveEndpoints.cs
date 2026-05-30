@@ -45,7 +45,7 @@ public static class GoLiveEndpoints
                 return Results.BadRequest(new { error = "Invalid or expired confirmation code. Request a new code." });
             return Results.Ok(new
             {
-                armed   = true,
+                armed = true,
                 message = "Live execution is ARMED. Real orders will be placed on the next qualifying candle. Send /api/golive/killswitch to disarm at any time."
             });
         });

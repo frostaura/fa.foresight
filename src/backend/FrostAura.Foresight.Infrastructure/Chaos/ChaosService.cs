@@ -566,8 +566,8 @@ internal sealed class CacheOnlyCandleProvider : IHistoricalCandleProvider
     {
         _ = symbol; // validated by caller; symbol filtering happens in SortedRange via the passed parameter
         _targetInterval = interval;
-        _targetCandles  = targetCandles;
-        _offTfCandles   = offTfCandles;
+        _targetCandles = targetCandles;
+        _offTfCandles = offTfCandles;
     }
 
     public Task<IReadOnlyList<HistoricalCandle>> GetRangeAsync(

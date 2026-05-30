@@ -177,45 +177,47 @@ def _worker_main(
                 np=np,
             )
 
-        queue.put({
+        result = {
             "ok": True,
             "outputs": encoded_outputs,
             "error": None,
             "stdout": stdout_buf.getvalue(),
             "stderr": stderr_buf.getvalue(),
             "outputHash": output_hash,
-        })
+        }
 
     except _SchemaMismatch as exc:
-        queue.put({
+        result = {
             "ok": False,
             "outputs": None,
             "error": {"kind": "SchemaMismatch", "message": str(exc)},
             "stdout": stdout_buf.getvalue(),
             "stderr": stderr_buf.getvalue(),
             "outputHash": None,
-        })
+        }
 
     except NondeterminismError as exc:
-        queue.put({
+        result = {
             "ok": False,
             "outputs": None,
             "error": {"kind": "NondeterminismError", "message": str(exc)},
             "stdout": stdout_buf.getvalue(),
             "stderr": stderr_buf.getvalue(),
             "outputHash": None,
-        })
+        }
 
     except Exception as exc:
         tb = traceback.format_exc()
-        queue.put({
+        result = {
             "ok": False,
             "outputs": None,
             "error": {"kind": "UserException", "message": f"{type(exc).__name__}: {exc}\n{tb}"},
             "stdout": stdout_buf.getvalue(),
             "stderr": stderr_buf.getvalue(),
             "outputHash": None,
-        })
+        }
+
+    queue.put(result)
 
 
 # ---------------------------------------------------------------------------

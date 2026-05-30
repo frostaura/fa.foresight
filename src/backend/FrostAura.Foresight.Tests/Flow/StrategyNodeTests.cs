@@ -33,7 +33,11 @@ public class StrategyNodeTests
     {
         var inputs = new Dictionary<string, object?>
         {
-            ["pUp"] = 0.60m, ["yesPrice"] = 0.55m, ["noPrice"] = 0.45m, ["balance"] = 1000m, ["initialBet"] = 2m,
+            ["pUp"] = 0.60m,
+            ["yesPrice"] = 0.55m,
+            ["noPrice"] = 0.45m,
+            ["balance"] = 1000m,
+            ["initialBet"] = 2m,
         };
         var nodeStake = await StakeAsync(new EdgeAwareKellyNode(), inputs, Empty);
 
@@ -71,7 +75,11 @@ public class StrategyNodeTests
     {
         var edge = await StakeAsync(new EdgeAwareKellyNode(), new Dictionary<string, object?>
         {
-            ["pUp"] = pUp, ["yesPrice"] = yes, ["noPrice"] = no, ["balance"] = balance, ["initialBet"] = 2m,
+            ["pUp"] = pUp,
+            ["yesPrice"] = yes,
+            ["noPrice"] = no,
+            ["balance"] = balance,
+            ["initialBet"] = 2m,
         }, Empty);
         var clamped = await StakeAsync(new ClampRoundNode(),
             new Dictionary<string, object?> { ["stake"] = edge }, Empty);

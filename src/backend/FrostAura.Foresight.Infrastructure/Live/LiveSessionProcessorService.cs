@@ -24,7 +24,7 @@ public sealed class LiveSessionProcessorService : BackgroundService
     public LiveSessionProcessorService(IServiceScopeFactory scopeFactory, ILogger<LiveSessionProcessorService> logger)
     {
         _scopeFactory = scopeFactory;
-        _logger       = logger;
+        _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -65,7 +65,7 @@ public sealed class LiveSessionProcessorService : BackgroundService
                 var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
                 if (!tenantSlugs.TryGetValue(summary.TenantId, out var slug)) continue;
                 tenantContext.Set(summary.TenantId, slug);
-                var engine  = scope.ServiceProvider.GetRequiredService<ILiveSessionEngine>();
+                var engine = scope.ServiceProvider.GetRequiredService<ILiveSessionEngine>();
                 var session = await engine.GetByIdAsync(summary.Id, ct);
                 if (session is null) continue;
                 await engine.ProcessAsync(session, ct);

@@ -24,11 +24,11 @@ public sealed record ChartModel(
 /// </summary>
 public static class CandlestickChartRenderer
 {
-    private static readonly Color Bg   = Color.FromHex("#0B1220");
-    private static readonly Color Up   = Color.FromHex("#6CC58F");
+    private static readonly Color Bg = Color.FromHex("#0B1220");
+    private static readonly Color Up = Color.FromHex("#6CC58F");
     private static readonly Color Down = Color.FromHex("#F08484");
-    private static readonly Color Bal  = Color.FromHex("#A4D4F4");
-    private static readonly Color Hit  = Color.FromHex("#34D399");
+    private static readonly Color Bal = Color.FromHex("#A4D4F4");
+    private static readonly Color Hit = Color.FromHex("#34D399");
     private static readonly Color Miss = Color.FromHex("#F87171");
     private static readonly Color Pend = Color.FromHex("#E8C26A");
 

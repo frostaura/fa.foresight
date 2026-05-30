@@ -44,28 +44,28 @@ public interface ILiveSessionEngine
 }
 
 public sealed record LiveSessionStartRequest(
-    string  Venue,
-    string  Symbol,
-    string  Interval,
+    string Venue,
+    string Symbol,
+    string Interval,
     decimal InitialBalance,
     decimal InitialBetSize,
     string? StrategyId,
-    bool    Gated);
+    bool Gated);
 
 public sealed class LiveSessionEngine : ILiveSessionEngine
 {
     private const long PlacementSafetyBufferMs = 5_000;
 
     private readonly ForesightDbContext _db;
-    private readonly ITenantContext     _tenant;
+    private readonly ITenantContext _tenant;
     private readonly IPlatformConnectorFactory _connectorFactory;
-    private readonly ILiveTradingArm    _arm;
-    private readonly IAccountLedger     _ledger;
+    private readonly ILiveTradingArm _arm;
+    private readonly IAccountLedger _ledger;
     private readonly ICalibrationRescaler _calibration;
-    private readonly IVenuePriceStore   _venuePrices;
+    private readonly IVenuePriceStore _venuePrices;
     private readonly BinanceMarketDataClient _binance;
     private readonly TradingGuardrailOptions _guardrails;
-    private readonly TradingNotifier    _notifier;
+    private readonly TradingNotifier _notifier;
     private readonly ILogger<LiveSessionEngine> _logger;
 
     public LiveSessionEngine(
@@ -81,17 +81,17 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
         TradingNotifier notifier,
         ILogger<LiveSessionEngine> logger)
     {
-        _db          = db;
-        _tenant      = tenant;
+        _db = db;
+        _tenant = tenant;
         _connectorFactory = connectorFactory;
-        _arm         = arm;
-        _ledger      = ledger;
+        _arm = arm;
+        _ledger = ledger;
         _calibration = calibration;
         _venuePrices = venuePrices;
-        _binance     = binance;
-        _guardrails  = guardrails.Value;
-        _notifier    = notifier;
-        _logger      = logger;
+        _binance = binance;
+        _guardrails = guardrails.Value;
+        _notifier = notifier;
+        _logger = logger;
     }
 
     public async Task<LiveSession> StartAsync(LiveSessionStartRequest request, CancellationToken ct)
@@ -102,7 +102,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
             throw new ArgumentException("initialBetSize must be > 0 and <= initialBalance");
 
         var resolvedStrategy = StakingStrategies.Resolve(request.StrategyId).Id;
-        var configHash       = ComputeConfigHash(request.Venue, request.Symbol, request.Interval, resolvedStrategy, request.InitialBalance, request.InitialBetSize);
+        var configHash = ComputeConfigHash(request.Venue, request.Symbol, request.Interval, resolvedStrategy, request.InitialBalance, request.InitialBetSize);
 
         // Config-hash collision check: active paper OR live session with the same config → 409.
         // Both paper_sessions.ConfigHash and live_sessions.ConfigHash are computed with the same
@@ -134,18 +134,18 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
 
         var session = new LiveSession
         {
-            Id             = Guid.NewGuid(),
-            TenantId       = _tenant.TenantId!.Value,
-            Symbol         = request.Symbol,
-            Interval       = request.Interval,
-            Venue          = request.Venue,
-            Mode           = "live",
-            ConfigHash     = configHash,
-            StartedAt      = DateTimeOffset.UtcNow,
+            Id = Guid.NewGuid(),
+            TenantId = _tenant.TenantId!.Value,
+            Symbol = request.Symbol,
+            Interval = request.Interval,
+            Venue = request.Venue,
+            Mode = "live",
+            ConfigHash = configHash,
+            StartedAt = DateTimeOffset.UtcNow,
             InitialBalance = request.InitialBalance,
             InitialBetSize = request.InitialBetSize,
-            StrategyId     = resolvedStrategy,
-            Gated          = request.Gated,
+            StrategyId = resolvedStrategy,
+            Gated = request.Gated,
             CurrentBalance = request.InitialBalance,
             CurrentBetSize = request.InitialBetSize,
             ReservedAmount = request.InitialBalance
@@ -206,7 +206,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
         // sessions routed through this engine — the connector will be NullExecutionProvider when the
         // tenant has no usable key or LiveTrading=false.
         var tenantId = session.TenantId;
-        var isLive   = session.Mode == "live";
+        var isLive = session.Mode == "live";
         var connector = await _connectorFactory.GetForTenantAsync(tenantId, ct);
         if (isLive && connector.ConnectorId != "null-execution" && !_arm.IsArmed(tenantId))
         {
@@ -236,9 +236,9 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
         if (tracked.StoppedAt is not null || tracked.Bust) return tracked;
 
         var intervalMs = BinanceMarketDataClient.IntervalMs(tracked.Interval);
-        var nowMs      = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var currentCandleOpenMs = nowMs / intervalMs * intervalMs;
-        var openBet    = tracked.Bets.FirstOrDefault(b => !b.Resolved);
+        var openBet = tracked.Bets.FirstOrDefault(b => !b.Resolved);
 
         // ── Settlement ──────────────────────────────────────────────────────────
         if (openBet is not null)
@@ -326,13 +326,13 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                     if (step.CrossedZero) tracked.ZeroCrossingsCount++;
                     if (tracked.CurrentBalance < 0)
                         tracked.PeakBorrowed = Math.Max(tracked.PeakBorrowed, Math.Abs(tracked.CurrentBalance));
-                    openBet.Resolved       = true;
-                    openBet.Outcome        = step.Won ? "win" : "loss";
-                    openBet.Payout         = step.Payout;
-                    openBet.Shares         = step.Shares;
-                    openBet.BalanceAfter   = tracked.CurrentBalance;
+                    openBet.Resolved = true;
+                    openBet.Outcome = step.Won ? "win" : "loss";
+                    openBet.Payout = step.Payout;
+                    openBet.Shares = step.Shares;
+                    openBet.BalanceAfter = tracked.CurrentBalance;
                     openBet.MarketOutcomeUp = marketOutcomeUp;
-                    openBet.ResolvedAt     = DateTimeOffset.UtcNow;
+                    openBet.ResolvedAt = DateTimeOffset.UtcNow;
 
                     // Divergence signals on a real resolution. Two distinct cases, recorded separately:
                     if (marketOutcomeUp.HasValue)
@@ -376,7 +376,8 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                     }
                     if (tracked.CurrentBalance <= 0) { tracked.Bust = true; tracked.StoppedAt = DateTimeOffset.UtcNow; }
 
-                    try { await _db.SaveChangesAsync(ct); } catch (DbUpdateConcurrencyException ex)
+                    try { await _db.SaveChangesAsync(ct); }
+                    catch (DbUpdateConcurrencyException ex)
                     { _logger.LogWarning(ex, "Settlement concurrency loss for live bet {Id}", openBet.Id); }
 
                     // Recompute ledger reservation after settle.
@@ -412,7 +413,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                     var pred = await _db.LivePredictions.AsNoTracking()
                         .FirstOrDefaultAsync(p =>
                             p.TenantId == tracked.TenantId &&
-                            p.Symbol   == tracked.Symbol   &&
+                            p.Symbol == tracked.Symbol &&
                             p.Interval == tracked.Interval &&
                             p.TargetOpenTime == currentCandleOpenMs, ct);
 
@@ -427,13 +428,13 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                         {
                             var entryQuote = await _venuePrices.EnsureEntryAsync(
                                 tracked.Venue, tracked.Symbol, tracked.Interval, currentCandleOpenMs, calibratedPUp, ct);
-                            var side        = StakingEngine.DecideSide(calibratedPUp);
+                            var side = StakingEngine.DecideSide(calibratedPUp);
                             var entryInputs = new StakingInputs(calibratedPUp, entryQuote.YesPrice, entryQuote.NoPrice);
                             var lastSettled = tracked.Bets.Where(b => b.Resolved).OrderByDescending(b => b.TargetOpenTime).FirstOrDefault();
-                            var lastStake   = lastSettled?.Size ?? tracked.InitialBetSize;
-                            var lastWon     = lastSettled?.Outcome == "win";
-                            var strategy    = StakingStrategies.Resolve(tracked.StrategyId);
-                            var nextStake   = strategy.NextBetSize(new StrategyStep(lastStake, lastWon, tracked.InitialBetSize, tracked.CurrentBalance, entryInputs));
+                            var lastStake = lastSettled?.Size ?? tracked.InitialBetSize;
+                            var lastWon = lastSettled?.Outcome == "win";
+                            var strategy = StakingStrategies.Resolve(tracked.StrategyId);
+                            var nextStake = strategy.NextBetSize(new StrategyStep(lastStake, lastWon, tracked.InitialBetSize, tracked.CurrentBalance, entryInputs));
 
                             if (nextStake > 0m)
                             {
@@ -454,7 +455,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                                 else
                                 {
                                     var entryPrice = side == "UP" ? entryQuote.YesPrice : entryQuote.NoPrice;
-                                    var shares     = StakingEngine.Shares(nextStake, entryPrice);
+                                    var shares = StakingEngine.Shares(nextStake, entryPrice);
                                     tracked.CurrentBetSize = nextStake;
 
                                     string? externalOrderId = null;
@@ -463,7 +464,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                                         try
                                         {
                                             var orderSide = side == "UP" ? OrderSide.Yes : OrderSide.No;
-                                            var receipt   = await connector.PlaceOrderAsync(
+                                            var receipt = await connector.PlaceOrderAsync(
                                                 new OrderRequest(entryQuote.MarketExternalId ?? "", orderSide, shares, entryPrice, tenantId), ct);
                                             externalOrderId = receipt.OrderId;
                                             _logger.LogInformation("Live bet placed: {OrderId} {Side} {Shares}@{Price}", externalOrderId, side, shares, entryPrice);
@@ -486,21 +487,21 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
 
                                     var bet = new LiveBet
                                     {
-                                        Id              = Guid.NewGuid(),
-                                        TenantId        = tracked.TenantId,
-                                        SessionId       = tracked.Id,
-                                        TargetOpenTime  = currentCandleOpenMs,
-                                        Side            = side,
+                                        Id = Guid.NewGuid(),
+                                        TenantId = tracked.TenantId,
+                                        SessionId = tracked.Id,
+                                        TargetOpenTime = currentCandleOpenMs,
+                                        Side = side,
                                         PredictedProbUp = pred.DirectionUpProbability,
-                                        AnchorClose     = pred.AnchorClose,
-                                        Size            = nextStake,
-                                        BalanceBefore   = tracked.CurrentBalance,
+                                        AnchorClose = pred.AnchorClose,
+                                        Size = nextStake,
+                                        BalanceBefore = tracked.CurrentBalance,
                                         ExternalOrderId = externalOrderId,
-                                        EntryPrice      = entryPrice,
-                                        Shares          = shares,
+                                        EntryPrice = entryPrice,
+                                        Shares = shares,
                                         MarketExternalId = entryQuote.MarketExternalId,
-                                        PlacedAt        = DateTimeOffset.FromUnixTimeMilliseconds(currentCandleOpenMs),
-                                        NotesJson       = JsonSerializer.Serialize(new
+                                        PlacedAt = DateTimeOffset.FromUnixTimeMilliseconds(currentCandleOpenMs),
+                                        NotesJson = JsonSerializer.Serialize(new
                                         {
                                             calibratedPUp,
                                             side,

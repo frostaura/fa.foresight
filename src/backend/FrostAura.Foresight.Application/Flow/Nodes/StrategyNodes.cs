@@ -31,7 +31,7 @@ public sealed class OutputStakeNode : IFlowNode
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
             ["stake"] = inputs.GetValueOrDefault("stake"),
-            ["side"]  = inputs.GetValueOrDefault("side"),
+            ["side"] = inputs.GetValueOrDefault("side"),
         });
     }
 }
@@ -100,7 +100,7 @@ public sealed class MartingaleStepNode : IFlowNode
         IReadOnlyDictionary<string, object?> inputs, JsonElement nodeParams, FlowContext ctx, CancellationToken ct)
     {
         var current = ToDecimal(inputs.GetValueOrDefault("currentBet")) ?? 0m;
-        var won     = ToBool(inputs.GetValueOrDefault("lastOutcome")) ?? true;
+        var won = ToBool(inputs.GetValueOrDefault("lastOutcome")) ?? true;
         var initial = ToDecimal(inputs.GetValueOrDefault("initialBet")) ?? 0m;
         var step = new StrategyStep(current, won, initial, 0m, default);
         var stake = new MartingaleStakingStrategy().NextBetSize(step);
@@ -181,24 +181,24 @@ public sealed class EdgeAwareKellyNode : IFlowNode
     public Task<IReadOnlyDictionary<string, object?>> ExecuteAsync(
         IReadOnlyDictionary<string, object?> inputs, JsonElement nodeParams, FlowContext ctx, CancellationToken ct)
     {
-        var pUp      = ToDecimal(inputs.GetValueOrDefault("pUp"))      ?? 0.5m;
-        var yesPrice = ToDecimal(inputs.GetValueOrDefault("yesPrice"))  ?? 0.5m;
-        var noPrice  = ToDecimal(inputs.GetValueOrDefault("noPrice"))   ?? 0.5m;
-        var balance  = ToDecimal(inputs.GetValueOrDefault("balance"))   ?? 0m;
-        var initial  = ToDecimal(inputs.GetValueOrDefault("initialBet")) ?? 1m;
+        var pUp = ToDecimal(inputs.GetValueOrDefault("pUp")) ?? 0.5m;
+        var yesPrice = ToDecimal(inputs.GetValueOrDefault("yesPrice")) ?? 0.5m;
+        var noPrice = ToDecimal(inputs.GetValueOrDefault("noPrice")) ?? 0.5m;
+        var balance = ToDecimal(inputs.GetValueOrDefault("balance")) ?? 0m;
+        var initial = ToDecimal(inputs.GetValueOrDefault("initialBet")) ?? 1m;
         var fraction = NodeParams.GetDecimal(nodeParams, "fraction", EdgeAwareKellyStakingStrategy.Fraction);
 
-        var up       = pUp >= 0.5m;
-        var price    = up ? yesPrice : noPrice;
-        var winProb  = up ? pUp : 1m - pUp;
-        var fStar    = KellyMath.FullKelly(winProb, price);
+        var up = pUp >= 0.5m;
+        var price = up ? yesPrice : noPrice;
+        var winProb = up ? pUp : 1m - pUp;
+        var fStar = KellyMath.FullKelly(winProb, price);
         if (fStar <= 0m)
         {
             return Task.FromResult<IReadOnlyDictionary<string, object?>>(
                 new Dictionary<string, object?> { ["stake"] = 0m });
         }
         var target = Math.Round(fraction * fStar * balance, 2, MidpointRounding.AwayFromZero);
-        var stake  = target < 1m ? 0m : target;
+        var stake = target < 1m ? 0m : target;
 
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
@@ -235,7 +235,7 @@ public sealed class ClampRoundNode : IFlowNode
     public Task<IReadOnlyDictionary<string, object?>> ExecuteAsync(
         IReadOnlyDictionary<string, object?> inputs, JsonElement nodeParams, FlowContext ctx, CancellationToken ct)
     {
-        var raw    = ToDecimal(inputs.GetValueOrDefault("stake")) ?? 0m;
+        var raw = ToDecimal(inputs.GetValueOrDefault("stake")) ?? 0m;
         var minBet = NodeParams.GetDecimal(nodeParams, "minBet", 1m);
         var rounded = Math.Round(raw, MidpointRounding.AwayFromZero);
         var stake = rounded < minBet ? 0m : rounded;
@@ -279,8 +279,8 @@ public sealed class GateNode : IFlowNode
         IReadOnlyDictionary<string, object?> inputs, JsonElement nodeParams, FlowContext ctx, CancellationToken ct)
     {
         var stake = ToDecimal(inputs.GetValueOrDefault("stake")) ?? 0m;
-        var pUp   = ToDecimal(inputs.GetValueOrDefault("pUp"))   ?? 0.5m;
-        var band  = NodeParams.GetDecimal(nodeParams, "band", StakingEngine.DefaultNoBetBand);
+        var pUp = ToDecimal(inputs.GetValueOrDefault("pUp")) ?? 0.5m;
+        var band = NodeParams.GetDecimal(nodeParams, "band", StakingEngine.DefaultNoBetBand);
 
         var result = StakingEngine.IsNoBet(pUp, band) ? 0m : stake;
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
@@ -298,18 +298,18 @@ internal static class StrategyNodeCoerce
 {
     public static decimal? ToDecimal(object? v) => v switch
     {
-        decimal d  => d,
-        double  dd => (decimal)dd,
-        float   f  => (decimal)f,
-        int     i  => i,
-        long    l  => l,
-        _          => null,
+        decimal d => d,
+        double dd => (decimal)dd,
+        float f => (decimal)f,
+        int i => i,
+        long l => l,
+        _ => null,
     };
 
     public static bool? ToBool(object? v) => v switch
     {
         bool b => b,
-        int  i => i != 0,
-        _      => null,
+        int i => i != 0,
+        _ => null,
     };
 }

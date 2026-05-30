@@ -19,40 +19,40 @@ namespace FrostAura.Foresight.Domain.Execution;
 public sealed record ClobV2Order
 {
     // ── Routing constants ────────────────────────────────────────────────────────
-    public const string DomainName    = "Polymarket CTF Exchange";
+    public const string DomainName = "Polymarket CTF Exchange";
     public const string DomainVersion = "2";
-    public const int    ChainId       = 137;
+    public const int ChainId = 137;
 
     // NegRisk variant (neg-risk flag set on market info).
     public const string NegRiskCtfExchangeAddress = "0xe2222d279d744050d28e00520010520000310F59";
     // Standard CTF exchange (default).
-    public const string CtfExchangeAddress         = "0xE111180000d2663C0091e4f400237545B87B996B";
+    public const string CtfExchangeAddress = "0xE111180000d2663C0091e4f400237545B87B996B";
 
     private static readonly string ZeroBytes32 = "0x" + new string('0', 64);
 
     // ── Order fields (exact V2 spec order) ───────────────────────────────────────
     /// <summary>Random uniqueness salt — uint256, emitted as decimal string in EIP-712.</summary>
-    public required string Salt          { get; init; }
+    public required string Salt { get; init; }
     /// <summary>Funder address (defaults to signer EOA when no POLY_GNOSIS_SAFE/POLY_PROXY).</summary>
-    public required string Maker         { get; init; }
+    public required string Maker { get; init; }
     /// <summary>Signing EOA address.</summary>
-    public required string Signer        { get; init; }
+    public required string Signer { get; init; }
     /// <summary>Polymarket CTF token id for the chosen outcome — uint256, decimal string.</summary>
-    public required string TokenId       { get; init; }
+    public required string TokenId { get; init; }
     /// <summary>Collateral in (BUY) or tokens in (SELL) — uint256, decimal string, 6dp scaled.</summary>
-    public required string MakerAmount   { get; init; }
+    public required string MakerAmount { get; init; }
     /// <summary>Tokens out (BUY) or collateral out (SELL) — uint256, decimal string, 6dp scaled.</summary>
-    public required string TakerAmount   { get; init; }
+    public required string TakerAmount { get; init; }
     /// <summary>0=BUY, 1=SELL — uint8, number in JSON.</summary>
-    public required int    Side          { get; init; }
+    public required int Side { get; init; }
     /// <summary>0=EOA, 1=POLY_PROXY, 2=POLY_GNOSIS_SAFE — uint8, number in JSON.</summary>
-    public required int    SignatureType { get; init; }
+    public required int SignatureType { get; init; }
     /// <summary>Placement timestamp in milliseconds — uint256, decimal string.</summary>
-    public required string Timestamp     { get; init; }
+    public required string Timestamp { get; init; }
     /// <summary>Builder metadata — bytes32, 0x-hex string. Zero unless a builder code is used.</summary>
     public string Metadata { get; init; } = ZeroBytes32;
     /// <summary>Builder address — bytes32, 0x-hex string. Zero unless a builder code is used.</summary>
-    public string Builder  { get; init; } = ZeroBytes32;
+    public string Builder { get; init; } = ZeroBytes32;
 
     // ── EIP-712 typed-data JSON builder ─────────────────────────────────────────
 
@@ -96,28 +96,28 @@ public sealed record ClobV2Order
             primaryType = "Order",
             domain = new
             {
-                name              = DomainName,
-                version           = DomainVersion,
-                chainId           = (object)ChainId.ToString(CultureInfo.InvariantCulture),
+                name = DomainName,
+                version = DomainVersion,
+                chainId = (object)ChainId.ToString(CultureInfo.InvariantCulture),
                 verifyingContract
             },
             message = new Dictionary<string, object>
             {
                 // uint256 fields → decimal strings
-                ["salt"]          = Salt,
-                ["maker"]         = Maker,
-                ["signer"]        = Signer,
-                ["tokenId"]       = TokenId,
-                ["makerAmount"]   = MakerAmount,
-                ["takerAmount"]   = TakerAmount,
+                ["salt"] = Salt,
+                ["maker"] = Maker,
+                ["signer"] = Signer,
+                ["tokenId"] = TokenId,
+                ["makerAmount"] = MakerAmount,
+                ["takerAmount"] = TakerAmount,
                 // uint8 fields → numbers
-                ["side"]          = (object)Side,
+                ["side"] = (object)Side,
                 ["signatureType"] = (object)SignatureType,
                 // uint256 as decimal string
-                ["timestamp"]     = Timestamp,
+                ["timestamp"] = Timestamp,
                 // bytes32 as 0x-hex string
-                ["metadata"]      = Metadata,
-                ["builder"]       = Builder
+                ["metadata"] = Metadata,
+                ["builder"] = Builder
             }
         };
 

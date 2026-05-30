@@ -467,12 +467,12 @@ public sealed class BacktestRunner
             }
         }
 
-        var lrJson   = variantRoot.TryGetProperty("modelLinearRegression",   out var lr) ? lr.GetRawText() : "{}";
+        var lrJson = variantRoot.TryGetProperty("modelLinearRegression", out var lr) ? lr.GetRawText() : "{}";
         var logrJson = variantRoot.TryGetProperty("modelLogisticRegression", out var lo) ? lo.GetRawText() : "{}";
         // GBT ensemble (present only for model.gbt flows); pass through under the node's TypeId so
         // GradientBoostedTreesNode can read it. Null/absent for linear models — the node treats a
         // non-object as "no model" and abstains, exactly like the regression nodes.
-        var gbtJson  = variantRoot.TryGetProperty("modelGbt", out var gb) && gb.ValueKind == JsonValueKind.Object ? gb.GetRawText() : "null";
+        var gbtJson = variantRoot.TryGetProperty("modelGbt", out var gb) && gb.ValueKind == JsonValueKind.Object ? gb.GetRawText() : "null";
         var combined = "{\"model.linear_regression\":" + lrJson + ",\"model.logistic_regression\":" + logrJson + ",\"model.gbt\":" + gbtJson + "}";
         using var doc = JsonDocument.Parse(combined);
         return doc.RootElement.Clone();
@@ -487,8 +487,8 @@ public sealed class BacktestRunner
     /// </summary>
     public static long PublicIntervalMs(string interval) => interval switch
     {
-        "1m"  => 60_000L,
-        "5m"  => 300_000L,
+        "1m" => 60_000L,
+        "5m" => 300_000L,
         "15m" => 900_000L,
         _ => throw new ArgumentException($"Unsupported interval '{interval}'.", nameof(interval)),
     };

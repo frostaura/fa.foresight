@@ -66,14 +66,13 @@ public class StakingEngineOddsTests
     }
 
     [Theory]
-    [InlineData(0.50, 0.55, "DOWN")]   // exactly 0.5 ⇒ UP per >= rule? 0.50 → UP
-    [InlineData(0.60, 0.55, "UP")]
-    [InlineData(0.40, 0.55, "DOWN")]
-    public void DecideSide_threshold(decimal pUp, decimal _ignore, string _expectedIgnored)
+    [InlineData(0.50, "UP")]      // exactly 0.5 ⇒ UP per the >= rule
+    [InlineData(0.4999, "DOWN")]  // just below 0.5 ⇒ DOWN
+    [InlineData(0.60, "UP")]
+    [InlineData(0.40, "DOWN")]
+    public void DecideSide_threshold(decimal pUpCalibrated, string expectedSide)
     {
-        // 0.5 maps to UP (>= rule); below 0.5 maps to DOWN.
-        StakingEngine.DecideSide(0.5m).Should().Be("UP");
-        StakingEngine.DecideSide(0.4999m).Should().Be("DOWN");
+        StakingEngine.DecideSide(pUpCalibrated).Should().Be(expectedSide);
     }
 
     // --- Edge-aware true Kelly ------------------------------------------------------------------

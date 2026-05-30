@@ -106,11 +106,11 @@ public sealed class OrderFlowPackNode : IFlowNode
 
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["of_imbalance"]       = imbalance,
+            ["of_imbalance"] = imbalance,
             ["of_count_imbalance"] = countImbalance,
-            ["of_large_skew"]      = largeSkew,
-            ["of_cvd_z"]           = cvdZ,
-            ["of_intensity_z"]     = intensityZ,
+            ["of_large_skew"] = largeSkew,
+            ["of_cvd_z"] = cvdZ,
+            ["of_intensity_z"] = intensityZ,
         });
     }
 }
@@ -172,9 +172,9 @@ public sealed class MicroFlowPackNode : IFlowNode
 
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["mf_late_imbalance"]  = lateImb,
+            ["mf_late_imbalance"] = lateImb,
             ["mf_imbalance_accel"] = imbAccel,
-            ["mf_late_intensity"]  = lateIntensity,
+            ["mf_late_intensity"] = lateIntensity,
         });
     }
 }
@@ -239,11 +239,11 @@ public sealed class DerivativesPackNode : IFlowNode
 
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
         {
-            ["d_oi_mom"]       = oiMom,
-            ["d_oi_z"]         = oiZ,
+            ["d_oi_mom"] = oiMom,
+            ["d_oi_z"] = oiZ,
             ["d_toptrader_ls"] = topLs,
-            ["d_taker_ls"]     = takerLs,
-            ["d_ls_ratio"]     = lsRatio,
+            ["d_taker_ls"] = takerLs,
+            ["d_ls_ratio"] = lsRatio,
         });
     }
 }

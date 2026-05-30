@@ -98,14 +98,10 @@ def apply_monkeypatches():
     time.process_time = _raise("time.process_time")
 
     # --- datetime ---
-    _dt.datetime.now = classmethod(lambda cls, *a, **kw: (_ for _ in ()).throw(
-        NondeterminismError("Non-deterministic call blocked: datetime.datetime.now()")
-    ))
-    _dt.datetime.utcnow = classmethod(lambda cls, *a, **kw: (_ for _ in ()).throw(
-        NondeterminismError("Non-deterministic call blocked: datetime.datetime.utcnow()")
-    ))
-
-    # Simpler classmethod patching via a thin class replacement
+    # NOTE: datetime.datetime is an immutable C type — assigning to
+    # `_dt.datetime.now` directly raises "TypeError: cannot set 'now' attribute of
+    # immutable type". Replace the module attribute with a subclass that overrides
+    # the non-deterministic constructors instead.
     class _BlockedDatetime(_dt.datetime):
         @classmethod
         def now(cls, tz=None):
