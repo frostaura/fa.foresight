@@ -66,6 +66,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
     private readonly BinanceMarketDataClient _binance;
     private readonly TradingGuardrailOptions _guardrails;
     private readonly TradingNotifier _notifier;
+    private readonly ILiveEventHub _events;
     private readonly ILogger<LiveSessionEngine> _logger;
 
     public LiveSessionEngine(
@@ -79,6 +80,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
         BinanceMarketDataClient binance,
         IOptions<TradingGuardrailOptions> guardrails,
         TradingNotifier notifier,
+        ILiveEventHub events,
         ILogger<LiveSessionEngine> logger)
     {
         _db = db;
@@ -91,7 +93,16 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
         _binance = binance;
         _guardrails = guardrails.Value;
         _notifier = notifier;
+        _events = events;
         _logger = logger;
+    }
+
+    /// <summary>Fan a session-changed delta to any open SSE subscriber so the Live page refetches the
+    /// session list without polling. Best-effort — a publish failure must never disrupt trading.</summary>
+    private void PublishSessionChanged(Guid tenantId, Guid sessionId)
+    {
+        try { _events.Publish(new LiveEvent(tenantId, LiveEventKind.SessionChanged, Armed: null, SessionId: sessionId)); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed to publish live session-changed event for {SessionId}", sessionId); }
     }
 
     public async Task<LiveSession> StartAsync(LiveSessionStartRequest request, CancellationToken ct)
@@ -162,6 +173,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
 
         _logger.LogInformation("Live session started: {SessionId} {Venue} {Symbol} {Interval} balance={Balance}",
             session.Id, request.Venue, request.Symbol, request.Interval, request.InitialBalance);
+        PublishSessionChanged(session.TenantId, session.Id);
         return session;
     }
 
@@ -175,6 +187,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
         session.StoppedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
         await _ledger.ReleaseAsync(_tenant.TenantId!.Value, sessionId, ct);
+        PublishSessionChanged(session.TenantId, session.Id);
         return session;
     }
 
@@ -226,6 +239,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
             if (tracked2 is not null) { tracked2.Bust = true; tracked2.StoppedAt = DateTimeOffset.UtcNow; await _db.SaveChangesAsync(ct); }
             await _ledger.ReleaseAsync(tenantId, session.Id, ct);
             await _notifier.NotifyCircuitBreakerAsync(tenantId, session.Id, drawdown, _guardrails.SessionDrawdownCircuitBreakerPct, ct);
+            PublishSessionChanged(tenantId, session.Id);
             return tracked2 ?? session;
         }
 
@@ -396,6 +410,9 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                     if (tracked.Bust)
                         await _notifier.NotifySessionBustAsync(tenantId, tracked.Id, "live", tracked.CurrentBalance, ct);
 
+                    // Settlement changed balance/bet state — push it so the Live card refreshes.
+                    PublishSessionChanged(tenantId, tracked.Id);
+
                     openBet = null;
                 }
             }
@@ -485,6 +502,7 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                                         await _db.SaveChangesAsync(ct);
                                         await _ledger.ReleaseAsync(tenantId, tracked.Id, ct);
                                         await _notifier.NotifySessionBustAsync(tenantId, tracked.Id, "live", tracked.CurrentBalance, ct);
+                                        PublishSessionChanged(tenantId, tracked.Id);
                                     }
                                     else
                                     {
@@ -545,7 +563,12 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
                                             })
                                         };
                                         _db.LiveBets.Add(bet);
-                                        try { await _db.SaveChangesAsync(ct); }
+                                        try
+                                        {
+                                            await _db.SaveChangesAsync(ct);
+                                            // A new bet landed — surface it on the Live card without polling.
+                                            PublishSessionChanged(tenantId, tracked.Id);
+                                        }
                                         catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) == true)
                                         {
                                             _db.Entry(bet).State = EntityState.Detached;

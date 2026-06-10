@@ -39,8 +39,15 @@ public sealed class ModelTrainer
         long trainingWindowStartMs,
         long trainingWindowEndMs,
         CancellationToken ct,
-        int horizonSteps = 2)
+        int horizonSteps = 2,
+        IProgress<TrainProgress>? progress = null)
     {
+        // Live progress so the UI never looks frozen during a multi-minute fit. Phases mirror the
+        // real work below: hydrating (data fetch) → building-features (per-candle replay, the bulk
+        // of wall-time) → validating (walk-forward folds) → fitting (final full-window fit). Each
+        // report carries this interval so parallel per-interval fits don't clobber one another.
+        progress?.Report(new TrainProgress(interval, "hydrating", 0, 1));
+
         // Fetch historicals with warmup so the first usable candle has full indicator coverage.
         var intervalMs = IntervalMs(interval);
         var warmupMs = (long)flow.WarmupCandles * intervalMs;
@@ -90,8 +97,15 @@ public sealed class ModelTrainer
         // instant deterministic compute at candle close. Whatever the horizon, candle i+1 (and beyond)
         // is NEVER a feature input: features see candles[0..i] only; off-tf is gated to the decision
         // moment (open of i+1) by close-time so a still-open higher-tf bar can never leak.
+        var featureTotal = Math.Max(1, candles.Count - horizonSteps - flow.WarmupCandles);
+        // Throttle progress to ~1% steps so a long replay emits ~100 events, not tens of thousands.
+        var featureReportEvery = Math.Max(1, featureTotal / 100);
+        progress?.Report(new TrainProgress(interval, "building-features", 0, featureTotal));
         for (var i = flow.WarmupCandles; i < candles.Count - horizonSteps; i++)
         {
+            var done = i - flow.WarmupCandles;
+            if (done % featureReportEvery == 0)
+                progress?.Report(new TrainProgress(interval, "building-features", done, featureTotal));
             var boundaryMs = candles[i].OpenTime + intervalMs;
             var slice = new TrainingSliceProvider(candles, candles[i].OpenTime, interval, offTfCandles, boundaryMs);
             var microSlice = _micro is null ? null : new Backtesting.MicrostructureSlice(microPool, intervalMs, boundaryMs);
@@ -164,6 +178,7 @@ public sealed class ModelTrainer
 
         for (var k = 1; k <= actualFolds; k++)
         {
+            progress?.Report(new TrainProgress(interval, "validating", k, actualFolds));
             var trainEnd = bucketSize * k;
             var valEnd = Math.Min(bucketSize * (k + 1), X.Count);
 
@@ -213,6 +228,7 @@ public sealed class ModelTrainer
         // Final coefficients fit on the entire training window. The deployed model carries these,
         // not the per-fold coefficients — walk-forward validates the procedure's robustness; the
         // final model uses all the data.
+        progress?.Report(new TrainProgress(interval, "fitting", 1, 1));
         var lr = FitLinearRegression(X.ToArray(), yClose.ToArray());
         var logr = FitLogisticRegression(X.ToArray(), yDir.ToArray());
         var gbtBag = gbtConfig is null ? null : FitGbtBag(X.ToArray(), yDir.ToArray(), gbtConfig.Params, gbtConfig.Bags);
@@ -528,6 +544,16 @@ public sealed record TrainResult(string TrainedStateJson, decimal ValidationAccu
 /// ensemble size and the confidence-gate coverage fraction (0 = gate disabled).
 /// </summary>
 internal sealed record GbtNodeConfig(GbtParams Params, int Bags, double Coverage);
+
+/// <summary>
+/// One progress tick emitted while a single interval-variant is fitting. <c>Phase</c> is one of
+/// <c>hydrating</c> / <c>building-features</c> / <c>validating</c> / <c>fitting</c>;
+/// <c>Processed</c>/<c>Total</c> form the within-phase fraction (e.g. candle k of N, fold k of N).
+/// <c>Interval</c> identifies which parallel variant this tick belongs to. The Application layer
+/// stays free of any transport concern — the Infrastructure trainer service adapts these into the
+/// SSE event hub.
+/// </summary>
+public sealed record TrainProgress(string Interval, string Phase, int Processed, int Total);
 
 /// <summary>
 /// Anti-lookahead provider for a single training iteration. Target-tf candles come from the

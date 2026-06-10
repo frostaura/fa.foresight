@@ -447,8 +447,18 @@ export default function LiveBitcoinChart({
     if (!lastCandle || candles.length < 2) return null;
     const liveUp = lastCandle.close > candles[candles.length - 2].close;
     if (pendingActiveBet) return (pendingActiveBet.side === "UP") === liveUp ? "winning" : "losing";
-    return currentLean;
-  }, [pendingActiveBet, currentLean, lastCandle?.close, lastCandle?.openTime, candles]);
+    if (currentLean) return currentLean;
+    // Last-resort lean so the orb never vanishes (and never falls back to the amber/orange "pending"
+    // colour) just because no horizon-0 prediction or live bet exists for the still-forming candle:
+    // lean on the active model's freshest directional call — the next-candle horizon-1 prediction.
+    // Same close-vs-prior-close rule as `currentLean`, so the orb reads green (live move agrees with
+    // the call) or red (disagrees) above the far-right candle whenever the system is forecasting.
+    if (nextPrediction) {
+      const pUp = nextPrediction.directionUpProbabilityCalibrated ?? nextPrediction.directionUpProbability;
+      return (pUp >= 0.5) === liveUp ? "winning" : "losing";
+    }
+    return null;
+  }, [pendingActiveBet, currentLean, nextPrediction, lastCandle?.close, lastCandle?.openTime, candles]);
 
   // Most recently resolved prediction — the "did the last call hit or miss" readout sits next to
   // the live next-candle line so the user can sanity-check the system in one glance without
@@ -889,7 +899,7 @@ export default function LiveBitcoinChart({
                   )}
                 />
               ))}
-              {last && (pendingActiveBet || currentPrediction) && (
+              {last && (pendingActiveBet || currentPrediction || nextPrediction) && (
                 <ReferenceDot
                   yAxisId="price"
                   x={last.openTime}
@@ -967,7 +977,7 @@ export default function LiveBitcoinChart({
                   )}
                 />
               ))}
-              {last && (pendingActiveBet || currentPrediction) && (
+              {last && (pendingActiveBet || currentPrediction || nextPrediction) && (
                 <ReferenceDot
                   yAxisId="price"
                   x={last.openTime}
@@ -1032,7 +1042,7 @@ export default function LiveBitcoinChart({
                   )}
                 />
               ))}
-              {last && (pendingActiveBet || currentPrediction) && (
+              {last && (pendingActiveBet || currentPrediction || nextPrediction) && (
                 <ReferenceDot
                   yAxisId="price"
                   x={last.openTime}

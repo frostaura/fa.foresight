@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import { ConfirmProvider } from "./components/ConfirmDialog";
 import { ModelTrainGateProvider } from "./components/ModelTrainGate";
+import { RealtimeSync } from "./lib/realtimeSync";
 import Models from "./pages/Models";
 import ModelDesignerPage from "./pages/ModelDesignerPage";
 import PaperTrading from "./pages/PaperTrading";
@@ -16,6 +17,8 @@ export default function App() {
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ConfirmProvider>
         <ModelTrainGateProvider>
+        {/* Push-based cache invalidation (model training + live arm/session) — no polling. */}
+        <RealtimeSync />
         <Routes>
           <Route element={<Layout />}>
             {/* Default → Trading → Status */}

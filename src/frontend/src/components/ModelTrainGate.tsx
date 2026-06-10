@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { createPortal } from "react-dom";
 import { AlertTriangle, Cpu, Loader2, X } from "lucide-react";
 import { cn } from "../lib/cn";
+import { useTrainingProgress } from "../lib/trainingStream";
+import { ProgressInline } from "./ProgressInline";
 import { useListModelsQuery, useTrainModelMutation, type Model } from "../store/api";
 
 // Every deterministic model is fit against BTCUSDT — the only instrument the trainer supports today.
@@ -75,14 +77,11 @@ function TrainDialog({ model: initial, onResolve }: { model: Model; onResolve: (
   const [error, setError] = useState<string | null>(initial.trainingError ?? null);
   const resolvedRef = useRef(false);
 
-  // While a background fit is in flight, poll the model list so we can react to the server-side
-  // TrainingStatus transition. This shares the `listModels(undefined)` cache key with the rest of
-  // the app, so the dropdown that triggered us refreshes its score the moment training completes.
-  const polling = phase === "training";
-  const { data: models } = useListModelsQuery(void 0, {
-    pollingInterval: polling ? 2500 : 0,
-    skipPollingIfUnfocused: true,
-  });
+  // While a background fit is in flight we react to the server-side TrainingStatus transition. The
+  // model cache is invalidated push-style by the /api/models SSE stream (see RealtimeSync) the moment
+  // training starts/completes/fails — no polling. This shares the `listModels(undefined)` cache key
+  // with the rest of the app, so the dropdown that triggered us refreshes its score on the same event.
+  const { data: models } = useListModelsQuery(void 0);
   const live = models?.find((m) => m.id === initial.id) ?? initial;
 
   const resolve = useCallback((ok: boolean) => {
@@ -107,7 +106,8 @@ function TrainDialog({ model: initial, onResolve }: { model: Model; onResolve: (
     setPhase("training");
     try {
       await train({ id: initial.id, symbol: TRAIN_SYMBOL }).unwrap();
-      // 202 Accepted — the fit runs server-side. The polling effect resolves us on completion.
+      // 202 Accepted — the fit runs server-side. The model SSE stream invalidates the model cache on
+      // completion (see RealtimeSync), which re-runs the effect below and resolves us.
     } catch (e) {
       const err = e as { data?: { error?: string }; message?: string };
       setError(err.data?.error ?? err.message ?? "Could not start training.");
@@ -126,6 +126,9 @@ function TrainDialog({ model: initial, onResolve }: { model: Model; onResolve: (
 
   const isTraining = phase === "training";
   const isFailed = phase === "failed";
+  // Live per-phase progress while the fit runs server-side, so the dialog shows real movement
+  // instead of just a spinning icon.
+  const trainProgress = useTrainingProgress(initial.id, isTraining);
 
   return createPortal(
     <div
@@ -178,6 +181,10 @@ function TrainDialog({ model: initial, onResolve }: { model: Model; onResolve: (
             <X className="h-4 w-4" />
           </button>
         </div>
+
+        {isTraining && (
+          <ProgressInline pct={trainProgress.pct} label={trainProgress.label ?? "Starting…"} tone="frost" />
+        )}
 
         {error && (
           <div className="text-rose-300 text-xs bg-rose-400/5 border border-rose-400/20 rounded-md px-3 py-2 break-words">

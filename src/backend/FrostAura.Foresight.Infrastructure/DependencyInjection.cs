@@ -229,8 +229,11 @@ public static class DependencyInjection
         services.AddScoped<WalkForwardEvaluator>();
         services.AddScoped<IBacktestsService, Live.BacktestsService>();
         services.AddSingleton<Live.IBacktestEventHub, Live.BacktestEventHub>();
+        services.AddSingleton<Live.ITrainingEventHub, Live.TrainingEventHub>();
         services.AddScoped<IModelTrainingService, Live.ModelTrainingService>();
         services.AddScoped<IWalkForwardService, Live.WalkForwardService>();
+        // Model-lifecycle SSE fan-out — lets the UI react to training-status transitions without polling.
+        services.AddSingleton<Live.IModelEventHub, Live.ModelEventHub>();
 
         // Workstream D: chaos/bust test engine.
         services.AddScoped<IChaosService, Infrastructure.Chaos.ChaosService>();
@@ -245,6 +248,9 @@ public static class DependencyInjection
         });
         services.AddScoped<ILiveSessionEngine, LiveSessionEngine>();
         services.AddHostedService<LiveSessionProcessorService>();
+        // Live-trading control-plane SSE fan-out (arm state + session changes) — replaces the Live
+        // page's fixed-interval polls of /api/live/status and /api/sessions.
+        services.AddSingleton<Live.ILiveEventHub, Live.LiveEventHub>();
         services.AddSingleton<IVenueCapabilities, PolymarketBtcCapabilities>();
 
         // Outbound notifications: thin best-effort facade over IChannelAdapter.

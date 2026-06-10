@@ -584,19 +584,34 @@ public sealed class ModelTrainingService : IModelTrainingService
     private readonly ITenantContext _tenant;
     private readonly ModelTrainer _trainer;
     private readonly IServiceScopeFactory _scopes;
+    private readonly IModelEventHub _events;
+    private readonly ITrainingEventHub? _trainingHub;
     private readonly ILogger<ModelTrainingService> _logger;
+
+    /// <summary>Adapts the trainer's IProgress ticks straight onto the SSE hub synchronously,
+    /// without bouncing through a captured SynchronizationContext (which would reorder events).</summary>
+    private sealed class SyncProgress<T> : IProgress<T>
+    {
+        private readonly Action<T> _on;
+        public SyncProgress(Action<T> on) => _on = on;
+        public void Report(T value) => _on(value);
+    }
 
     public ModelTrainingService(
         ForesightDbContext db,
         ITenantContext tenant,
         ModelTrainer trainer,
         IServiceScopeFactory scopes,
-        ILogger<ModelTrainingService> logger)
+        IModelEventHub events,
+        ILogger<ModelTrainingService> logger,
+        ITrainingEventHub? trainingHub = null)
     {
         _db = db;
         _tenant = tenant;
         _trainer = trainer;
         _scopes = scopes;
+        _events = events;
+        _trainingHub = trainingHub;
         _logger = logger;
     }
 
@@ -740,7 +755,10 @@ public sealed class ModelTrainingService : IModelTrainingService
                 var microProvider = scope.ServiceProvider.GetService<IHistoricalMicrostructureProvider>();
                 await HydrateTrainingDataAsync(flow, candleProvider, microProvider, symbol, iv, startMs, endMs, ct, _logger);
                 _logger.LogInformation("Training variant {Symbol}/{Interval} on {Days}d", symbol, iv, LookbackDaysFor(iv));
-                var result = await trainer.TrainAsync(flow, tenantId, modelId, symbol, iv, startMs, endMs, ct);
+                // Stream per-phase progress to the SSE hub so the UI fills a real bar per interval.
+                var progress = new SyncProgress<TrainProgress>(prog =>
+                    _trainingHub?.Publish(new TrainingEvent(modelId, TrainingEventKind.Progress, prog.Interval, prog.Phase, prog.Processed, prog.Total, null)));
+                var result = await trainer.TrainAsync(flow, tenantId, modelId, symbol, iv, startMs, endMs, ct, progress: progress);
                 _logger.LogInformation("Variant {Symbol}/{Interval} fit complete — WF accuracy {Pct:P2}", symbol, iv, result.ValidationAccuracy);
                 return (Interval: iv, StartMs: startMs, EndMs: endMs, Json: result.TrainedStateJson, Accuracy: result.ValidationAccuracy);
             })
@@ -830,6 +848,11 @@ public sealed class ModelTrainingService : IModelTrainingService
         model.UpdatedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
 
+        // Push the "training" transition to any open SSE subscriber so the UI flips state without
+        // polling. The hub is a singleton, so it stays valid for the background task below even
+        // after this request's scope is disposed.
+        _events.Publish(new ModelEvent(tenantId, modelId, ModelEventKind.Training, null));
+
         // Fire-and-forget on a fresh DI scope with CancellationToken.None so the fit outlives the
         // HTTP request (and the browser tab) that started it. The UI watches TrainingStatus.
         _ = Task.Run(() => RunTrainingInBackgroundAsync(modelId, tenantId, tenantSlug, symbol, holdoutDays, interval), CancellationToken.None);
@@ -852,12 +875,16 @@ public sealed class ModelTrainingService : IModelTrainingService
         var trainingSvc = scope.ServiceProvider.GetRequiredService<IModelTrainingService>();
         try
         {
+            _trainingHub?.Publish(new TrainingEvent(modelId, TrainingEventKind.Started, interval ?? "all", "queued", 0, 1, null));
             await trainingSvc.TrainAsync(modelId, symbol, holdoutDays, interval, CancellationToken.None);
             var m = await db.Models.FirstAsync(x => x.Id == modelId);
             m.TrainingStatus = null;
             m.TrainingError = null;
             m.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync();
+            // Success transition → UI invalidates its model cache and the train gate resolves.
+            _events.Publish(new ModelEvent(tenantId, modelId, ModelEventKind.Trained, null));
+            _trainingHub?.Publish(new TrainingEvent(modelId, TrainingEventKind.Completed, interval ?? "all", "done", 1, 1, null));
         }
         catch (Exception ex)
         {
@@ -869,6 +896,8 @@ public sealed class ModelTrainingService : IModelTrainingService
                 m.TrainingError = ex.Message.Length > 2000 ? ex.Message[..2000] : ex.Message;
                 m.UpdatedAt = DateTimeOffset.UtcNow;
                 await db.SaveChangesAsync();
+                _events.Publish(new ModelEvent(tenantId, modelId, ModelEventKind.Failed, m.TrainingError));
+                _trainingHub?.Publish(new TrainingEvent(modelId, TrainingEventKind.Failed, interval ?? "all", "failed", 0, 1, m.TrainingError));
             }
             catch (Exception saveEx) { _logger.LogError(saveEx, "Failed to mark training {Id} as failed", modelId); }
         }

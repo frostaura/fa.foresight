@@ -420,9 +420,9 @@ export const api = createApi({
       invalidatesTags: ["Backtest"]
     }),
     // Kicks off training on the server and returns immediately ({ status: "training" }). The fit
-    // runs on a background task that survives the browser closing; the UI tracks progress by
-    // reading the model's trainingStatus (polled via listModels) until it clears. Invalidates Model
-    // so the card flips to "Training…" right after the click.
+    // runs on a background task that survives the browser closing; the UI tracks progress via the
+    // /api/models SSE stream, which invalidates the model cache on each training transition (see
+    // RealtimeSync) — no polling. Invalidates Model so the card flips to "Training…" right after the click.
     trainModel: b.mutation<{ status: string }, { id: string; symbol: string }>({
       query: ({ id, symbol }) => ({ url: `models/${id}/train`, method: "POST", body: { symbol } }),
       invalidatesTags: ["Model"]
@@ -734,8 +734,8 @@ export interface Model {
   trainInterval?: string | null;
   // Persistent training-job state (server-side). "training" while a background fit is in flight,
   // "failed" if it threw, null/absent when idle or complete. The Models page reads this on load and
-  // polls until it clears, so a training run started in one session shows live progress in another
-  // and survives closing the browser.
+  // the /api/models SSE stream invalidates the cache as it transitions, so a training run started in
+  // one session shows live progress in another and survives closing the browser — without polling.
   trainingStatus?: string | null;
   trainingStartedAt?: string | null;
   trainingError?: string | null;

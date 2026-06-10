@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Star, Lock, FlaskConical, Brain, Plus, Loader2, Cpu, Trash2, Archive, ArchiveRestore, BookOpen } from "lucide-react";
 import { useConfirm } from "../components/ConfirmDialog";
 import CreateModelDialog from "../components/CreateModelDialog";
 import PageHeader from "../components/PageHeader";
+import { ProgressInline } from "../components/ProgressInline";
 import { RichList, RichListRow } from "../components/RichList";
 import Ticker, { type TickerItem } from "../components/Ticker";
 import { cn } from "../lib/cn";
 import { fmtRunDate } from "../lib/format";
+import { useTrainingProgress } from "../lib/trainingStream";
 import { pnlClass } from "../lib/pnl";
 import { useLocalStorageState } from "../lib/persistedState";
 import {
@@ -86,20 +88,13 @@ type ArchiveView = "active" | "archived";
 export default function Models() {
   const [archiveView, setArchiveView] = useLocalStorageState<ArchiveView>("fa.models.archiveView", "active");
 
-  // Fetch all models when showing archived view, otherwise only active
+  // Fetch all models when showing archived view, otherwise only active. Training-status changes are
+  // pushed by the /api/models SSE stream (see RealtimeSync), which invalidates this cache — so a
+  // training model flips to trained here with no polling.
   const includeArchived = archiveView === "archived";
-  const [pollTraining, setPollTraining] = useState(false);
   const { data: allModels, isLoading } = useListModelsQuery(
-    includeArchived ? { includeArchived: true } : void 0,
-    {
-      pollingInterval: pollTraining ? 3000 : 0,
-      skipPollingIfUnfocused: true,
-    }
+    includeArchived ? { includeArchived: true } : void 0
   );
-
-  useEffect(() => {
-    setPollTraining((allModels ?? []).some((m) => m.trainingStatus === "training"));
-  }, [allModels]);
 
   // Filter to the correct view
   const models = useMemo(() => {
@@ -455,6 +450,9 @@ function ModelRow({
   const intervalAccs = useMemo(() => parseIntervalWfAccs(model.trainedState), [model.trainedState]);
   const hasTrainingRange = model.trainStartMs != null && model.trainEndMs != null;
   const isTrainingNow = isTraining || model.trainingStatus === "training";
+  // Live training progress (SSE). Only subscribes while this model is actually training; the bar
+  // fills through fetch → build-features → walk-forward → fit so the card never looks frozen.
+  const trainProgress = useTrainingProgress(model.id, isTrainingNow);
 
   const displayDescription = useMemo(() => {
     if (descMode === "simple") {
@@ -588,8 +586,15 @@ function ModelRow({
             </div>
           )}
           {isTrainingNow && (
-            <div className="fa-caption text-fa-frost-dim/70" title="Training runs on the server and keeps going if you close this page.">
-              Training in progress (server-side){model.trainingStartedAt ? ` · started ${fmtRunDate(new Date(model.trainingStartedAt))}` : ""} — safe to leave this page.
+            <div className="space-y-1.5" title="Training runs on the server and keeps going if you close this page.">
+              <ProgressInline
+                pct={trainProgress.pct}
+                label={trainProgress.label ?? "Training…"}
+                tone="frost"
+              />
+              <div className="fa-caption text-fa-frost-dim/70">
+                Training in progress (server-side){model.trainingStartedAt ? ` · started ${fmtRunDate(new Date(model.trainingStartedAt))}` : ""} — safe to leave this page.
+              </div>
             </div>
           )}
           {!isTrainingNow && model.trainingStatus === "failed" && (

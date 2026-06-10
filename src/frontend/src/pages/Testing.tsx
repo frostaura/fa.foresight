@@ -16,7 +16,9 @@ import { SymbolIcon, SymbolPicker } from "../components/SymbolIcon";
 import BacktestRunModal from "../components/BacktestRunModal";
 import SideDrawer from "../components/SideDrawer";
 import RichMultiSelect, { type RichMultiSelectOption } from "../components/RichMultiSelect";
+import { ProgressInline } from "../components/ProgressInline";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
+import { useChaosProgress } from "../lib/chaosStream";
 import { cn } from "../lib/cn";
 import { fmtRunDate, fmtRunTime } from "../lib/format";
 import { useSort, SortHeader, type SortDir } from "../lib/sort";
@@ -861,13 +863,9 @@ function BacktestTab({ models, eligible }: { models: Model[]; eligible: Model[] 
     return () => { for (const es of subs.values()) es.close(); subs.clear(); };
   }, []);
 
-  useEffect(() => {
-    if (!history) return;
-    const pending = history.some((r) => r.status === "running" || r.status === "queued");
-    if (!pending) return;
-    const id = window.setInterval(() => refetch(), 2000);
-    return () => window.clearInterval(id);
-  }, [history, refetch]);
+  // No polling: each running backtest opens a per-run SSE (subscribeToRun) whose terminal event
+  // refetches the history, flipping the row running → complete. The list stays live via those
+  // push events, not an interval.
 
   const fanout = useMemo(() =>
     modelIds.flatMap((m) => strategyIds.map((s) => ({ modelId: m, strategyId: s }))),
@@ -1225,17 +1223,47 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
   const [runChaos, { isLoading: chaosLoading }] = useRunChaosMutation();
   const [clearChaos, { isLoading: isClearingChaos }] = useClearChaosMutation();
   const confirm = useConfirm();
-  // Safety-net polling for the run-history list. RTK's own pollingInterval (instead of a manual
-  // setInterval + refetch) re-runs the query through the full cache pipeline, so results always
-  // land in the exact cache entry this component subscribes to. Polling is on while a run is
-  // in-flight OR for 60s after a launch — covering the gap where POST /api/chaos has returned
-  // but the new "running" row hasn't been observed in the list yet.
-  const [lastChaosLaunchAt, setLastChaosLaunchAt] = useState<number | null>(null);
-  const [chaosPolling, setChaosPolling] = useState(false);
-  const { data: chaosRuns, refetch: refetchChaos } = useListChaosRunsQuery({}, {
-    pollingInterval: chaosPolling ? 2500 : 0,
-    skipPollingIfUnfocused: true,
-  });
+  const { data: chaosRuns, refetch: refetchChaos } = useListChaosRunsQuery({});
+  const chaosSubs = useRef<Map<string, EventSource>>(new Map());
+
+  // Push-based chaos progress: one SSE per in-flight batch (GET /api/chaos/stream?batchId). A combo
+  // finishing emits a progress frame whose sampleIndex reaches totalSamples — we refetch the list so
+  // that row flips running → complete; the terminal completed/failed frame closes the stream. This
+  // replaces the old 2s interval poll.
+  const subscribeToBatch = useCallback((batchId: string) => {
+    if (chaosSubs.current.has(batchId)) return;
+    const es = new EventSource(`/api/chaos/stream?batchId=${batchId}`);
+    chaosSubs.current.set(batchId, es);
+    const cleanup = () => {
+      es.close();
+      chaosSubs.current.delete(batchId);
+      refetchChaos();
+    };
+    es.onmessage = (msg) => {
+      try {
+        const evt = JSON.parse(msg.data);
+        if (evt.kind === "completed" || evt.kind === "failed") { cleanup(); return; }
+        // A single combo just finished (or errored) when its progress reaches the sample total.
+        if (evt.kind === "progress" && (evt.sampleIndex ?? 0) >= (evt.totalSamples ?? 0)) refetchChaos();
+      } catch { /* malformed frame */ }
+    };
+    es.onerror = cleanup;
+  }, [refetchChaos]);
+
+  // Subscribe to any batch with a still-running row (covers runs started in another tab/session).
+  useEffect(() => {
+    for (const cr of chaosRuns ?? []) {
+      if (cr.status === "running" && cr.batchId && !chaosSubs.current.has(cr.batchId)) {
+        subscribeToBatch(cr.batchId);
+      }
+    }
+  }, [chaosRuns, subscribeToBatch]);
+
+  // Close every open chaos stream on unmount.
+  useEffect(() => {
+    const subs = chaosSubs.current;
+    return () => { for (const es of subs.values()) es.close(); subs.clear(); };
+  }, []);
 
   useEffect(() => {
     setModelIds((prev) => sanitizeModelSelection(prev, eligible));
@@ -1261,27 +1289,19 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
     });
   }, [strategiesResp, setStrategyIds]);
 
-  // Close the 60s post-launch polling window once it has elapsed.
-  useEffect(() => {
-    if (lastChaosLaunchAt == null) return;
-    const remaining = Math.max(0, 60_000 - (Date.now() - lastChaosLaunchAt));
-    const id = window.setTimeout(() => setLastChaosLaunchAt(null), remaining);
-    return () => window.clearTimeout(id);
-  }, [lastChaosLaunchAt]);
-
-  // Poll the chaos list (2.5s) while any run is in-flight or one was launched in the last 60s,
-  // so new rows appear promptly and go running → complete live. Only active while this tab is
-  // mounted (Radix unmounts inactive tab panels) and the window is focused.
-  useEffect(() => {
-    const pending = (chaosRuns ?? []).some((cr) => cr.status === "running");
-    setChaosPolling(pending || lastChaosLaunchAt != null);
-  }, [chaosRuns, lastChaosLaunchAt]);
-
   // days → candles for the chaos window length. candlesPerDay = 1 day ÷ intervalMs.
   const candlesPerDay = 86_400_000 / intervalToMs(interval);
   const windowLengthCandles = Math.round(windowDays * candlesPerDay);
 
   const isRunning = chaosLoading || (chaosRuns ?? []).some((cr) => cr.status === "running");
+
+  // The batch currently executing — its rows share one batchId. We stream that batch's combo/sample
+  // progress so the run shows real movement instead of a 2s-polled orb. Idle (null) when nothing runs.
+  const runningBatchId = useMemo(
+    () => (chaosRuns ?? []).find((cr) => cr.status === "running")?.batchId ?? null,
+    [chaosRuns],
+  );
+  const chaosProgress = useChaosProgress(runningBatchId);
 
   const onRun = async () => {
     setError(null);
@@ -1302,9 +1322,9 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
     };
     try {
       // Chaos fans out over all selected models internally — one call per launch.
-      await runChaos(req).unwrap();
-      setLastChaosLaunchAt(Date.now()); // opens the 60s safety-net polling window
+      const { batchId } = await runChaos(req).unwrap();
       refetchChaos();
+      if (batchId) subscribeToBatch(batchId);
     } catch (e: unknown) {
       const err = e as { data?: { error?: string } };
       setError(err.data?.error ?? "Chaos test failed");
@@ -1456,6 +1476,15 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
             </button>
           </div>
         </div>
+        {isRunning && (
+          <div className="mt-4">
+            <ProgressInline
+              pct={chaosProgress.pct}
+              label={chaosProgress.label ?? "Sampling random windows…"}
+              tone="amber"
+            />
+          </div>
+        )}
       </div>
 
       {/* Chaos run summary from /api/chaos — the single source of truth for this tab, produced by
