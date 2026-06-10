@@ -37,6 +37,29 @@ public static class StakingEngine
     /// <summary>True when |pUp − 0.5|·2 &lt; <paramref name="band"/> (too close to a coin-flip to bet).</summary>
     public static bool IsNoBet(decimal pUp, decimal band) => Math.Abs(pUp - 0.5m) * 2m < band;
 
+    /// <summary>Default EV-gate margin: pure break-even — any strictly positive edge qualifies.</summary>
+    public const decimal DefaultMinEdge = 0m;
+
+    /// <summary>
+    /// EV gate for a $1-payout binary. EV per $1 staked = winProb/price − 1, which is positive iff
+    /// the chosen side's win probability strictly exceeds the price paid for it (plus an optional
+    /// cushion <paramref name="margin"/>). Degenerate prices (≤ 0 or ≥ 1) never have an edge.
+    /// </summary>
+    public static bool HasPositiveEdge(decimal winProb, decimal price, decimal margin = 0m)
+        => price > 0m && price < 1m && winProb > price + margin;
+
+    /// <summary>
+    /// Polymarket venue compliance: stakes are whole dollars with a $1 minimum. FLOORS the sized
+    /// stake (never stakes MORE than the strategy prescribed); below $1 returns 0 — a clean abstain,
+    /// not a bust. Applied at the placement chokepoint, after any caps, so fractional caps cannot
+    /// reintroduce cents.
+    /// </summary>
+    public static decimal QuantizeToWholeDollars(decimal stake)
+    {
+        var floored = decimal.Floor(stake);
+        return floored < 1m ? 0m : floored;
+    }
+
     /// <summary>Shares purchased for <paramref name="stake"/> at <paramref name="entryPrice"/> ∈ (0,1). 0 at degenerate prices.</summary>
     public static decimal Shares(decimal stake, decimal entryPrice)
         => entryPrice <= 0m ? 0m : Math.Round(stake / entryPrice, 6, MidpointRounding.ToZero);

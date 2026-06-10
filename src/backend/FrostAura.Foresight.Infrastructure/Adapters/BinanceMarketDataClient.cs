@@ -217,6 +217,7 @@ public sealed class BinanceMarketDataClient
         "1m" => 60_000L,
         "5m" => 5 * 60_000L,
         "15m" => 15 * 60_000L,
+        "1h" => 60 * 60_000L,
         _ => throw new ArgumentException($"Unsupported interval: {interval}")
     };
 

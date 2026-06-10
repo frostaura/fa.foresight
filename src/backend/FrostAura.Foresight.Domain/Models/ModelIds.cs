@@ -54,4 +54,20 @@ public static class ModelIds
     /// diverging from the always-bet live number. The push for an honest, defensible-sample 60%.
     /// </summary>
     public static readonly Guid ForesightFiveMinV2 = new("00000000-0000-0000-0000-000000000007");
+
+    /// <summary>
+    /// Foresight | 15m | v3-bag — productionisation of the 2026-06-10 research champion
+    /// (fp_bag_k4: 5-seed-bagged GBT, 5% coverage). Venue-native analog: the 15-min cumulative
+    /// direction is the closest Polymarket-tradeable label to the research K=3 horizon (the 20-min
+    /// K=4 label has no instrument). Seed-bagged (bags=5), isotonic-calibrated, coverage-gated and
+    /// OOD-guarded via the trainer's additive TrainedState fields; abstention = pUp 0.5.
+    /// </summary>
+    public static readonly Guid ForesightFifteenMinV3Bag = new("00000000-0000-0000-0000-000000000008");
+
+    /// <summary>
+    /// Foresight | 5m | v3-bag — v2's exact sources/packs/matrix with the estimator upgraded to the
+    /// campaign's seed-bagged GBT recipe (bags=5, seed=101, coverage=0.05). A/B sibling of v2: the
+    /// walk-forward delta isolates exactly the value of bagging + calibration + the confidence gate.
+    /// </summary>
+    public static readonly Guid ForesightFiveMinV3Bag = new("00000000-0000-0000-0000-000000000009");
 }

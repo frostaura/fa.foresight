@@ -407,12 +407,14 @@ public static class DatabaseInitializer
                 ""WindowLength"" int NOT NULL,
                 ""SampleCount"" int NOT NULL,
                 ""AllowBorrow"" boolean NOT NULL DEFAULT true,
+                ""InitialBalance"" numeric(20,4) NOT NULL DEFAULT 0,
                 ""Seed"" bigint NOT NULL DEFAULT 0,
                 ""Status"" varchar(20) NOT NULL DEFAULT 'running',
                 ""BustRate"" numeric(8,6) NULL,
                 ""ProfitP5"" numeric(20,4) NULL,
                 ""ProfitP50"" numeric(20,4) NULL,
                 ""ProfitP95"" numeric(20,4) NULL,
+                ""ProfitMean"" numeric(20,4) NULL,
                 ""WorstDrawdown"" numeric(20,4) NULL,
                 ""MeanZeroCrossings"" double precision NULL,
                 ""SyntheticBetFraction"" numeric(6,5) NULL,
@@ -421,6 +423,9 @@ public static class DatabaseInitializer
                 ""CompletedAt"" timestamptz NULL,
                 ""Error"" varchar(2000) NULL
             );
+            -- Idempotent column adds for DBs created before InitialBalance / ProfitMean existed.
+            ALTER TABLE chaos_runs ADD COLUMN IF NOT EXISTS ""InitialBalance"" numeric(20,4) NOT NULL DEFAULT 0;
+            ALTER TABLE chaos_runs ADD COLUMN IF NOT EXISTS ""ProfitMean"" numeric(20,4) NULL;
             CREATE INDEX IF NOT EXISTS ix_chaos_runs_tenant_batch
                 ON chaos_runs (""TenantId"", ""BatchId"");
 
@@ -850,6 +855,78 @@ public static class DatabaseInitializer
             existingV2.UpdatedAt = now;
             await db.SaveChangesAsync(ct);
             logger.LogInformation("Refreshed model {ModelId} ({Name})", ModelIds.ForesightFiveMinV2, v2Name);
+        }
+
+        // Seed "Foresight | 15m | v3-bag" — venue-native productionisation of the 2026-06-10
+        // research champion (fp_bag_k4): seed-bagged GBT on the 15m anchor with 1h regime + 5m
+        // sub-bar context. Re-seeded on every boot like the other built-ins.
+        const string v3Bag15Name = "Foresight | 15m | v3-bag";
+        const string v3Bag15Description = "Venue-native analog of the 2026-06-10 research champion (fp_bag_k4): 5-seed-bagged GBT on the 15m cumulative direction — the closest Polymarket-tradeable label to the research K=3 horizon. 1h regime + 5m sub-bar context; isotonic calibration, 5% coverage gate and OOD guard via the trainer's additive state. Abstains by emitting pUp 0.5.";
+        var v3Bag15Definition = BuiltInModels.BuildForesight15mV3BagFlow();
+        var existingV3Bag15 = await db.Models.FindAsync(new object?[] { ModelIds.ForesightFifteenMinV3Bag }, ct);
+        if (existingV3Bag15 is null)
+        {
+            db.Models.Add(new Model
+            {
+                Id = ModelIds.ForesightFifteenMinV3Bag,
+                TenantId = null,
+                Name = v3Bag15Name,
+                Description = v3Bag15Description,
+                Kind = "deterministic",
+                SupportsBacktesting = true,
+                IsBuiltIn = true,
+                IsDefault = false,
+                Definition = v3Bag15Definition,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation("Seeded model {ModelId} ({Name})", ModelIds.ForesightFifteenMinV3Bag, v3Bag15Name);
+        }
+        else if (existingV3Bag15.Definition != v3Bag15Definition || existingV3Bag15.Name != v3Bag15Name || existingV3Bag15.Description != v3Bag15Description)
+        {
+            existingV3Bag15.Definition = v3Bag15Definition;
+            existingV3Bag15.Name = v3Bag15Name;
+            existingV3Bag15.Description = v3Bag15Description;
+            existingV3Bag15.UpdatedAt = now;
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation("Refreshed model {ModelId} ({Name})", ModelIds.ForesightFifteenMinV3Bag, v3Bag15Name);
+        }
+
+        // Seed "Foresight | 5m | v3-bag" — v2's exact matrix with the estimator upgraded to the
+        // campaign's seed-bagged recipe (bags=5 / seed=101 / coverage=0.05). Clean A/B sibling of
+        // v2 so the walk-forward delta isolates bagging + calibration + gating.
+        const string v3Bag5Name = "Foresight | 5m | v3-bag";
+        const string v3Bag5Description = "v2's exact 5m feature matrix with the estimator upgraded to the 2026-06-10 campaign recipe: 5-seed-bagged GBT, isotonic calibration, 5% coverage gate and OOD guard via the trainer's additive state. Single-seed GBT results proved to be coin flips on top of skill — bagging is mandatory. Abstains by emitting pUp 0.5.";
+        var v3Bag5Definition = BuiltInModels.BuildForesight5mV3BagFlow();
+        var existingV3Bag5 = await db.Models.FindAsync(new object?[] { ModelIds.ForesightFiveMinV3Bag }, ct);
+        if (existingV3Bag5 is null)
+        {
+            db.Models.Add(new Model
+            {
+                Id = ModelIds.ForesightFiveMinV3Bag,
+                TenantId = null,
+                Name = v3Bag5Name,
+                Description = v3Bag5Description,
+                Kind = "deterministic",
+                SupportsBacktesting = true,
+                IsBuiltIn = true,
+                IsDefault = false,
+                Definition = v3Bag5Definition,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation("Seeded model {ModelId} ({Name})", ModelIds.ForesightFiveMinV3Bag, v3Bag5Name);
+        }
+        else if (existingV3Bag5.Definition != v3Bag5Definition || existingV3Bag5.Name != v3Bag5Name || existingV3Bag5.Description != v3Bag5Description)
+        {
+            existingV3Bag5.Definition = v3Bag5Definition;
+            existingV3Bag5.Name = v3Bag5Name;
+            existingV3Bag5.Description = v3Bag5Description;
+            existingV3Bag5.UpdatedAt = now;
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation("Refreshed model {ModelId} ({Name})", ModelIds.ForesightFiveMinV3Bag, v3Bag5Name);
         }
 
         // ── Strategies: seed built-in catalogue rows and demonstrator DAG strategy ──────────

@@ -1,0 +1,28 @@
+{
+  "n_oos": 115152,
+  "approx_days": 400,
+  "pooled_acc_ens": 0.5156,
+  "pooled_auc_ens": 0.5234,
+  "baseline_majority": 0.5015,
+  "edge_pp": 1.56,
+  "per_fold_acc_gbm": [
+    0.5165,
+    0.5111,
+    0.5074,
+    0.5138,
+    0.5163,
+    0.5249,
+    0.5128,
+    0.5196
+  ],
+  "acc_by_confidence": {
+    "all": 0.5156,
+    "top 20%": 0.5353,
+    "top 10%": 0.5396,
+    "top 5%": 0.5434,
+    "top 1%": 0.5434
+  },
+  "gross_bps_per_trade_all": 0.133,
+  "gross_bps_per_trade_top1pct": 0.821,
+  "typical_roundtrip_cost_bps": 10
+}

@@ -139,6 +139,47 @@ public sealed class EdgeAwareKellyStakingStrategy : IStakingStrategy
 }
 
 /// <summary>
+/// Campaign 2026-06 production sizing: quarter-Kelly on the chosen side's realised edge vs the
+/// entry price, hard-capped at 2% of the current bankroll, then floored to whole dollars for the
+/// $1-minimum Polymarket venue. The cap bounds single-bet exposure during the regime-entry failures
+/// the June-2026 crash holdout exposed; quarter-Kelly itself survived 12/12 chaos windows with zero
+/// busts. No edge (f* ≤ 0) or a sub-$1 size is an abstain (0).
+/// </summary>
+public sealed class QuarterKellyTwoPercentCappedStakingStrategy : IStakingStrategy
+{
+    /// <summary>Fractional multiplier on full Kelly (quarter-Kelly).</summary>
+    public const decimal Fraction = 0.25m;
+
+    /// <summary>Hard ceiling on a single stake as a fraction of the current bankroll.</summary>
+    public const decimal MaxBankrollFraction = 0.02m;
+
+    public string Id => "kelly-q2";
+    public string Name => "Quarter-Kelly 2% capped — campaign 2026-06";
+    public string Description =>
+        "Quarter-Kelly on the chosen side's realised edge vs the entry price (f* = (winProb − price)/(1 − price) " +
+        "× 0.25 × bankroll), hard-capped at 2% of the current bankroll, then floored to whole dollars for the " +
+        "$1-minimum venue. Skips entirely when there is no edge or the capped size falls below $1. The " +
+        "production sizing from the 2026-06-10 campaign: quarter-Kelly survived 12/12 chaos windows with zero " +
+        "busts; the 2% cap bounds single-bet exposure on fresh regime entry.";
+    public bool RequiresEdgeInputs => true;
+
+    public decimal NextBetSize(StrategyStep s)
+    {
+        if (s.NextBankroll <= 0m) return 0m;
+        var pUp = s.Inputs.PUp;
+        var up = pUp >= 0.5m;
+        var price = up ? s.Inputs.YesPrice : s.Inputs.NoPrice;
+        var winProb = up ? pUp : 1m - pUp;
+        var fStar = KellyMath.FullKelly(winProb, price);
+        if (fStar <= 0m) return 0m;                                   // no edge ⇒ abstain
+        var target = Fraction * fStar * s.NextBankroll;
+        var cap = MaxBankrollFraction * s.NextBankroll;
+        if (target > cap) target = cap;
+        return StakingEngine.QuantizeToWholeDollars(target);          // whole-dollar floor; sub-$1 ⇒ abstain
+    }
+}
+
+/// <summary>
 /// Static catalogue of built-in staking strategies. New strategies added to <see cref="All"/> become
 /// selectable in the UI + addressable by id without other plumbing. Flat is the default.
 /// </summary>
@@ -151,6 +192,7 @@ public static class StakingStrategies
         new FractionalKellyStakingStrategy(),
         new WholeDollarKellyStakingStrategy(),
         new EdgeAwareKellyStakingStrategy(),
+        new QuarterKellyTwoPercentCappedStakingStrategy(),
     };
 
     public const string DefaultId = "flat";

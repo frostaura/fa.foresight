@@ -419,106 +419,141 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
 
                     if (pred is not null)
                     {
-                        var calibratedPUp = await _calibration.RescaleAsync(tracked.TenantId, tracked.Interval, pred.DirectionUpProbability, ct);
-                        if (tracked.Gated && StakingEngine.IsNoBet(calibratedPUp, StakingEngine.DefaultNoBetBand))
+                        // SERVED == VALIDATED: the side, the gates and the sizing inputs all use the
+                        // model's emitted pUp directly (in-node calibration happens inside the model
+                        // node; 0.5 is the canonical abstain). The legacy rescaler output is computed
+                        // for TELEMETRY ONLY (persisted to the bet notes) — it must never drive the
+                        // decision, or the served bet set diverges from the validated one.
+                        var servedPUp = pred.DirectionUpProbability;
+                        var rescalerPUp = await _calibration.RescaleAsync(tracked.TenantId, tracked.Interval, servedPUp, ct);
+                        if (tracked.Gated && StakingEngine.IsNoBet(servedPUp, StakingEngine.DefaultNoBetBand))
                         {
                             _logger.LogDebug("Live session {SessionId}: gated out on candle {Tgt}", tracked.Id, currentCandleOpenMs);
                         }
                         else
                         {
                             var entryQuote = await _venuePrices.EnsureEntryAsync(
-                                tracked.Venue, tracked.Symbol, tracked.Interval, currentCandleOpenMs, calibratedPUp, ct);
-                            var side = StakingEngine.DecideSide(calibratedPUp);
-                            var entryInputs = new StakingInputs(calibratedPUp, entryQuote.YesPrice, entryQuote.NoPrice);
-                            var lastSettled = tracked.Bets.Where(b => b.Resolved).OrderByDescending(b => b.TargetOpenTime).FirstOrDefault();
-                            var lastStake = lastSettled?.Size ?? tracked.InitialBetSize;
-                            var lastWon = lastSettled?.Outcome == "win";
-                            var strategy = StakingStrategies.Resolve(tracked.StrategyId);
-                            var nextStake = strategy.NextBetSize(new StrategyStep(lastStake, lastWon, tracked.InitialBetSize, tracked.CurrentBalance, entryInputs));
+                                tracked.Venue, tracked.Symbol, tracked.Interval, currentCandleOpenMs, servedPUp, ct);
+                            var side = StakingEngine.DecideSide(servedPUp);
+                            var entryPrice = side == "UP" ? entryQuote.YesPrice : entryQuote.NoPrice;
+                            var chosenSideProb = side == "UP" ? servedPUp : 1m - servedPUp;
 
-                            if (nextStake > 0m)
+                            // EV gate: abstain on any non-+EV candle. EvGateMargin (default 0 =
+                            // break-even) is a separate knob from the autonomous-loop MinEdge.
+                            if (!StakingEngine.HasPositiveEdge(chosenSideProb, entryPrice, _guardrails.EvGateMargin))
                             {
-                                // Per-trade cap guardrail.
-                                if (nextStake > _guardrails.MaxPerTradeUsd)
-                                {
-                                    _logger.LogInformation("Live bet capped from {Original} to {Cap} by per-trade guardrail", nextStake, _guardrails.MaxPerTradeUsd);
-                                    nextStake = _guardrails.MaxPerTradeUsd;
-                                }
+                                _logger.LogDebug("Live session {SessionId}: EV gate abstain on candle {Tgt} — sideProb {Prob} <= price {Price} + margin {Margin}",
+                                    tracked.Id, currentCandleOpenMs, chosenSideProb, entryPrice, _guardrails.EvGateMargin);
+                            }
+                            else
+                            {
+                                var entryInputs = new StakingInputs(servedPUp, entryQuote.YesPrice, entryQuote.NoPrice);
+                                var lastSettled = tracked.Bets.Where(b => b.Resolved).OrderByDescending(b => b.TargetOpenTime).FirstOrDefault();
+                                var lastStake = lastSettled?.Size ?? tracked.InitialBetSize;
+                                var lastWon = lastSettled?.Outcome == "win";
+                                var strategy = StakingStrategies.Resolve(tracked.StrategyId);
+                                var nextStake = strategy.NextBetSize(new StrategyStep(lastStake, lastWon, tracked.InitialBetSize, tracked.CurrentBalance, entryInputs));
 
-                                if (nextStake > tracked.CurrentBalance)
+                                if (nextStake > 0m)
                                 {
-                                    tracked.Bust = true; tracked.StoppedAt = DateTimeOffset.UtcNow;
-                                    await _db.SaveChangesAsync(ct);
-                                    await _ledger.ReleaseAsync(tenantId, tracked.Id, ct);
-                                    await _notifier.NotifySessionBustAsync(tenantId, tracked.Id, "live", tracked.CurrentBalance, ct);
-                                }
-                                else
-                                {
-                                    var entryPrice = side == "UP" ? entryQuote.YesPrice : entryQuote.NoPrice;
-                                    var shares = StakingEngine.Shares(nextStake, entryPrice);
-                                    tracked.CurrentBetSize = nextStake;
-
-                                    string? externalOrderId = null;
-                                    if (isLive && _arm.IsArmed(tenantId) && connector.ConnectorId != "null-execution")
+                                    // Per-trade cap guardrail.
+                                    if (nextStake > _guardrails.MaxPerTradeUsd)
                                     {
-                                        try
-                                        {
-                                            var orderSide = side == "UP" ? OrderSide.Yes : OrderSide.No;
-                                            var receipt = await connector.PlaceOrderAsync(
-                                                new OrderRequest(entryQuote.MarketExternalId ?? "", orderSide, shares, entryPrice, tenantId), ct);
-                                            externalOrderId = receipt.OrderId;
-                                            _logger.LogInformation("Live bet placed: {OrderId} {Side} {Shares}@{Price}", externalOrderId, side, shares, entryPrice);
-                                            // Notify trade placed (best-effort).
-                                            await _notifier.NotifyTradePlacedAsync(
-                                                tenantId, tracked.Id, externalOrderId,
-                                                side, nextStake, entryPrice, entryQuote.MarketExternalId, ct);
-                                        }
-                                        catch (Exception ex) when (ex is not OperationCanceledException)
-                                        {
-                                            _logger.LogError(ex, "Live order placement failed — bet NOT recorded");
-                                            return tracked;
-                                        }
+                                        _logger.LogInformation("Live bet capped from {Original} to {Cap} by per-trade guardrail", nextStake, _guardrails.MaxPerTradeUsd);
+                                        nextStake = _guardrails.MaxPerTradeUsd;
+                                    }
+
+                                    // Polymarket venue compliance: whole-dollar stakes, $1 minimum —
+                                    // applied AFTER the cap so a fractional cap can't reintroduce cents.
+                                    // A sub-$1 result is a clean abstain (0), handled below.
+                                    nextStake = StakingEngine.QuantizeToWholeDollars(nextStake);
+                                }
+
+                                if (nextStake > 0m)
+                                {
+                                    // Concurrent-exposure cap: never let the tenant's combined open
+                                    // (unresolved) bet exposure exceed the configured fraction of the
+                                    // combined active-session bankroll. Skip — not bust.
+                                    if (await ExceedsTotalExposureCapAsync(tenantId, nextStake, ct))
+                                    {
+                                        _logger.LogInformation("Live session {SessionId}: skipping bet on candle {Tgt} — total open exposure cap ({Cap:P0} of bankroll) would be exceeded",
+                                            tracked.Id, currentCandleOpenMs, _guardrails.MaxTotalExposurePctBankroll);
+                                    }
+                                    else if (nextStake > tracked.CurrentBalance)
+                                    {
+                                        tracked.Bust = true; tracked.StoppedAt = DateTimeOffset.UtcNow;
+                                        await _db.SaveChangesAsync(ct);
+                                        await _ledger.ReleaseAsync(tenantId, tracked.Id, ct);
+                                        await _notifier.NotifySessionBustAsync(tenantId, tracked.Id, "live", tracked.CurrentBalance, ct);
                                     }
                                     else
                                     {
-                                        _logger.LogInformation("[SHADOW/DISARMED] Would place live bet {Side} {Shares}@{Price} on {Market}",
-                                            side, shares, entryPrice, entryQuote.MarketExternalId);
-                                    }
+                                        var shares = StakingEngine.Shares(nextStake, entryPrice);
+                                        tracked.CurrentBetSize = nextStake;
 
-                                    var bet = new LiveBet
-                                    {
-                                        Id = Guid.NewGuid(),
-                                        TenantId = tracked.TenantId,
-                                        SessionId = tracked.Id,
-                                        TargetOpenTime = currentCandleOpenMs,
-                                        Side = side,
-                                        PredictedProbUp = pred.DirectionUpProbability,
-                                        AnchorClose = pred.AnchorClose,
-                                        Size = nextStake,
-                                        BalanceBefore = tracked.CurrentBalance,
-                                        ExternalOrderId = externalOrderId,
-                                        EntryPrice = entryPrice,
-                                        Shares = shares,
-                                        MarketExternalId = entryQuote.MarketExternalId,
-                                        PlacedAt = DateTimeOffset.FromUnixTimeMilliseconds(currentCandleOpenMs),
-                                        NotesJson = JsonSerializer.Serialize(new
+                                        string? externalOrderId = null;
+                                        if (isLive && _arm.IsArmed(tenantId) && connector.ConnectorId != "null-execution")
                                         {
-                                            calibratedPUp,
-                                            side,
-                                            entryPrice,
-                                            externalOrderId,
-                                            armed = _arm.IsArmed(tenantId)
-                                        })
-                                    };
-                                    _db.LiveBets.Add(bet);
-                                    try { await _db.SaveChangesAsync(ct); }
-                                    catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) == true)
-                                    {
-                                        _db.Entry(bet).State = EntityState.Detached;
-                                        _logger.LogDebug("Duplicate live bet race for session {SessionId} candle {Tgt}", tracked.Id, currentCandleOpenMs);
+                                            try
+                                            {
+                                                var orderSide = side == "UP" ? OrderSide.Yes : OrderSide.No;
+                                                var receipt = await connector.PlaceOrderAsync(
+                                                    new OrderRequest(entryQuote.MarketExternalId ?? "", orderSide, shares, entryPrice, tenantId), ct);
+                                                externalOrderId = receipt.OrderId;
+                                                _logger.LogInformation("Live bet placed: {OrderId} {Side} {Shares}@{Price}", externalOrderId, side, shares, entryPrice);
+                                                // Notify trade placed (best-effort).
+                                                await _notifier.NotifyTradePlacedAsync(
+                                                    tenantId, tracked.Id, externalOrderId,
+                                                    side, nextStake, entryPrice, entryQuote.MarketExternalId, ct);
+                                            }
+                                            catch (Exception ex) when (ex is not OperationCanceledException)
+                                            {
+                                                _logger.LogError(ex, "Live order placement failed — bet NOT recorded");
+                                                return tracked;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            _logger.LogInformation("[SHADOW/DISARMED] Would place live bet {Side} {Shares}@{Price} on {Market}",
+                                                side, shares, entryPrice, entryQuote.MarketExternalId);
+                                        }
+
+                                        var bet = new LiveBet
+                                        {
+                                            Id = Guid.NewGuid(),
+                                            TenantId = tracked.TenantId,
+                                            SessionId = tracked.Id,
+                                            TargetOpenTime = currentCandleOpenMs,
+                                            Side = side,
+                                            PredictedProbUp = pred.DirectionUpProbability,
+                                            AnchorClose = pred.AnchorClose,
+                                            Size = nextStake,
+                                            BalanceBefore = tracked.CurrentBalance,
+                                            ExternalOrderId = externalOrderId,
+                                            EntryPrice = entryPrice,
+                                            Shares = shares,
+                                            MarketExternalId = entryQuote.MarketExternalId,
+                                            PlacedAt = DateTimeOffset.FromUnixTimeMilliseconds(currentCandleOpenMs),
+                                            NotesJson = JsonSerializer.Serialize(new
+                                            {
+                                                servedPUp,
+                                                rescalerPUp, // telemetry only — the decision ran off servedPUp
+                                                side,
+                                                entryPrice,
+                                                externalOrderId,
+                                                armed = _arm.IsArmed(tenantId)
+                                            })
+                                        };
+                                        _db.LiveBets.Add(bet);
+                                        try { await _db.SaveChangesAsync(ct); }
+                                        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) == true)
+                                        {
+                                            _db.Entry(bet).State = EntityState.Detached;
+                                            _logger.LogDebug("Duplicate live bet race for session {SessionId} candle {Tgt}", tracked.Id, currentCandleOpenMs);
+                                        }
                                     }
                                 }
-                            }
+                            } // end EV-gate else
                         }
                     }
                 }
@@ -534,6 +569,24 @@ public sealed class LiveSessionEngine : ILiveSessionEngine
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Concurrent-exposure cap check: true when the tenant's open (unresolved) live-bet exposure plus
+    /// the candidate stake exceeds <see cref="TradingGuardrailOptions.MaxTotalExposurePctBankroll"/> of
+    /// the combined active-session bankroll. The open-bet sum is the cheapest honest exposure figure —
+    /// ledger reservations cover whole session balances (already-committed capital), not at-risk stakes.
+    /// </summary>
+    private async Task<bool> ExceedsTotalExposureCapAsync(Guid tenantId, decimal stake, CancellationToken ct)
+    {
+        var openExposure = await _db.LiveBets
+            .Where(b => b.TenantId == tenantId && !b.Resolved &&
+                        _db.LiveSessions.Any(s => s.Id == b.SessionId && s.StoppedAt == null))
+            .SumAsync(b => (decimal?)b.Size ?? 0m, ct);
+        var bankroll = await _db.LiveSessions
+            .Where(s => s.TenantId == tenantId && s.StoppedAt == null)
+            .SumAsync(s => (decimal?)s.CurrentBalance ?? 0m, ct);
+        return openExposure + stake > _guardrails.MaxTotalExposurePctBankroll * bankroll;
+    }
 
     /// <summary>
     /// Stable SHA-256 config hash over the session's key parameters EXCLUDING mode.

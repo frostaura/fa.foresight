@@ -1,0 +1,52 @@
+{
+ "champion": "fp_bag_k4",
+ "K": 4,
+ "primary_cov": 0.05,
+ "holdout_bars": 2684,
+ "btc_move_pct": -16.4,
+ "n_trades": 294,
+ "hit": 0.4864,
+ "wilson_lb95": 0.4388,
+ "binary_ev_even_odds": -0.0472,
+ "by_day": {
+  "06-01": [
+   20,
+   0.4
+  ],
+  "06-02": [
+   83,
+   0.434
+  ],
+  "06-03": [
+   49,
+   0.51
+  ],
+  "06-04": [
+   43,
+   0.512
+  ],
+  "06-05": [
+   8,
+   0.5
+  ],
+  "06-06": [
+   27,
+   0.63
+  ],
+  "06-07": [
+   34,
+   0.471
+  ],
+  "06-08": [
+   2,
+   1.0
+  ],
+  "06-09": [
+   28,
+   0.464
+  ]
+ },
+ "min_trades_rule70": true,
+ "ts": 1781090646,
+ "verdict_heuristic": "FALSIFIED or UNDERPOWERED \u2014 see numbers"
+}

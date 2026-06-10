@@ -51,6 +51,59 @@ public static class ChaosRunner
         return offsets;
     }
 
+    /// <summary>
+    /// A sampled chaos window expressed as a slice of the candidate array: the candidates whose
+    /// TargetOpenTime falls inside [start, start + windowLen·interval). Count may be 0 — a window
+    /// in which the model abstained on every candle is a legitimate outcome (survived, zero
+    /// profit), not an error.
+    /// </summary>
+    public readonly record struct TimeWindow(int Start, int Count);
+
+    /// <summary>
+    /// Time-based window sampling. <see cref="GenerateStartOffsets"/> indexes windows by
+    /// candidate-array position, which silently assumes one candidate per candle. Models that
+    /// ABSTAIN (confidence gate / OOD guard emit pUp = 0.5) produce sparse candidate arrays, so a
+    /// window length expressed in candles can exceed the candidate count even when the candidates
+    /// span weeks — the v3-bag models hit exactly that. Here windows are sampled on the TIME axis
+    /// instead: a window is windowLen·intervalMs of market time, and its candidates are whatever
+    /// the model chose to bet inside it. Same determinism contract: seeded splitmix64 only.
+    /// </summary>
+    public static IReadOnlyList<TimeWindow> GenerateTimeWindows(
+        int sampleCount, int windowLen, long intervalMs, IReadOnlyList<BetCandidate> candidates, long seed)
+    {
+        if (candidates.Count == 0) return Array.Empty<TimeWindow>();
+        var spanMs = (long)windowLen * intervalMs;
+        var t0 = candidates[0].TargetOpenTime;
+        var tLast = candidates[^1].TargetOpenTime;
+        // Distinct interval-aligned start slots whose full window still fits inside the range.
+        var maxStartSlot = (int)((tLast - t0 - spanMs) / intervalMs);
+        if (maxStartSlot <= 0) return Array.Empty<TimeWindow>();
+
+        var rng = new DeterministicRng(seed);
+        var count = Math.Min(sampleCount, maxStartSlot);
+        var windows = new List<TimeWindow>(count);
+        for (var i = 0; i < count; i++)
+        {
+            var ws = t0 + rng.NextInt(maxStartSlot) * intervalMs;
+            var we = ws + spanMs;
+            var start = LowerBound(candidates, ws);
+            var end = LowerBound(candidates, we);
+            windows.Add(new TimeWindow(start, end - start));
+        }
+        return windows;
+
+        static int LowerBound(IReadOnlyList<BetCandidate> c, long t)
+        {
+            int lo = 0, hi = c.Count;
+            while (lo < hi)
+            {
+                var mid = (lo + hi) >> 1;
+                if (c[mid].TargetOpenTime < t) lo = mid + 1; else hi = mid;
+            }
+            return lo;
+        }
+    }
+
     // ──────────────────────────────────────────────────────────────────────────────────────
     // 2.  REPLAY WINDOW
     // ──────────────────────────────────────────────────────────────────────────────────────
@@ -187,6 +240,7 @@ public static class ChaosRunner
                 ProfitP5: 0m,
                 ProfitP50: 0m,
                 ProfitP95: 0m,
+                ProfitMean: 0m,
                 WorstDrawdown: 0m,
                 MeanZeroCrossings: 0.0,
                 SyntheticBetFraction: (decimal)syntheticFraction,
@@ -201,6 +255,7 @@ public static class ChaosRunner
         var p5 = Percentile(profits, 0.05);
         var p50 = Percentile(profits, 0.50);
         var p95 = Percentile(profits, 0.95);
+        var profitMean = profits.Average();
 
         var worstDd = samples.Max(s => s.MaxDrawdown);
         var meanZero = samples.Average(s => (double)s.ZeroCrossings);
@@ -215,6 +270,7 @@ public static class ChaosRunner
             ProfitP5: p5,
             ProfitP50: p50,
             ProfitP95: p95,
+            ProfitMean: profitMean,
             WorstDrawdown: worstDd,
             MeanZeroCrossings: meanZero,
             SyntheticBetFraction: (decimal)syntheticFraction,

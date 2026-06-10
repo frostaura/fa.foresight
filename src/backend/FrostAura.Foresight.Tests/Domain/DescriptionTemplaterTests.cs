@@ -47,6 +47,26 @@ public class DescriptionTemplaterTests
     }
 
     [Fact]
+    public void ForModel_clamps_to_column_limits_for_node_rich_dag()
+    {
+        // A model whose DAG carries many distinct node types makes the humanised signal list — and
+        // thus the prose — long. The output must still fit the SimpleDescription varchar(500) /
+        // TechnicalDescription varchar(1000) columns, otherwise the deterministic backfill's batch
+        // save aborts and every entity's descriptions stay null (the real bug this guards).
+        var nodes = string.Join(",", Enumerable.Range(0, 60)
+            .Select(i => $"{{\"id\":\"n{i}\",\"type\":\"feature-indicator-number-{i}\"}}"));
+        var dag = $"{{\"definitionKind\":\"model\",\"nodes\":[{nodes}]}}";
+
+        var (simple, technical) = DescriptionTemplater.ForModel(
+            "FeaturePack Heavy", "deterministic", true, dag);
+
+        simple.Length.Should().BeLessThanOrEqualTo(500);
+        technical.Length.Should().BeLessThanOrEqualTo(1000);
+        simple.Should().NotBeNullOrWhiteSpace();
+        technical.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
     public void ForStrategy_dag_describes_nodes()
     {
         var dag = "{\"definitionKind\":\"strategy\",\"nodes\":[{\"id\":\"k\",\"type\":\"edge-aware-kelly\"},{\"id\":\"o\",\"type\":\"output-stake\"}]}";

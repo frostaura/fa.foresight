@@ -1,0 +1,14 @@
+{
+  "best_confident_accuracy": 56.81,
+  "best_confident_coverage_pct": 5.05,
+  "all_bar_accuracy_30min": 52.3,
+  "return_optimal_accuracy": 53.16,
+  "return_optimal_coverage_pct": 63.3,
+  "binary_EV_per_bet_at_optimal_pct_stake": 4.32,
+  "spot_net_bps_per_trade_range": [
+    -9.1,
+    -6.3
+  ],
+  "leakage_audit": "PASS (real 7.7 SD above shuffled-label null; positive+noise controls clean)",
+  "verdict": "Honest confident-subset ceiling ~57%; return is MAXIMISED near ~53% accuracy / high coverage, not 60%. Profitable on binary odds, not spot."
+}

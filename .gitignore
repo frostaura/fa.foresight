@@ -54,3 +54,14 @@ src/frontend/.playwright-mcp/
 # TS incremental build cache
 src/frontend/tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+# Research lab — raw market data, feature dumps & model caches are large and
+# reproducible from the download/build scripts; only code, protocol, ledger,
+# reports and small result artifacts are committed.
+research/**/data/
+research/**/*.pkl
+research/**/*.parquet
+research/**/*.csv
+
+# Backtest/feature caches written to the repo root by ad-hoc scripts
+.cache-*.json

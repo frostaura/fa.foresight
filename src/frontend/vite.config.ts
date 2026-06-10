@@ -53,12 +53,30 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,svg,png,ico,webp,woff2}"],
         navigateFallback: "/index.html",
         runtimeCaching: [
+          // Markets + tenants only: near-static reads where an instant stale paint is desirable.
+          // These are the only two endpoints src/lib/swRevalidate.ts maps BroadcastUpdate messages
+          // back to RTK tags for, so a stale paint self-heals once the revalidation lands.
           {
-            urlPattern: ({ url, request }) => request.method === "GET" && url.pathname.startsWith("/api/") && !url.pathname.endsWith("/sentiment") && !url.pathname.endsWith("/discover") && !url.pathname.endsWith("/history") && !url.pathname.includes("/stream"),
+            urlPattern: ({ url, request }) => request.method === "GET" && /^\/api\/(markets|tenants)(\/|$)/.test(url.pathname) && !url.pathname.endsWith("/sentiment") && !url.pathname.endsWith("/discover") && !url.pathname.endsWith("/history") && !url.pathname.includes("/stream"),
             handler: "StaleWhileRevalidate",
             options: {
               cacheName: "foresight-api",
               broadcastUpdate: { channelName: "foresight-api-updates", options: { headersToCheck: ["content-length", "etag", "last-modified"] } },
+              expiration: { maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 7 },
+              cacheableResponse: { statuses: [0, 200] }
+            }
+          },
+          // Every other GET /api/* is mutable app data (chaos runs, sessions, models, backtests,
+          // strategies…). These MUST be NetworkFirst: under StaleWhileRevalidate the SW answers
+          // RTK Query's post-mutation refetches (invalidatesTags) from its own Cache Storage, so
+          // the refetch lands stale in the Redux cache and the UI never updates until a full
+          // reload. The cache is kept purely as an offline / network-failure fallback.
+          {
+            urlPattern: ({ url, request }) => request.method === "GET" && url.pathname.startsWith("/api/") && !url.pathname.endsWith("/sentiment") && !url.pathname.endsWith("/discover") && !url.pathname.endsWith("/history") && !url.pathname.includes("/stream"),
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "foresight-api",
+              networkTimeoutSeconds: 8,
               expiration: { maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 7 },
               cacheableResponse: { statuses: [0, 200] }
             }

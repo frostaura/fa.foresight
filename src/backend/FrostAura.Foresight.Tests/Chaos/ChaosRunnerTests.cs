@@ -336,4 +336,47 @@ public class ChaosRunnerTests
         agg.BustRate.Should().Be(1.0, "every window should bust on continuous losses");
         agg.Pass.Should().BeFalse();
     }
+
+    [Fact]
+    public void GenerateTimeWindows_handles_sparse_candidates_from_gating_models()
+    {
+        // 100 candidates spaced 20 intervals apart (a model that abstains 95% of the time):
+        // index-based windows of 288 candles would need 288 candidates and fail; time-based
+        // windows must still sample fine because the candidates SPAN 2000 intervals.
+        const long intervalMs = 300_000L;
+        var candidates = Enumerable.Range(0, 100)
+            .Select(i => new BetCandidate(1_000_000_000_000L + i * 20 * intervalMs, 0.6m, 0.55m, 0.45m, false, true))
+            .ToArray();
+
+        ChaosRunner.GenerateStartOffsets(50, 288, candidates.Length, 7L)
+            .Should().BeEmpty("the index-based sampler cannot window sparse candidates");
+
+        var windows = ChaosRunner.GenerateTimeWindows(50, 288, intervalMs, candidates, 7L);
+        windows.Should().NotBeEmpty();
+        windows.Count.Should().Be(50);
+        foreach (var w in windows)
+        {
+            w.Start.Should().BeInRange(0, candidates.Length);
+            w.Count.Should().BeInRange(0, candidates.Length - w.Start);
+            if (w.Count > 0)
+            {
+                var span = candidates[w.Start + w.Count - 1].TargetOpenTime - candidates[w.Start].TargetOpenTime;
+                span.Should().BeLessThan(288 * intervalMs, "all of a window's candidates must fall inside its time span");
+            }
+        }
+
+        // Determinism: same seed, same windows.
+        ChaosRunner.GenerateTimeWindows(50, 288, intervalMs, candidates, 7L)
+            .Should().Equal(windows);
+    }
+
+    [Fact]
+    public void GenerateTimeWindows_returns_empty_when_range_shorter_than_window()
+    {
+        const long intervalMs = 300_000L;
+        var candidates = Enumerable.Range(0, 10)
+            .Select(i => new BetCandidate(1_000_000_000_000L + i * intervalMs, 0.6m, 0.55m, 0.45m, false, true))
+            .ToArray();
+        ChaosRunner.GenerateTimeWindows(20, 288, intervalMs, candidates, 1L).Should().BeEmpty();
+    }
 }

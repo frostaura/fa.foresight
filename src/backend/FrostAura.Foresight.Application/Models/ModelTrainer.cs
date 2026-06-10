@@ -154,7 +154,13 @@ public sealed class ModelTrainer
         // Engine dispatch: if the flow carries a model.gbt node, gradient-boosted trees is the
         // estimator and its walk-forward accuracy is the headline; otherwise it's logistic
         // regression. LR/LogReg are always fit (cheap) so the trained-state shape stays stable.
-        var gbtParams = TryReadGbtParams(flow);
+        var gbtConfig = TryReadGbtParams(flow);
+
+        // Out-of-fold GBT predictions (bag-mean raw probabilities) collected during walk-forward.
+        // These are already embargoed (each fold validates strictly after its training window), so
+        // they are the honest sample to fit isotonic calibration and the confidence gate on.
+        var oofGbtPreds = new List<double>();
+        var oofGbtLabels = new List<int>();
 
         for (var k = 1; k <= actualFolds; k++)
         {
@@ -170,7 +176,7 @@ public sealed class ModelTrainer
 
             var lrFold = FitLinearRegression(XtrainFold, yCloseTrainFold);
             var logrFold = FitLogisticRegression(XtrainFold, yDirTrainFold);
-            var gbtFold = gbtParams is null ? null : GradientBoostedTrees.Fit(XtrainFold, yDirTrainFold, gbtParams);
+            var gbtFoldBag = gbtConfig is null ? null : FitGbtBag(XtrainFold, yDirTrainFold, gbtConfig.Params, gbtConfig.Bags);
 
             int lrHitsK = 0, logrHitsK = 0, gbtHitsK = 0;
             for (var v = 0; v < XvalFold.Length; v++)
@@ -185,11 +191,19 @@ public sealed class ModelTrainer
                 var p = 1.0 / (1.0 + Math.Exp(-z));
                 if ((p >= 0.5 ? 1 : 0) == yDirValFold[v]) logrHitsK++;
 
-                if (gbtFold is not null && (GradientBoostedTrees.PredictProba(gbtFold, row) >= 0.5 ? 1 : 0) == yDirValFold[v]) gbtHitsK++;
+                if (gbtFoldBag is not null)
+                {
+                    // Bag-mean probability — the same aggregation the serving node uses, so the
+                    // walk-forward accuracy measures the deployed procedure, not a single seed.
+                    var pGbt = BagMeanProba(gbtFoldBag, row);
+                    if ((pGbt >= 0.5 ? 1 : 0) == yDirValFold[v]) gbtHitsK++;
+                    oofGbtPreds.Add(pGbt);
+                    oofGbtLabels.Add(yDirValFold[v]);
+                }
             }
             lrFoldAccs.Add(XvalFold.Length == 0 ? 0.0 : (double)lrHitsK / XvalFold.Length);
             logrFoldAccs.Add(XvalFold.Length == 0 ? 0.0 : (double)logrHitsK / XvalFold.Length);
-            if (gbtFold is not null) gbtFoldAccs.Add(XvalFold.Length == 0 ? 0.0 : (double)gbtHitsK / XvalFold.Length);
+            if (gbtFoldBag is not null) gbtFoldAccs.Add(XvalFold.Length == 0 ? 0.0 : (double)gbtHitsK / XvalFold.Length);
         }
 
         var lrAcc = lrFoldAccs.Average();
@@ -201,14 +215,39 @@ public sealed class ModelTrainer
         // final model uses all the data.
         var lr = FitLinearRegression(X.ToArray(), yClose.ToArray());
         var logr = FitLogisticRegression(X.ToArray(), yDir.ToArray());
-        var gbt = gbtParams is null ? null : GradientBoostedTrees.Fit(X.ToArray(), yDir.ToArray(), gbtParams);
+        var gbtBag = gbtConfig is null ? null : FitGbtBag(X.ToArray(), yDir.ToArray(), gbtConfig.Params, gbtConfig.Bags);
+        var gbt = gbtBag?[0];
+
+        // Isotonic calibration fit on the embargoed OOF bag-mean predictions. Serving applies it
+        // by linear interpolation before the OOD veto and confidence gate (see RegressionNodes).
+        double[]? calX = null, calY = null;
+        if (gbtConfig is not null && oofGbtPreds.Count > 0)
+            (calX, calY) = IsotonicCalibration.Fit(oofGbtPreds.ToArray(), oofGbtLabels.ToArray());
+
+        // Confidence gate: keep only the most confident `coverage` fraction of calibrated OOF
+        // predictions — threshold is the (1-coverage) quantile of |pCal - 0.5|. coverage=0 disables.
+        double? gateThreshold = null;
+        if (gbtConfig is not null && gbtConfig.Coverage > 0 && oofGbtPreds.Count > 0)
+        {
+            var distances = oofGbtPreds
+                .Select(p => Math.Abs((calX is null ? p : IsotonicCalibration.Apply(calX, calY!, p)) - 0.5))
+                .OrderBy(d => d)
+                .ToArray();
+            gateThreshold = Quantile(distances, 1.0 - gbtConfig.Coverage);
+        }
+
+        // OOD guard: per-feature population mean/std over the full training matrix (post-warmup
+        // rows). Serving vetoes (emits 0.5) when >= minHits features sit beyond zMax sigmas.
+        double[]? oodMeans = null, oodStds = null;
+        if (gbtConfig is not null)
+            (oodMeans, oodStds) = ColumnStats(X);
 
         var trainedState = JsonSerializer.Serialize(new
         {
             featureNames = columns,
             trainedAt = DateTimeOffset.UtcNow,
             trainingRows = X.Count,
-            engine = gbtParams is null ? "logistic_regression" : "gbt",
+            engine = gbtConfig is null ? "logistic_regression" : "gbt",
             walkForward = new
             {
                 folds = actualFolds,
@@ -232,14 +271,39 @@ public sealed class ModelTrainer
                 weights = logr.Weights,
                 featureNames = columns,
             },
+            // Legacy single-model field stays the FIRST bag member for backward compatibility;
+            // the optional additive fields below are absent (null) unless the feature is active.
             modelGbt = gbt,
+            modelGbtBag = gbtBag is null || gbtBag.Length <= 1 ? null : (object)new
+            {
+                seeds = Enumerable.Range(gbtConfig!.Params.Seed, gbtBag.Length).ToArray(),
+                models = gbtBag,
+            },
+            calibration = calX is null || calX.Length == 0 ? null : (object)new
+            {
+                type = "isotonic",
+                x = calX,
+                y = calY,
+            },
+            confidenceGate = gateThreshold is null ? null : (object)new
+            {
+                coverage = gbtConfig!.Coverage,
+                threshold = gateThreshold.Value,
+            },
+            oodGuard = oodMeans is null ? null : (object)new
+            {
+                means = oodMeans,
+                stds = oodStds,
+                zMax = 8.0,
+                minHits = 3,
+            },
         }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         // ValidationAccuracy returned to the caller is the walk-forward mean of the ACTIVE engine —
         // the honest "across multiple regimes" number. Compared against the honest-backtest's
         // out-of-sample accuracy, the gap should be small if no leakage and the model truly
         // generalizes. A big gap = the trainer's robustness story doesn't match production.
-        var headlineAcc = gbtParams is null ? Math.Max(lrAcc, logrAcc) : gbtAcc;
+        var headlineAcc = gbtConfig is null ? Math.Max(lrAcc, logrAcc) : gbtAcc;
         return new TrainResult(
             TrainedStateJson: trainedState,
             ValidationAccuracy: (decimal)headlineAcc);
@@ -248,22 +312,85 @@ public sealed class ModelTrainer
     /// <summary>
     /// Reads gradient-boosted-tree hyper-parameters off the flow's <c>model.gbt</c> node, or returns
     /// null when the flow uses a different estimator (logistic regression is the default engine).
+    /// Also carries the bagging/gating knobs: <c>bags</c> (ensemble size, default 1 = legacy single
+    /// fit), <c>seed</c> (first bag member's RNG seed), and <c>coverage</c> (confidence-gate keep
+    /// fraction, default 0 = gate disabled).
     /// </summary>
-    private static GbtParams? TryReadGbtParams(FlowDefinition flow)
+    private static GbtNodeConfig? TryReadGbtParams(FlowDefinition flow)
     {
         var node = flow.Nodes.FirstOrDefault(n => n.Type == "model.gbt");
         if (node is null) return null;
         var p = node.Params;
-        return new GbtParams(
-            NEstimators: Flow.Nodes.NodeParams.GetInt(p, "n_estimators", 150),
-            MaxDepth: Flow.Nodes.NodeParams.GetInt(p, "max_depth", 3),
-            LearningRate: (double)Flow.Nodes.NodeParams.GetDecimal(p, "learning_rate", 0.04m),
-            MinSamplesLeaf: Flow.Nodes.NodeParams.GetInt(p, "min_samples_leaf", 200),
-            Subsample: (double)Flow.Nodes.NodeParams.GetDecimal(p, "subsample", 0.7m),
-            ColSample: (double)Flow.Nodes.NodeParams.GetDecimal(p, "colsample", 0.7m),
-            Lambda: (double)Flow.Nodes.NodeParams.GetDecimal(p, "l2", 1.0m),
-            Gamma: 0.0,
-            Seed: 1);
+        var seed = Flow.Nodes.NodeParams.GetInt(p, "seed", 1);
+        var bags = Math.Max(1, Flow.Nodes.NodeParams.GetInt(p, "bags", 1));
+        var coverage = Math.Clamp((double)Flow.Nodes.NodeParams.GetDecimal(p, "coverage", 0m), 0.0, 1.0);
+        return new GbtNodeConfig(
+            Params: new GbtParams(
+                NEstimators: Flow.Nodes.NodeParams.GetInt(p, "n_estimators", 150),
+                MaxDepth: Flow.Nodes.NodeParams.GetInt(p, "max_depth", 3),
+                LearningRate: (double)Flow.Nodes.NodeParams.GetDecimal(p, "learning_rate", 0.04m),
+                MinSamplesLeaf: Flow.Nodes.NodeParams.GetInt(p, "min_samples_leaf", 200),
+                Subsample: (double)Flow.Nodes.NodeParams.GetDecimal(p, "subsample", 0.7m),
+                ColSample: (double)Flow.Nodes.NodeParams.GetDecimal(p, "colsample", 0.7m),
+                Lambda: (double)Flow.Nodes.NodeParams.GetDecimal(p, "l2", 1.0m),
+                Gamma: 0.0,
+                Seed: seed),
+            Bags: bags,
+            Coverage: coverage);
+    }
+
+    /// <summary>
+    /// Fits <paramref name="bags"/> GBT ensembles on the same data with consecutive seeds
+    /// (seed..seed+B-1). Seed-bagging is mandatory doctrine from the 2026-06-10 campaign: a single
+    /// seed at this SNR is a coin flip on top of skill; the bag mean is the honest estimator.
+    /// </summary>
+    private static GbtModel[] FitGbtBag(double[][] x, int[] y, GbtParams p, int bags)
+    {
+        var models = new GbtModel[Math.Max(1, bags)];
+        for (var b = 0; b < models.Length; b++)
+            models[b] = GradientBoostedTrees.Fit(x, y, p with { Seed = p.Seed + b });
+        return models;
+    }
+
+    private static double BagMeanProba(GbtModel[] bag, double[] row)
+    {
+        var sum = 0.0;
+        foreach (var m in bag) sum += GradientBoostedTrees.PredictProba(m, row);
+        return sum / bag.Length;
+    }
+
+    /// <summary>Linear-interpolated quantile over an ascending-sorted array, q ∈ [0,1].</summary>
+    private static double Quantile(double[] sortedAsc, double q)
+    {
+        if (sortedAsc.Length == 0) return 0.0;
+        var pos = Math.Clamp(q, 0.0, 1.0) * (sortedAsc.Length - 1);
+        var lo = (int)Math.Floor(pos);
+        var hi = (int)Math.Ceiling(pos);
+        if (lo == hi) return sortedAsc[lo];
+        return sortedAsc[lo] + (pos - lo) * (sortedAsc[hi] - sortedAsc[lo]);
+    }
+
+    /// <summary>Per-column population mean/std over the training matrix (rows are post-warmup).</summary>
+    private static (double[] Means, double[] Stds) ColumnStats(List<double[]> x)
+    {
+        var n = x.Count;
+        var p = x[0].Length;
+        var means = new double[p];
+        var stds = new double[p];
+        for (var c = 0; c < p; c++)
+        {
+            var sum = 0.0;
+            for (var i = 0; i < n; i++) sum += x[i][c];
+            means[c] = sum / n;
+            var ss = 0.0;
+            for (var i = 0; i < n; i++)
+            {
+                var d = x[i][c] - means[c];
+                ss += d * d;
+            }
+            stds[c] = Math.Sqrt(ss / n);
+        }
+        return (means, stds);
     }
 
     /// <summary>
@@ -389,11 +516,18 @@ public sealed class ModelTrainer
         "1m" => 60_000L,
         "5m" => 300_000L,
         "15m" => 900_000L,
+        "1h" => 3_600_000L,
         _ => throw new ArgumentException($"Unsupported interval '{interval}'.", nameof(interval)),
     };
 }
 
 public sealed record TrainResult(string TrainedStateJson, decimal ValidationAccuracy);
+
+/// <summary>
+/// The model.gbt node's training-time configuration: core GBT hyper-parameters plus the bagging
+/// ensemble size and the confidence-gate coverage fraction (0 = gate disabled).
+/// </summary>
+internal sealed record GbtNodeConfig(GbtParams Params, int Bags, double Coverage);
 
 /// <summary>
 /// Anti-lookahead provider for a single training iteration. Target-tf candles come from the

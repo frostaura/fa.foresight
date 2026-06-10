@@ -1,0 +1,11 @@
+{
+  "protocol": "single recent 25% holdout (~3.7mo), v5 stack, threshold from train calib",
+  "k6_30min_top2.5pct_acc": 58.05,
+  "k6_30min_top1pct_acc": 60.54,
+  "k9_45min_top2.5pct_acc": 62.39,
+  "agreement_top2.5pct_acc": 58.17,
+  "permutation_z": 6.0,
+  "null_mean": 50.9,
+  "walkforward_15mo_confident_ceiling": 56.8,
+  "benchmark_peer": 59.0
+}

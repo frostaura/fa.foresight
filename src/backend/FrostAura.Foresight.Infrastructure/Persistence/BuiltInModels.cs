@@ -522,4 +522,212 @@ internal static class BuiltInModels
         }
         """;
     }
+
+    /// <summary>
+    /// Foresight | 15m | v3-bag — the venue-native productionisation of the 2026-06-10 research
+    /// champion (fp_bag_k4: 5-seed-bagged GBT, 5% coverage, 58.31% pooled, 12/12 chaos windows).
+    /// The 15-min cumulative direction is the closest Polymarket-tradeable label to the research
+    /// K=3 horizon (the 20-min K=4 label has no instrument).
+    ///
+    /// Structure mirrors the v1/v2 multi-timeframe pattern shifted one band up: the anchor is 15m,
+    /// sub-bar pressure comes from 5m candles (window=9 sub-bars ≈ 3 anchor bars, the same trailing
+    /// context ratio as v1's fifteen 1m bars under a 5m anchor), and higher-tf regime comes from 1h
+    /// candles (interval support added alongside this model). tech_pack contributes the stationary
+    /// rsi14/trendPct pair and feature_pack its z20 (raw price-level outputs like SMA/BB bands are
+    /// deliberately not matrixed — non-stationary features don't survive a walk-forward).
+    ///
+    /// Estimator carries the campaign's seed-bagged recipe: bags=5 / seed=101 / coverage=0.05 are
+    /// consumed by the trainer, which writes the additive TrainedState fields (modelGbtBag,
+    /// calibration, confidenceGate, oodGuard). Abstention canon: the node emits pUp = 0.5 when the
+    /// gate or OOD guard vetoes, which every engine already treats as no-bet.
+    /// </summary>
+    public static string BuildForesight15mV3BagFlow()
+    {
+        return /*lang=json,strict*/ """
+        {
+          "schemaVersion": 1,
+          "modelKind": "deterministic",
+          "supportsBacktesting": true,
+          "warmupCandles": 60,
+          "nodes": [
+            { "id": "c15",  "type": "source.binance.klines", "params": { "tf": "target", "limit": 60 }, "position": { "x":  40, "y":   0 } },
+            { "id": "c1h",  "type": "source.binance.klines", "params": { "tf": "1h",     "limit": 60 }, "position": { "x":  40, "y": 720 } },
+            { "id": "c5",   "type": "source.binance.klines", "params": { "tf": "5m",     "limit": 60 }, "position": { "x":  40, "y": 880 } },
+
+            { "id": "tech", "type": "indicator.tech_pack",     "params": {}, "position": { "x": 320, "y":   0 } },
+            { "id": "feat", "type": "indicator.feature_pack",  "params": {}, "position": { "x": 320, "y": 140 } },
+            { "id": "mom",  "type": "indicator.momentum_pack", "params": {}, "position": { "x": 320, "y": 280 } },
+            { "id": "norm", "type": "indicator.norm_pack",     "params": {}, "position": { "x": 320, "y": 420 } },
+            { "id": "vol",  "type": "indicator.volume_pack",   "params": {}, "position": { "x": 320, "y": 560 } },
+            { "id": "time", "type": "indicator.temporal_pack", "params": {}, "position": { "x": 320, "y": 700 } },
+            { "id": "htf",  "type": "indicator.htf_regime_pack","params": {},"position": { "x": 320, "y": 840 } },
+            { "id": "sub",  "type": "indicator.subbar_pack",   "params": { "window": 9 }, "position": { "x": 320, "y": 980 } },
+
+            { "id": "matrix", "type": "feature.matrix_builder",
+              "params": { "columns": [
+                "rsi14","trendPct","z20",
+                "ret_1","ret_3","ret_5","ret_10",
+                "ema_spread_atr","px_vs_ema26_atr","bb_pos","atr_pct",
+                "vol_z20","up_vol_ratio","obv_z20",
+                "hour_sin","hour_cos","dow_sin","dow_cos","is_us_session","is_eu_session","is_weekend",
+                "htf_ema_spread_atr","htf_px_vs_ema26_atr","htf_atr_pct","htf_rsi","htf_ret_4",
+                "subbar_rvol","subbar_up_ratio","subbar_vol_skew","subbar_ret_5"
+              ] },
+              "position": { "x": 660, "y": 400 } },
+
+            { "id": "model", "type": "model.gbt",
+              "params": { "n_estimators": 350, "max_depth": 6, "learning_rate": 0.03, "min_samples_leaf": 150, "subsample": 0.8, "colsample": 0.6, "l2": 8.0, "bags": 5, "seed": 101, "coverage": 0.05 },
+              "position": { "x": 980, "y": 400 } },
+            { "id": "out",   "type": "output.prediction", "params": {}, "position": { "x": 1300, "y": 400 } }
+          ],
+          "edges": [
+            { "from": "c15.candles", "to": "tech.candles" },
+            { "from": "c15.candles", "to": "feat.candles" },
+            { "from": "c15.candles", "to": "mom.candles" },
+            { "from": "c15.candles", "to": "norm.candles" },
+            { "from": "c15.candles", "to": "vol.candles" },
+            { "from": "c1h.candles", "to": "htf.candles" },
+            { "from": "c5.candles",  "to": "sub.candles" },
+
+            { "from": "tech.rsi14",    "to": "matrix.rsi14" },
+            { "from": "tech.trendPct", "to": "matrix.trendPct" },
+            { "from": "feat.z20",      "to": "matrix.z20" },
+
+            { "from": "mom.ret_1",  "to": "matrix.ret_1" },
+            { "from": "mom.ret_3",  "to": "matrix.ret_3" },
+            { "from": "mom.ret_5",  "to": "matrix.ret_5" },
+            { "from": "mom.ret_10", "to": "matrix.ret_10" },
+
+            { "from": "norm.ema_spread_atr",  "to": "matrix.ema_spread_atr" },
+            { "from": "norm.px_vs_ema26_atr", "to": "matrix.px_vs_ema26_atr" },
+            { "from": "norm.bb_pos",          "to": "matrix.bb_pos" },
+            { "from": "norm.atr_pct",         "to": "matrix.atr_pct" },
+
+            { "from": "vol.vol_z20",      "to": "matrix.vol_z20" },
+            { "from": "vol.up_vol_ratio", "to": "matrix.up_vol_ratio" },
+            { "from": "vol.obv_z20",      "to": "matrix.obv_z20" },
+
+            { "from": "time.hour_sin",      "to": "matrix.hour_sin" },
+            { "from": "time.hour_cos",      "to": "matrix.hour_cos" },
+            { "from": "time.dow_sin",       "to": "matrix.dow_sin" },
+            { "from": "time.dow_cos",       "to": "matrix.dow_cos" },
+            { "from": "time.is_us_session", "to": "matrix.is_us_session" },
+            { "from": "time.is_eu_session", "to": "matrix.is_eu_session" },
+            { "from": "time.is_weekend",    "to": "matrix.is_weekend" },
+
+            { "from": "htf.htf_ema_spread_atr",  "to": "matrix.htf_ema_spread_atr" },
+            { "from": "htf.htf_px_vs_ema26_atr", "to": "matrix.htf_px_vs_ema26_atr" },
+            { "from": "htf.htf_atr_pct",         "to": "matrix.htf_atr_pct" },
+            { "from": "htf.htf_rsi",             "to": "matrix.htf_rsi" },
+            { "from": "htf.htf_ret_4",           "to": "matrix.htf_ret_4" },
+
+            { "from": "sub.subbar_rvol",     "to": "matrix.subbar_rvol" },
+            { "from": "sub.subbar_up_ratio", "to": "matrix.subbar_up_ratio" },
+            { "from": "sub.subbar_vol_skew", "to": "matrix.subbar_vol_skew" },
+            { "from": "sub.subbar_ret_5",    "to": "matrix.subbar_ret_5" },
+
+            { "from": "matrix.matrix",    "to": "model.matrix" },
+            { "from": "matrix.ready",     "to": "model.ready" },
+            { "from": "model.pUp",        "to": "out.pUp" },
+            { "from": "model.confidence", "to": "out.confidence" }
+          ]
+        }
+        """;
+    }
+
+    /// <summary>
+    /// Foresight | 5m | v3-bag — v2's exact sources/packs/matrix (target 5m + 15m regime + 1m
+    /// sub-bar; no order-flow, so it stays fully live-capable like v2) with the estimator upgraded
+    /// to the 2026-06-10 campaign's seed-bagged recipe. The campaign's loudest finding: single-seed
+    /// GBT results at this SNR are coin flips on top of skill (59.12% under seed 42 collapsed to
+    /// 55.32% under seed 7) — seed-bagging (B=5) is mandatory. bags / seed / coverage are consumed
+    /// by the trainer, which writes the additive TrainedState fields (modelGbtBag, calibration,
+    /// confidenceGate, oodGuard); v2's reporting-only min_confidence is dropped in favour of the
+    /// calibrated coverage gate. Clean A/B sibling of v2: identical matrix, so the walk-forward
+    /// delta is attributable purely to bagging + calibration + gating.
+    /// </summary>
+    public static string BuildForesight5mV3BagFlow()
+    {
+        return /*lang=json,strict*/ """
+        {
+          "schemaVersion": 1,
+          "modelKind": "deterministic",
+          "supportsBacktesting": true,
+          "warmupCandles": 60,
+          "nodes": [
+            { "id": "c5",   "type": "source.binance.klines", "params": { "tf": "target", "limit": 60 }, "position": { "x":  40, "y":   0 } },
+            { "id": "c15",  "type": "source.binance.klines", "params": { "tf": "15m",    "limit": 60 }, "position": { "x":  40, "y": 560 } },
+            { "id": "c1",   "type": "source.binance.klines", "params": { "tf": "1m",     "limit": 60 }, "position": { "x":  40, "y": 720 } },
+
+            { "id": "mom",  "type": "indicator.momentum_pack", "params": {}, "position": { "x": 320, "y":   0 } },
+            { "id": "norm", "type": "indicator.norm_pack",     "params": {}, "position": { "x": 320, "y": 160 } },
+            { "id": "vol",  "type": "indicator.volume_pack",   "params": {}, "position": { "x": 320, "y": 320 } },
+            { "id": "time", "type": "indicator.temporal_pack", "params": {}, "position": { "x": 320, "y": 480 } },
+            { "id": "htf",  "type": "indicator.htf_regime_pack","params": {},"position": { "x": 320, "y": 600 } },
+            { "id": "sub",  "type": "indicator.subbar_pack",   "params": { "window": 15 }, "position": { "x": 320, "y": 760 } },
+
+            { "id": "matrix", "type": "feature.matrix_builder",
+              "params": { "columns": [
+                "ret_1","ret_3","ret_5","ret_10",
+                "ema_spread_atr","px_vs_ema26_atr","bb_pos","atr_pct",
+                "vol_z20","up_vol_ratio","obv_z20",
+                "hour_sin","hour_cos","dow_sin","dow_cos","is_us_session","is_eu_session","is_weekend",
+                "htf_ema_spread_atr","htf_px_vs_ema26_atr","htf_atr_pct","htf_rsi","htf_ret_4",
+                "subbar_rvol","subbar_up_ratio","subbar_vol_skew","subbar_ret_5"
+              ] },
+              "position": { "x": 660, "y": 320 } },
+
+            { "id": "model", "type": "model.gbt",
+              "params": { "n_estimators": 350, "max_depth": 6, "learning_rate": 0.03, "min_samples_leaf": 150, "subsample": 0.8, "colsample": 0.6, "l2": 8.0, "bags": 5, "seed": 101, "coverage": 0.05 },
+              "position": { "x": 980, "y": 320 } },
+            { "id": "out",   "type": "output.prediction", "params": {}, "position": { "x": 1300, "y": 320 } }
+          ],
+          "edges": [
+            { "from": "c5.candles",  "to": "mom.candles" },
+            { "from": "c5.candles",  "to": "norm.candles" },
+            { "from": "c5.candles",  "to": "vol.candles" },
+            { "from": "c15.candles", "to": "htf.candles" },
+            { "from": "c1.candles",  "to": "sub.candles" },
+
+            { "from": "mom.ret_1",  "to": "matrix.ret_1" },
+            { "from": "mom.ret_3",  "to": "matrix.ret_3" },
+            { "from": "mom.ret_5",  "to": "matrix.ret_5" },
+            { "from": "mom.ret_10", "to": "matrix.ret_10" },
+
+            { "from": "norm.ema_spread_atr",  "to": "matrix.ema_spread_atr" },
+            { "from": "norm.px_vs_ema26_atr", "to": "matrix.px_vs_ema26_atr" },
+            { "from": "norm.bb_pos",          "to": "matrix.bb_pos" },
+            { "from": "norm.atr_pct",         "to": "matrix.atr_pct" },
+
+            { "from": "vol.vol_z20",      "to": "matrix.vol_z20" },
+            { "from": "vol.up_vol_ratio", "to": "matrix.up_vol_ratio" },
+            { "from": "vol.obv_z20",      "to": "matrix.obv_z20" },
+
+            { "from": "time.hour_sin",      "to": "matrix.hour_sin" },
+            { "from": "time.hour_cos",      "to": "matrix.hour_cos" },
+            { "from": "time.dow_sin",       "to": "matrix.dow_sin" },
+            { "from": "time.dow_cos",       "to": "matrix.dow_cos" },
+            { "from": "time.is_us_session", "to": "matrix.is_us_session" },
+            { "from": "time.is_eu_session", "to": "matrix.is_eu_session" },
+            { "from": "time.is_weekend",    "to": "matrix.is_weekend" },
+
+            { "from": "htf.htf_ema_spread_atr",  "to": "matrix.htf_ema_spread_atr" },
+            { "from": "htf.htf_px_vs_ema26_atr", "to": "matrix.htf_px_vs_ema26_atr" },
+            { "from": "htf.htf_atr_pct",         "to": "matrix.htf_atr_pct" },
+            { "from": "htf.htf_rsi",             "to": "matrix.htf_rsi" },
+            { "from": "htf.htf_ret_4",           "to": "matrix.htf_ret_4" },
+
+            { "from": "sub.subbar_rvol",     "to": "matrix.subbar_rvol" },
+            { "from": "sub.subbar_up_ratio", "to": "matrix.subbar_up_ratio" },
+            { "from": "sub.subbar_vol_skew", "to": "matrix.subbar_vol_skew" },
+            { "from": "sub.subbar_ret_5",    "to": "matrix.subbar_ret_5" },
+
+            { "from": "matrix.matrix",    "to": "model.matrix" },
+            { "from": "matrix.ready",     "to": "model.ready" },
+            { "from": "model.pUp",        "to": "out.pUp" },
+            { "from": "model.confidence", "to": "out.confidence" }
+          ]
+        }
+        """;
+    }
 }

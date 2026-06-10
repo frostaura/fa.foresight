@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
@@ -19,12 +19,13 @@ import RichMultiSelect, { type RichMultiSelectOption } from "../components/RichM
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { cn } from "../lib/cn";
 import { fmtRunDate, fmtRunTime } from "../lib/format";
-import { useSort, SortHeader } from "../lib/sort";
+import { useSort, SortHeader, type SortDir } from "../lib/sort";
 import { useLocalStorageState } from "../lib/persistedState";
 import { computeModelScore, parseIntervalWfStats } from "./Models";
 import { modelNeedsTraining, useModelTrainGate } from "../components/ModelTrainGate";
 import {
   useClearBacktestsMutation,
+  useClearChaosMutation,
   useGetBacktestBatchQuery,
   useGetChaosSamplesQuery,
   useGetStakingStrategiesQuery,
@@ -1147,6 +1148,59 @@ function ChaosSamplesDrawer({ run, modelName, onClose }:
 
 // ── ChaosTab ──────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Mean final balance for a chaos run = starting bankroll + mean-window net profit. Null until the
+ * run completes (profitMean populated). The "Total profit" column shows the mean profit directly;
+ * "Final balance" adds it back to the bankroll; "Δ %" expresses it as a fraction of the bankroll.
+ */
+function chaosFinalBalance(r: ChaosRunNormalized): number | null {
+  if (r.profitMean == null || r.initialBalance == null) return null;
+  return r.initialBalance + r.profitMean;
+}
+function chaosDeltaPct(r: ChaosRunNormalized): number | null {
+  if (r.profitMean == null || !r.initialBalance) return null;
+  return (r.profitMean / r.initialBalance) * 100;
+}
+
+/** Sortable column keys for the chaos run-history table. */
+type ChaosSortKey =
+  | "status" | "model" | "strategy" | "interval" | "window"
+  | "samples" | "bustRate" | "totalProfit" | "deltaPct" | "finalBalance" | "started";
+
+/**
+ * Column header for the chaos run-history table: a click-to-sort label plus an info "i" that opens
+ * a tooltip explaining what the column means. Pass `sort` (from useSort's `headerProps`) to make the
+ * label a sort toggle; omit it for a static label. Both the tip and the sort control are keyboard-
+ * and hover-accessible. `align` mirrors the cell's text alignment so the icon sits next to the label.
+ */
+function ChaosColHeader({ label, title, body, align = "left", width = 260, sort }: {
+  label: string;
+  title: string;
+  body: ReactNode;
+  align?: "left" | "right" | "center";
+  width?: number;
+  sort?: { sortKey: ChaosSortKey; activeKey: ChaosSortKey | null; dir: SortDir; onClick: () => void };
+}) {
+  const justify = align === "right" ? "justify-end" : align === "center" ? "justify-center" : "justify-start";
+  return (
+    <span className={cn("inline-flex w-full items-center gap-1", justify)}>
+      {sort
+        ? <SortHeader<ChaosSortKey> {...sort} align={align === "right" ? "right" : "left"}>{label}</SortHeader>
+        : <span>{label}</span>}
+      <InfoTip width={width} content={<TipBody title={title}>{body}</TipBody>}>
+        <button
+          type="button"
+          aria-label={`About ${label}`}
+          onClick={(e) => e.stopPropagation()}
+          className="text-fa-frost-dim/50 hover:text-fa-frost-bright transition leading-none align-middle shrink-0"
+        >
+          <Info className="h-3 w-3" />
+        </button>
+      </InfoTip>
+    </span>
+  );
+}
+
 function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) {
   const { data: symbolsResp } = useGetSymbolsQuery();
   const { data: strategiesResp } = useGetStakingStrategiesQuery();
@@ -1155,19 +1209,33 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
   const availableStrategies = strategiesResp?.strategies ?? [{ id: "flat", name: "Flat", description: "" }];
 
   const [modelIds, setModelIds] = useLocalStorageState<string[]>("fa.chaos.modelIds", () => { const m = firstUsableModel(eligible); return m ? [m.id] : []; });
-  const [strategyId, setStrategyId] = useLocalStorageState<string>("fa.chaos.strategyId", "flat");
+  // Multi-select staking strategies — the engine fans out one run per model × strategy. Keys are
+  // versioned (.v2) so the new defaults (14d / $100 / $2) take effect over any stale persisted state.
+  const [strategyIds, setStrategyIds] = useLocalStorageState<string[]>("fa.chaos.strategyIds", ["flat"]);
   const [symbol, setSymbol] = useLocalStorageState<string>("fa.chaos.symbol", supportedSymbols[0] ?? "BTCUSDT");
   const interval = "5m";
-  const [initialBalance, setInitialBalance] = useLocalStorageState<number>("fa.chaos.initialBalance", 1000);
-  const [initialBetSize, setInitialBetSize] = useLocalStorageState<number>("fa.chaos.initialBetSize", 10);
-  const [windowDays, setWindowDays] = useLocalStorageState<number>("fa.chaos.windowDays", 14);
+  const [initialBalance, setInitialBalance] = useLocalStorageState<number>("fa.chaos.initialBalance.v2", 100);
+  const [initialBetSize, setInitialBetSize] = useLocalStorageState<number>("fa.chaos.initialBetSize.v2", 2);
+  const [windowDays, setWindowDays] = useLocalStorageState<number>("fa.chaos.windowDays.v2", 14);
   const [sampleCount, setSampleCount] = useLocalStorageState<number>("fa.chaos.sampleCount", 200);
   const [allowBorrow, setAllowBorrow] = useLocalStorageState<boolean>("fa.chaos.allowBorrow", false);
   const [error, setError] = useState<string | null>(null);
   const [openSamplesRun, setOpenSamplesRun] = useState<ChaosRunNormalized | null>(null);
 
   const [runChaos, { isLoading: chaosLoading }] = useRunChaosMutation();
-  const { data: chaosRuns, refetch: refetchChaos } = useListChaosRunsQuery({});
+  const [clearChaos, { isLoading: isClearingChaos }] = useClearChaosMutation();
+  const confirm = useConfirm();
+  // Safety-net polling for the run-history list. RTK's own pollingInterval (instead of a manual
+  // setInterval + refetch) re-runs the query through the full cache pipeline, so results always
+  // land in the exact cache entry this component subscribes to. Polling is on while a run is
+  // in-flight OR for 60s after a launch — covering the gap where POST /api/chaos has returned
+  // but the new "running" row hasn't been observed in the list yet.
+  const [lastChaosLaunchAt, setLastChaosLaunchAt] = useState<number | null>(null);
+  const [chaosPolling, setChaosPolling] = useState(false);
+  const { data: chaosRuns, refetch: refetchChaos } = useListChaosRunsQuery({}, {
+    pollingInterval: chaosPolling ? 2500 : 0,
+    skipPollingIfUnfocused: true,
+  });
 
   useEffect(() => {
     setModelIds((prev) => sanitizeModelSelection(prev, eligible));
@@ -1187,16 +1255,27 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
   useEffect(() => {
     if (!strategiesResp) return;
     const validIds = new Set(strategiesResp.strategies.map((s) => s.id));
-    if (!validIds.has(strategyId)) setStrategyId(strategiesResp.default ?? "flat");
-  }, [strategiesResp, strategyId, setStrategyId]);
+    setStrategyIds((prev) => {
+      const filtered = prev.filter((id) => validIds.has(id));
+      return filtered.length > 0 ? filtered : [strategiesResp.default ?? "flat"];
+    });
+  }, [strategiesResp, setStrategyIds]);
 
-  // Poll the chaos list while any run is in-flight so rows go running → complete live.
+  // Close the 60s post-launch polling window once it has elapsed.
+  useEffect(() => {
+    if (lastChaosLaunchAt == null) return;
+    const remaining = Math.max(0, 60_000 - (Date.now() - lastChaosLaunchAt));
+    const id = window.setTimeout(() => setLastChaosLaunchAt(null), remaining);
+    return () => window.clearTimeout(id);
+  }, [lastChaosLaunchAt]);
+
+  // Poll the chaos list (2.5s) while any run is in-flight or one was launched in the last 60s,
+  // so new rows appear promptly and go running → complete live. Only active while this tab is
+  // mounted (Radix unmounts inactive tab panels) and the window is focused.
   useEffect(() => {
     const pending = (chaosRuns ?? []).some((cr) => cr.status === "running");
-    if (!pending) return;
-    const id = window.setInterval(() => { refetchChaos(); }, 2000);
-    return () => window.clearInterval(id);
-  }, [chaosRuns, refetchChaos]);
+    setChaosPolling(pending || lastChaosLaunchAt != null);
+  }, [chaosRuns, lastChaosLaunchAt]);
 
   // days → candles for the chaos window length. candlesPerDay = 1 day ÷ intervalMs.
   const candlesPerDay = 86_400_000 / intervalToMs(interval);
@@ -1207,9 +1286,10 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
   const onRun = async () => {
     setError(null);
     if (modelIds.length === 0) { setError("Pick at least one trained model."); return; }
+    if (strategyIds.length === 0) { setError("Pick at least one staking strategy."); return; }
     const req: ChaosRequest = {
       modelIds,
-      strategyIds: [strategyId],
+      strategyIds,
       symbol,
       interval,
       windowLengthCandles,
@@ -1223,6 +1303,7 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
     try {
       // Chaos fans out over all selected models internally — one call per launch.
       await runChaos(req).unwrap();
+      setLastChaosLaunchAt(Date.now()); // opens the 60s safety-net polling window
       refetchChaos();
     } catch (e: unknown) {
       const err = e as { data?: { error?: string } };
@@ -1239,6 +1320,35 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
     () => [...(chaosRuns ?? [])].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()),
     [chaosRuns],
   );
+
+  // Column sort. Natural order (no active key) is newest-first, matching sortedChaos. Each header
+  // toggles desc → asc → natural. Nulls (in-flight runs with no stats yet) sink to the bottom.
+  // Total profit / Δ% / final balance are all derived from the mean-window profit (chaosFinalBalance).
+  const { sortedRows: chaosRows, headerProps: chaosHeader } = useSort<ChaosRunNormalized, ChaosSortKey>(sortedChaos, {
+    status: (r) => r.status,
+    model: (r) => modelNameById.get(r.modelId) ?? r.modelId,
+    strategy: (r) => r.strategyId ?? "",
+    interval: (r) => r.interval,
+    window: (r) => r.windowLength,
+    samples: (r) => r.sampleCount,
+    bustRate: (r) => r.bustRate ?? null,
+    totalProfit: (r) => r.profitMean ?? null,
+    deltaPct: (r) => chaosDeltaPct(r),
+    finalBalance: (r) => chaosFinalBalance(r),
+    started: (r) => new Date(r.startedAt),
+  });
+
+  const anyChaosRunning = (chaosRuns ?? []).some((cr) => cr.status === "running");
+  const onClearChaos = async () => {
+    const n = sortedChaos.length;
+    await confirm({
+      title: `Clear ${n} chaos run${n === 1 ? "" : "s"}?`,
+      description: "Every row in the chaos run-history table — and its per-window samples — will be removed permanently. This cannot be undone.",
+      confirmLabel: `Delete ${n} run${n === 1 ? "" : "s"}`,
+      destructive: true,
+      onConfirm: async () => { await clearChaos().unwrap(); refetchChaos(); },
+    });
+  };
 
   if (eligible.length === 0) {
     return (
@@ -1275,17 +1385,17 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
               placeholder="Select models…"
             />
           </Field>
-          <Field label="Staking strategy"
-            info={{ title: "Staking strategy", body: "The staking method applied across every sampled window. A single strategy keeps the survival comparison clean." }}>
+          <Field label={`Staking strategies${strategyIds.length > 1 ? ` (${strategyIds.length})` : ""}`}
+            info={{ title: "Staking strategies", body: "Pick one or more staking methods. The chaos engine fans out one run per model × strategy, so you can compare survival across every strategy in a single launch." }}>
             <RichMultiSelect
               options={availableStrategies.map((s): RichMultiSelectOption => ({
                 value: s.id,
                 label: s.name,
                 sublabel: s.description || undefined,
               }))}
-              value={[strategyId]}
-              onChange={(next) => { if (next.length > 0) setStrategyId(next[next.length - 1]); }}
-              placeholder="Select strategy…"
+              value={strategyIds}
+              onChange={setStrategyIds}
+              placeholder="Select strategies…"
               minSelected={1}
             />
           </Field>
@@ -1337,12 +1447,12 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
                 Allow borrow {allowBorrow ? <span className="text-emerald-300">(on)</span> : <span className="text-amber-300">(strict bust)</span>}
               </span>
             </label>
-            <button onClick={onRun} disabled={isRunning || modelIds.length === 0}
+            <button onClick={onRun} disabled={isRunning || modelIds.length === 0 || strategyIds.length === 0}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-fa-frost-bright/20 hover:bg-fa-frost-bright/30 text-fa-frost-bright text-sm border border-fa-frost-bright/30 disabled:opacity-50 disabled:cursor-not-allowed transition">
               {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FlaskConical className="h-4 w-4" />}
               {isRunning
                 ? "Chaos test running…"
-                : `Run chaos test · ${sampleCount} windows × ${windowDays}d`}
+                : `Run chaos test · ${(() => { const combos = modelIds.length * strategyIds.length; return combos > 1 ? `${combos} combos × ` : ""; })()}${sampleCount} windows × ${windowDays}d`}
             </button>
           </div>
         </div>
@@ -1352,27 +1462,73 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
           the Run chaos test button above. Each row drills into its per-window samples. */}
       {sortedChaos.length > 0 ? (
         <div className="fa-card px-5 py-4 flex-1 min-h-0 flex flex-col">
-          <div className="fa-section-title mb-3 shrink-0">Chaos run history</div>
+          <div className="flex items-center justify-between mb-3 shrink-0">
+            <div className="fa-section-title">Chaos run history</div>
+            <button onClick={onClearChaos} disabled={isClearingChaos || anyChaosRunning}
+              className="inline-flex items-center gap-1.5 text-xs text-fa-frost-dim hover:text-rose-300 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              title={anyChaosRunning ? "Wait for the in-flight run to finish before clearing." : "Delete every chaos run shown in the table"}>
+              {isClearingChaos ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+              {isClearingChaos ? "Clearing…" : "Clear all"}
+            </button>
+          </div>
           <div className="flex-1 min-h-0 overflow-auto">
             <table className="fa-table-bordered min-w-full text-xs [&_th]:whitespace-nowrap [&_td]:whitespace-nowrap">
               <thead className="text-fa-frost-dim sticky top-0 z-10 bg-fa-ink/95 backdrop-blur">
                 <tr>
-                  <th className="font-normal px-2 w-8 text-center" aria-label="Status"></th>
-                  <th className="font-normal pr-4 text-left">Model</th>
-                  <th className="font-normal pr-4 text-left">Strategy</th>
-                  <th className="font-normal pr-4 text-center">Symbol</th>
-                  <th className="font-normal pr-4 text-center">Interval</th>
-                  <th className="font-normal pr-4 text-right">Window</th>
-                  <th className="font-normal pr-4 text-right">Samples</th>
-                  <th className="font-normal pr-4 text-right">Bust rate</th>
-                  <th className="font-normal pr-4 text-right">P50 profit</th>
-                  <th className="font-normal pr-4 text-right">Worst DD</th>
-                  <th className="font-normal pr-4 text-center">Pass</th>
-                  <th className="font-normal pr-4 text-right">Started</th>
+                  <th className="font-normal px-2 w-8 text-center">
+                    <span className="inline-flex w-full items-center justify-center gap-1">
+                      <SortHeader<ChaosSortKey> {...chaosHeader("status")}><span className="sr-only">Status</span><span aria-hidden className="fa-status-orb fa-status-clean opacity-40" /></SortHeader>
+                      <InfoTip width={280} content={<TipBody title="Status">A pulsing dot means the run is still executing; green = passed; red = failed. Click any completed row to drill into its per-window samples.</TipBody>}>
+                        <button type="button" aria-label="About Status" onClick={(e) => e.stopPropagation()} className="text-fa-frost-dim/50 hover:text-fa-frost-bright transition leading-none shrink-0">
+                          <Info className="h-3 w-3" />
+                        </button>
+                      </InfoTip>
+                    </span>
+                  </th>
+                  <th className="font-normal pr-4 text-left">
+                    <ChaosColHeader label="Model" title="Model" align="left" sort={chaosHeader("model")}
+                      body="The prediction model whose calibrated up-probabilities drove the bets in every sampled window." />
+                  </th>
+                  <th className="font-normal pr-4 text-left">
+                    <ChaosColHeader label="Strategy" title="Strategy" align="left" sort={chaosHeader("strategy")}
+                      body="The staking strategy that sized each bet across the run. One row is produced per model × strategy." />
+                  </th>
+                  <th className="font-normal pr-4 text-center">
+                    <ChaosColHeader label="Interval" title="Interval" align="center" sort={chaosHeader("interval")}
+                      body="The candle interval the model predicts on (e.g. 5m)." />
+                  </th>
+                  <th className="font-normal pr-4 text-right">
+                    <ChaosColHeader label="Window" title="Window length" align="right" sort={chaosHeader("window")}
+                      body="Length of each randomly-sampled window, in days. Every sample replays a window of this size from a random start point in history." />
+                  </th>
+                  <th className="font-normal pr-4 text-right">
+                    <ChaosColHeader label="Samples" title="Samples" align="right" sort={chaosHeader("samples")}
+                      body="How many random windows were drawn and replayed. More samples give a more reliable bust-rate and profit estimate." />
+                  </th>
+                  <th className="font-normal pr-4 text-right">
+                    <ChaosColHeader label="Bust rate" title="Bust rate" align="right" sort={chaosHeader("bustRate")}
+                      body="Fraction of windows where the bankroll could no longer fund the next bet — i.e. it went bust. 0% means it survived every single window." />
+                  </th>
+                  <th className="font-normal pr-4 text-right">
+                    <ChaosColHeader label="Total profit" title="Total profit (mean)" align="right" width={300} sort={chaosHeader("totalProfit")}
+                      body="Average net profit across all sampled windows (final − starting bankroll, averaged). The expected outcome of running this model + strategy on a random window. Green = profitable, red = a loss." />
+                  </th>
+                  <th className="font-normal pr-4 text-right">
+                    <ChaosColHeader label="Δ %" title="Delta % (mean)" align="right" width={280} sort={chaosHeader("deltaPct")}
+                      body="Mean profit as a percentage of the starting bankroll — the average per-window return. Lets you compare runs with different bankrolls on equal footing." />
+                  </th>
+                  <th className="font-normal pr-4 text-right">
+                    <ChaosColHeader label="Final balance" title="Final balance (mean)" align="right" width={280} sort={chaosHeader("finalBalance")}
+                      body="Starting bankroll plus the mean-window profit — the average ending bankroll across all sampled windows." />
+                  </th>
+                  <th className="font-normal pr-4 text-right">
+                    <ChaosColHeader label="Started" title="Started" align="right" sort={chaosHeader("started")}
+                      body="When this run was launched." />
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {sortedChaos.map((cr: ChaosRunNormalized, idx) => {
+                {chaosRows.map((cr: ChaosRunNormalized, idx) => {
                   const model = models.find((m) => m.id === cr.modelId);
                   const isRunningCr = cr.status === "running";
                   const orbClass = isRunningCr ? "fa-status-running" : cr.pass ? "fa-status-clean" : "fa-status-bust";
@@ -1381,32 +1537,36 @@ function ChaosTab({ models, eligible }: { models: Model[]; eligible: Model[] }) 
                   const wDays = windowCandlesToDays(cr.windowLength, cr.interval);
                   const stripe = idx % 2 === 1 ? "bg-fa-frost/[0.018]" : "";
                   const clickable = cr.status === "complete";
+                  const profit = cr.profitMean ?? null;          // mean-window net profit
+                  const deltaPct = chaosDeltaPct(cr);
+                  const finalBal = chaosFinalBalance(cr);
+                  const profitColor = (v: number | null) => v == null ? "text-fa-frost-dim" : v > 0 ? "text-emerald-300" : v < 0 ? "text-rose-300" : "text-fa-frost-bright";
+                  const money = (v: number | null) => v == null ? "—" : `${v < 0 ? "-$" : "$"}${Math.abs(v).toFixed(2)}`;
                   return (
                     <tr key={cr.id} onClick={clickable ? () => setOpenSamplesRun(cr) : undefined}
                       className={cn("border-t border-fa-edge/40 transition-colors", isRunningCr && "fa-backtest-shimmer", stripe,
                         clickable ? "cursor-pointer hover:bg-fa-frost/[0.04]" : "")}
                       title={clickable ? "Open the per-window samples for this run" : isRunningCr ? "Running — samples available once complete" : undefined}>
-                      <td className="px-2 text-center"><span className={cn("fa-status-orb", orbClass)} /></td>
+                      <td className="px-2 text-center" title={isRunningCr ? "Running"
+                        : cr.status === "failed" ? `Failed — ${cr.error ?? "run crashed before completing"}`
+                        : cr.pass ? "Pass — survived every window and mean profit > 0"
+                        : `Fail — busted in some windows or mean profit ≤ 0${cr.error ? ` · ${cr.error}` : ""}`}>
+                        <span className={cn("fa-status-orb", orbClass)} />
+                      </td>
                       <td className="pr-4 text-fa-frost-bright">{model?.name ?? cr.modelId.slice(0, 8)}</td>
                       <td className="pr-4 text-fa-frost-dim capitalize">{cr.strategyId}</td>
-                      <td className="pr-4 text-center"><SymbolIcon symbol={cr.symbol} className="h-5 w-5" /></td>
                       <td className="pr-4 text-center text-fa-frost-bright">{cr.interval}</td>
                       <td className="pr-4 text-right tabular-nums text-fa-frost-bright" title={`${cr.windowLength.toLocaleString()} candles per sampled window`}>{wDays}d</td>
                       <td className="pr-4 text-right tabular-nums text-fa-frost-dim" title="Random windows tested">{cr.sampleCount.toLocaleString()}</td>
                       <td className={cn("pr-4 text-right tabular-nums", bustClass)}>{bustPct}</td>
-                      <td className={cn("pr-4 text-right tabular-nums", cr.profitP50 == null ? "text-fa-frost-dim" : cr.profitP50 > 0 ? "text-emerald-300" : "text-rose-300")}>
-                        {cr.profitP50 == null ? "—" : `$${cr.profitP50.toFixed(2)}`}
+                      <td className={cn("pr-4 text-right tabular-nums", profitColor(profit))} title="Mean net profit across all sampled windows">
+                        {money(profit)}
                       </td>
-                      <td className={cn("pr-4 text-right tabular-nums", cr.worstDrawdown == null || cr.worstDrawdown === 0 ? "text-fa-frost-dim" : "text-rose-300")}
-                        title="Worst peak-to-trough balance drop across all sampled windows">
-                        {cr.worstDrawdown == null ? "—" : cr.worstDrawdown === 0 ? "$0.00" : `-$${cr.worstDrawdown.toFixed(2)}`}
+                      <td className={cn("pr-4 text-right tabular-nums", profitColor(deltaPct))} title="Mean profit as a % of starting bankroll">
+                        {deltaPct == null ? "—" : `${deltaPct > 0 ? "+" : ""}${deltaPct.toFixed(1)}%`}
                       </td>
-                      <td className="pr-4 text-center">
-                        <span className={cn("fa-overline rounded-full px-1.5 py-0.5 border",
-                          isRunningCr ? "text-cyan-300 bg-cyan-300/10 border-cyan-300/30" :
-                          cr.pass ? "text-emerald-300 bg-emerald-300/10 border-emerald-300/30" : "text-rose-300 bg-rose-300/10 border-rose-300/30")}>
-                          {isRunningCr ? "running" : cr.pass ? "pass" : "fail"}
-                        </span>
+                      <td className={cn("pr-4 text-right tabular-nums", finalBal == null ? "text-fa-frost-dim" : "text-fa-frost-bright")} title="Starting bankroll + mean-window profit">
+                        {finalBal == null ? "—" : `$${finalBal.toFixed(2)}`}
                       </td>
                       <td className="pr-4 text-right text-fa-frost-dim" title={new Date(cr.startedAt).toLocaleString()}>{fmtRunTime(cr.startedAt)}</td>
                     </tr>

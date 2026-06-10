@@ -366,7 +366,9 @@ public sealed class ForesightDbContext : DbContext, IDataProtectionKeyContext
             b.Property(r => r.ProfitP5).HasColumnType("numeric(20,4)");
             b.Property(r => r.ProfitP50).HasColumnType("numeric(20,4)");
             b.Property(r => r.ProfitP95).HasColumnType("numeric(20,4)");
+            b.Property(r => r.ProfitMean).HasColumnType("numeric(20,4)");
             b.Property(r => r.WorstDrawdown).HasColumnType("numeric(20,4)");
+            b.Property(r => r.InitialBalance).HasColumnType("numeric(20,4)");
             b.Property(r => r.SyntheticBetFraction).HasColumnType("numeric(6,5)");
             b.Property(r => r.Error).HasMaxLength(2000);
             b.HasIndex(r => new { r.TenantId, r.BatchId });

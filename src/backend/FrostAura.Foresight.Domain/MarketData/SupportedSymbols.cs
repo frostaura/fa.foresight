@@ -13,10 +13,12 @@ public static class SupportedSymbols
 {
     public static readonly IReadOnlyList<string> All = new[] { "BTCUSDT" };
     // Scoped to the short-horizon candle bands that actually feed paper trading + the agentic
-    // research pipeline. 1h/4h/1d were dropped because they served no real use case here and
-    // doubled the cache warmer's work for no upside — multi-tf models that consume higher
-    // timeframes can be re-added intentionally if the need surfaces.
-    public static readonly IReadOnlyList<string> Intervals = new[] { "1m", "5m", "15m" };
+    // research pipeline. 4h/1d were dropped because they served no real use case here and
+    // doubled the cache warmer's work for no upside. 1h was re-added intentionally (2026-06-10)
+    // as the htf_regime_pack source for the 15m v3-bag model — it must be in this list so the
+    // backtest/trainer/chaos off-tf hydration loops pool 1h candles; warm cost is negligible
+    // (24 candles/day).
+    public static readonly IReadOnlyList<string> Intervals = new[] { "1m", "5m", "15m", "1h" };
 
     public static bool IsSupportedSymbol(string symbol) => All.Contains(symbol);
     public static bool IsSupportedInterval(string interval) => Intervals.Contains(interval);

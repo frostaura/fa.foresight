@@ -52,6 +52,16 @@ public sealed class VenuePriceStore : IVenuePriceStore
             .Where(c => c.TenantId == tenantId && c.IsDefault)
             .Select(c => (decimal?)c.EffectivePrice)
             .FirstOrDefaultAsync(ct);
+        // Background scopes (backtest / chaos workers) run with an unresolved tenant, which used
+        // to silently pin them to the hardcoded constant — the configured EffectivePrice never
+        // reached any testing path. In single-tenant mode the default connection is THE
+        // connection, so fall back to it before the constant.
+        p ??= await _db.PlatformConnections
+            .AsNoTracking()
+            .Where(c => c.IsDefault)
+            .OrderBy(c => c.CreatedAt)
+            .Select(c => (decimal?)c.EffectivePrice)
+            .FirstOrDefaultAsync(ct);
         var price = p is { } v && v > 0m && v < 1m ? v : DefaultEffectivePrice;
         _effectivePrice = price;
         return price;

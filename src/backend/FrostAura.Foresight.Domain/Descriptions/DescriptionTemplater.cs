@@ -12,6 +12,13 @@ namespace FrostAura.Foresight.Domain.Descriptions;
 /// </summary>
 public static class DescriptionTemplater
 {
+    // Must match the column limits in ForesightDbContext (SimpleDescription varchar(500),
+    // TechnicalDescription varchar(1000)). Generated prose scales with the DAG's node-type count, so
+    // a node-rich model can overflow — clamp here so the deterministic backfill can never violate the
+    // constraint and abort the whole batch save.
+    private const int SimpleMaxLen = 500;
+    private const int TechnicalMaxLen = 1000;
+
     public static (string Simple, string Technical) ForModel(
         string name, string kind, bool supportsBacktesting, string? definitionJson)
     {
@@ -35,7 +42,7 @@ public static class DescriptionTemplater
             $"directional accuracy for short-horizon crypto sits near the 50–55% regime, so edge comes " +
             $"from calibration and bet sizing rather than raw hit-rate.";
 
-        return (simple, technical);
+        return (Clamp(simple, SimpleMaxLen), Clamp(technical, TechnicalMaxLen));
     }
 
     public static (string Simple, string Technical) ForStrategy(
@@ -49,7 +56,7 @@ public static class DescriptionTemplater
                 ? $"{name} sizes each bet according to its built-in staking rule."
                 : description!.Trim();
             var simpleBuiltIn = FirstSentence(desc);
-            return (simpleBuiltIn, desc);
+            return (Clamp(simpleBuiltIn, SimpleMaxLen), Clamp(desc, TechnicalMaxLen));
         }
 
         var nodeTypes = ExtractNodeTypes(definitionJson);
@@ -67,7 +74,7 @@ public static class DescriptionTemplater
             $"current bankroll, and the prior outcome; a stake of 0 is a no-bet, and bets are floored at " +
             $"the venue minimum.";
 
-        return (simple, technical);
+        return (Clamp(simple, SimpleMaxLen), Clamp(technical, TechnicalMaxLen));
     }
 
     /// <summary>Distinct node-type strings from a flow-DAG definition, in stable sorted order. Empty on any parse issue.</summary>
@@ -105,5 +112,20 @@ public static class DescriptionTemplater
     {
         var idx = text.IndexOf('.');
         return idx > 0 ? text[..(idx + 1)] : text;
+    }
+
+    /// <summary>
+    /// Truncate to <paramref name="maxLen"/> characters, preferring a word boundary and appending an
+    /// ellipsis. Guarantees the result fits its database column so a node-rich entity can't overflow.
+    /// </summary>
+    private static string Clamp(string text, int maxLen)
+    {
+        if (text.Length <= maxLen) return text;
+        // Reserve one char for the ellipsis; back up to the last word boundary if one is close.
+        var cut = maxLen - 1;
+        var slice = text[..cut];
+        var lastSpace = slice.LastIndexOf(' ');
+        if (lastSpace > cut - 40) slice = slice[..lastSpace];
+        return slice.TrimEnd(',', ' ', '—', '-', '.') + "…";
     }
 }

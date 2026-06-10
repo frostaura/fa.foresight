@@ -87,6 +87,7 @@ public sealed record ChaosSampleResult(
 /// <param name="ProfitP5">5th-percentile profit (FinalBalance − InitialBalance).</param>
 /// <param name="ProfitP50">Median profit.</param>
 /// <param name="ProfitP95">95th-percentile profit.</param>
+/// <param name="ProfitMean">Mean (average) profit across all windows.</param>
 /// <param name="WorstDrawdown">Maximum drawdown across all windows.</param>
 /// <param name="MeanZeroCrossings">Mean zero-crossings across all windows.</param>
 /// <param name="SyntheticBetFraction">Fraction of candidates that used synthetic odds.</param>
@@ -99,6 +100,7 @@ public sealed record ChaosComboAggregate(
     decimal ProfitP5,
     decimal ProfitP50,
     decimal ProfitP95,
+    decimal ProfitMean,
     decimal WorstDrawdown,
     double MeanZeroCrossings,
     decimal SyntheticBetFraction,
@@ -125,4 +127,10 @@ public interface IChaosService
 
     /// <summary>Per-window sample rows for a chaos run.</summary>
     Task<IReadOnlyList<Domain.Chaos.ChaosSample>> GetSamplesAsync(Guid id, int take, CancellationToken ct);
+
+    /// <summary>
+    /// Bulk-deletes chaos runs for the current tenant (samples cascade). With no modelId every run
+    /// is removed; with a modelId only that model's runs. Returns the number of run rows deleted.
+    /// </summary>
+    Task<int> ClearAsync(Guid? modelId, CancellationToken ct);
 }

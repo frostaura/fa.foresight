@@ -14,6 +14,7 @@ namespace FrostAura.Foresight.Api.Endpoints;
 /// GET  /api/chaos/batches/{batchId}      — all combo rows for a batch, ranked
 /// GET  /api/chaos/{id}                   — single combo row
 /// GET  /api/chaos/{id}/samples           — per-window sample rows
+/// DELETE /api/chaos                       — bulk clear runs (optional ?modelId)
 /// GET  /api/chaos/stream                 — SSE progress stream for a batch
 /// </summary>
 public static class ChaosEndpoints
@@ -76,6 +77,15 @@ public static class ChaosEndpoints
                 .ToListAsync(ct);
 
             return Results.Ok(rows);
+        });
+
+        // Bulk clear. With no modelId → wipes every chaos run for the tenant; with modelId → clears
+        // just that model's runs. Per-window samples cascade. Returns the rows deleted for a toast.
+        g.MapDelete("/", async (Guid? modelId, ITenantContext tc, IChaosService svc, CancellationToken ct) =>
+        {
+            if (!tc.IsResolved) return Results.NotFound();
+            var deleted = await svc.ClearAsync(modelId, ct);
+            return Results.Ok(new { deleted });
         });
 
         // SSE progress stream. The browser subscribes after POST /api/chaos returns a batchId;

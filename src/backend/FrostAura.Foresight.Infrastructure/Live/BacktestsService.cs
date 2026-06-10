@@ -621,6 +621,7 @@ public sealed class ModelTrainingService : IModelTrainingService
         "1m" => 60_000L,
         "5m" => 300_000L,
         "15m" => 900_000L,
+        "1h" => 3_600_000L,
         _ => throw new ArgumentException($"Unsupported interval '{interval}'.", nameof(interval)),
     };
 

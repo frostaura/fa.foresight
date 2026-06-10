@@ -473,7 +473,16 @@ public sealed class BacktestRunner
         // GradientBoostedTreesNode can read it. Null/absent for linear models — the node treats a
         // non-object as "no model" and abstains, exactly like the regression nodes.
         var gbtJson = variantRoot.TryGetProperty("modelGbt", out var gb) && gb.ValueKind == JsonValueKind.Object ? gb.GetRawText() : "null";
-        var combined = "{\"model.linear_regression\":" + lrJson + ",\"model.logistic_regression\":" + logrJson + ",\"model.gbt\":" + gbtJson + "}";
+        // Optional additive serving fields (seed bag, isotonic calibration, confidence gate, OOD
+        // guard) pass through under their contract names — absent/null means exact legacy behavior
+        // in GradientBoostedTreesNode. This remap is the single choke point both BacktestRunner and
+        // LivePredictionService share, so passing them here keeps backtest == chaos == live.
+        var bagJson = variantRoot.TryGetProperty("modelGbtBag", out var bgg) && bgg.ValueKind == JsonValueKind.Object ? bgg.GetRawText() : "null";
+        var calJson = variantRoot.TryGetProperty("calibration", out var cal) && cal.ValueKind == JsonValueKind.Object ? cal.GetRawText() : "null";
+        var gateJson = variantRoot.TryGetProperty("confidenceGate", out var cgt) && cgt.ValueKind == JsonValueKind.Object ? cgt.GetRawText() : "null";
+        var oodJson = variantRoot.TryGetProperty("oodGuard", out var ood) && ood.ValueKind == JsonValueKind.Object ? ood.GetRawText() : "null";
+        var combined = "{\"model.linear_regression\":" + lrJson + ",\"model.logistic_regression\":" + logrJson + ",\"model.gbt\":" + gbtJson
+            + ",\"modelGbtBag\":" + bagJson + ",\"calibration\":" + calJson + ",\"confidenceGate\":" + gateJson + ",\"oodGuard\":" + oodJson + "}";
         using var doc = JsonDocument.Parse(combined);
         return doc.RootElement.Clone();
     }
@@ -490,6 +499,7 @@ public sealed class BacktestRunner
         "1m" => 60_000L,
         "5m" => 300_000L,
         "15m" => 900_000L,
+        "1h" => 3_600_000L,
         _ => throw new ArgumentException($"Unsupported interval '{interval}'.", nameof(interval)),
     };
 

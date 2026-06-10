@@ -10,6 +10,7 @@ using FrostAura.Foresight.Infrastructure.Live;
 using FrostAura.Foresight.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace FrostAura.Foresight.Infrastructure.Paper;
 
@@ -78,6 +79,7 @@ public sealed class PaperTradingService : IPaperTradingService
     private readonly Live.TradingNotifier _notifier;
     private readonly IStrategyEvaluator _strategyEvaluator;
     private readonly Live.ILivePredictionService _predictions;
+    private readonly Live.TradingGuardrailOptions _guardrails;
     private readonly ILogger<PaperTradingService> _logger;
     private static readonly bool Disable5m = string.Equals(
         Environment.GetEnvironmentVariable("FORESIGHT_5M_PAPER_DISABLED"), "true",
@@ -93,6 +95,7 @@ public sealed class PaperTradingService : IPaperTradingService
         Live.TradingNotifier notifier,
         IStrategyEvaluator strategyEvaluator,
         Live.ILivePredictionService predictions,
+        IOptions<Live.TradingGuardrailOptions> guardrails,
         ILogger<PaperTradingService> logger)
     {
         _db = db;
@@ -104,6 +107,7 @@ public sealed class PaperTradingService : IPaperTradingService
         _notifier = notifier;
         _strategyEvaluator = strategyEvaluator;
         _predictions = predictions;
+        _guardrails = guardrails.Value;
         _logger = logger;
     }
 
@@ -494,24 +498,40 @@ public sealed class PaperTradingService : IPaperTradingService
             return null;
         }
 
-        // Calibrated probability drives side selection and the gate; the abstain-on-low-conviction
-        // skip is gone (see the removed AbstainHalfWidth note above).
-        var calibratedPUp = await _calibration.RescaleAsync(tracked.TenantId, tracked.Interval, pred.DirectionUpProbability, ct);
-        // Confidence gate (opt-in safety mode). On a gated session, skip placing when the calibrated
+        // SERVED == VALIDATED: side selection, the confidence gate, the EV gate and the sizing inputs
+        // all use the model's emitted pUp directly (in-node calibration happens inside the model node;
+        // 0.5 is the canonical abstain). The legacy rescaler output is computed for TELEMETRY ONLY
+        // (persisted to the bet notes) — it must never drive the decision, or the served bet set
+        // diverges from the validated (backtest / walk-forward) one.
+        var servedPUp = pred.DirectionUpProbability;
+        var rescalerPUp = await _calibration.RescaleAsync(tracked.TenantId, tracked.Interval, servedPUp, ct);
+        // Confidence gate (opt-in safety mode). On a gated session, skip placing when the served
         // prob sits in the ±2pp no-bet band — the SAME equation the backtest gate + chart GATE use.
-        if (tracked.Gated && StakingEngine.IsNoBet(calibratedPUp, StakingEngine.DefaultNoBetBand))
+        if (tracked.Gated && StakingEngine.IsNoBet(servedPUp, StakingEngine.DefaultNoBetBand))
         {
-            _logger.LogDebug("Gated session {SessionId}: no bet on candle {Tgt} — calibrated pUp {PUp} inside the no-bet band", tracked.Id, candleOpenMs, calibratedPUp);
+            _logger.LogDebug("Gated session {SessionId}: no bet on candle {Tgt} — served pUp {PUp} inside the no-bet band", tracked.Id, candleOpenMs, servedPUp);
             return null;
         }
 
         // ── Odds-based placement ──
         // Fetch the fixed-fee entry quote (anti-look-ahead) for this candle.
         var entryQuote = await _venuePrices.EnsureEntryAsync(
-            "polymarket", tracked.Symbol, tracked.Interval, candleOpenMs, calibratedPUp, ct);
+            "polymarket", tracked.Symbol, tracked.Interval, candleOpenMs, servedPUp, ct);
 
-        var side = StakingEngine.DecideSide(calibratedPUp);
-        var entryInputs = new StakingInputs(calibratedPUp, entryQuote.YesPrice, entryQuote.NoPrice);
+        var side = StakingEngine.DecideSide(servedPUp);
+        var entryPrice = side == "UP" ? entryQuote.YesPrice : entryQuote.NoPrice;
+        var chosenSideProb = side == "UP" ? servedPUp : 1m - servedPUp;
+
+        // EV gate: abstain on any non-+EV candle (the chosen side's win probability must strictly
+        // exceed the price it pays + EvGateMargin). Same gate as live so paper stays a faithful dry-run.
+        if (!StakingEngine.HasPositiveEdge(chosenSideProb, entryPrice, _guardrails.EvGateMargin))
+        {
+            _logger.LogDebug("Session {SessionId}: EV gate abstain on candle {Tgt} — sideProb {Prob} <= price {Price} + margin {Margin}",
+                tracked.Id, candleOpenMs, chosenSideProb, entryPrice, _guardrails.EvGateMargin);
+            return null;
+        }
+
+        var entryInputs = new StakingInputs(servedPUp, entryQuote.YesPrice, entryQuote.NoPrice);
 
         // Derive lastStake and lastWon from the most-recently settled bet so escalation chains
         // correctly — including across a backfill, where each reconstructed bet is settled before
@@ -549,6 +569,24 @@ public sealed class PaperTradingService : IPaperTradingService
             return null;
         }
 
+        // Polymarket venue compliance: whole-dollar stakes, $1 minimum — applied at the placement
+        // chokepoint after sizing (paper has no per-trade cap), mirroring live. Sub-$1 = clean abstain.
+        nextStake = StakingEngine.QuantizeToWholeDollars(nextStake);
+        if (nextStake <= 0m)
+        {
+            _logger.LogDebug("Session {SessionId}: stake quantized below $1 — skipping candle {Tgt}", tracked.Id, candleOpenMs);
+            return null;
+        }
+
+        // Concurrent-exposure cap: never let the tenant's combined open (unresolved) paper-bet
+        // exposure exceed the configured fraction of the combined active-session bankroll. Skip, not bust.
+        if (await ExceedsTotalExposureCapAsync(tracked.TenantId, nextStake, ct))
+        {
+            _logger.LogInformation("Session {SessionId}: skipping bet on candle {Tgt} — total open exposure cap ({Cap:P0} of bankroll) would be exceeded",
+                tracked.Id, candleOpenMs, _guardrails.MaxTotalExposurePctBankroll);
+            return null;
+        }
+
         // Escalation bust: if the sizing exceeds the bankroll end the session.
         if (nextStake > tracked.CurrentBalance)
         {
@@ -560,7 +598,6 @@ public sealed class PaperTradingService : IPaperTradingService
             return null;
         }
 
-        var entryPrice = side == "UP" ? entryQuote.YesPrice : entryQuote.NoPrice;
         var shares = StakingEngine.Shares(nextStake, entryPrice);
         tracked.CurrentBetSize = nextStake;
 
@@ -569,8 +606,8 @@ public sealed class PaperTradingService : IPaperTradingService
             iterationTag = "iter-3",
             action = "placed",
             backfilled = backfill,
-            rawPUp = pred.DirectionUpProbability,
-            calibratedPUp,
+            servedPUp,
+            rescalerPUp, // telemetry only — the decision ran off servedPUp
             p50 = pred.ClosePercentile50,
             anchor = pred.AnchorClose,
             decidedSide = side,
@@ -627,5 +664,24 @@ public sealed class PaperTradingService : IPaperTradingService
             return null;
         }
         return bet;
+    }
+
+    /// <summary>
+    /// Concurrent-exposure cap check (paper mirror of the live engine's): true when the tenant's open
+    /// (unresolved) paper-bet exposure plus the candidate stake exceeds
+    /// <see cref="Live.TradingGuardrailOptions.MaxTotalExposurePctBankroll"/> of the combined
+    /// active-paper-session bankroll. The open-bet sum is the cheapest honest exposure figure the
+    /// engine already tracks.
+    /// </summary>
+    private async Task<bool> ExceedsTotalExposureCapAsync(Guid tenantId, decimal stake, CancellationToken ct)
+    {
+        var openExposure = await _db.PaperBets
+            .Where(b => b.TenantId == tenantId && !b.Resolved &&
+                        _db.PaperSessions.Any(s => s.Id == b.SessionId && s.StoppedAt == null))
+            .SumAsync(b => (decimal?)b.Size ?? 0m, ct);
+        var bankroll = await _db.PaperSessions
+            .Where(s => s.TenantId == tenantId && s.StoppedAt == null)
+            .SumAsync(s => (decimal?)s.CurrentBalance ?? 0m, ct);
+        return openExposure + stake > _guardrails.MaxTotalExposurePctBankroll * bankroll;
     }
 }

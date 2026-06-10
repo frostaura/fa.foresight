@@ -26,6 +26,20 @@ public sealed class TradingGuardrailOptions
     /// <summary>Minimum model-vs-price edge required to auto-trade. /forcebuy bypasses this.</summary>
     public decimal MinEdge { get; set; } = 0.05m;
 
+    /// <summary>
+    /// Cushion on the session-placement EV gate (live + paper): a bet is placed only when the chosen
+    /// side's win probability strictly exceeds the entry price + this margin. Deliberately a SEPARATE
+    /// knob from <see cref="MinEdge"/> (the autonomous-loop forecast gate) — 0 = pure break-even.
+    /// </summary>
+    public decimal EvGateMargin { get; set; } = 0m;
+
+    /// <summary>
+    /// Concurrent-exposure cap (live + paper placement): skip a new bet when the tenant's open
+    /// (unresolved) bet exposure plus the new stake would exceed this fraction of the combined
+    /// active-session bankroll. Bounds simultaneous at-risk capital across parallel sessions.
+    /// </summary>
+    public decimal MaxTotalExposurePctBankroll { get; set; } = 0.10m;
+
     public decimal MaxPerTradeUsd { get; set; } = 5m;
     public decimal MaxDailyNotionalUsd { get; set; } = 50m;
     public int MaxConcurrentPositions { get; set; } = 10;

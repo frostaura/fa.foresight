@@ -159,6 +159,12 @@ export const api = createApi({
       query: (id) => ({ url: `chaos/${id}/samples` }),
       providesTags: ["Chaos"],
     }),
+    // Bulk-clear chaos runs (samples cascade). No modelId → wipes every run for the tenant.
+    // Invalidates Chaos so the history list re-fetches empty.
+    clearChaos: b.mutation<{ deleted: number }, { modelId?: string } | void>({
+      query: (params) => ({ url: "chaos", method: "DELETE", params: params ?? undefined }),
+      invalidatesTags: ["Chaos"],
+    }),
 
     // ── Flow sandbox execution ───────────────────────────────────────────────
     runFlowNode: b.mutation<RunNodeResult, RunNodeRequest>({
@@ -491,6 +497,7 @@ export const {
   useListChaosRunsQuery,
   useRunChaosMutation,
   useGetChaosSamplesQuery,
+  useClearChaosMutation,
   useRunFlowNodeMutation,
   useListStrategiesQuery,
   useGetStrategiesQuery,
@@ -553,8 +560,10 @@ export interface ChaosRunNormalized {
   interval: string;
   windowLength: number;
   sampleCount: number;
+  initialBalance?: number | null;
   bustRate?: number | null;
   profitP50?: number | null;
+  profitMean?: number | null;
   worstDrawdown?: number | null;
   pass: boolean;
   status: "running" | "complete" | "failed";

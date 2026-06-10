@@ -165,8 +165,101 @@ public class StakingEngineOddsTests
     {
         StakingStrategies.IsKnown("kelly-edge").Should().BeTrue();
         StakingStrategies.Resolve("kelly-edge").Should().BeOfType<EdgeAwareKellyStakingStrategy>();
+        StakingStrategies.IsKnown("kelly-q2").Should().BeTrue();
+        StakingStrategies.Resolve("kelly-q2").Should().BeOfType<QuarterKellyTwoPercentCappedStakingStrategy>();
         StakingStrategies.Resolve(null).Id.Should().Be(StakingStrategies.DefaultId);
-        StakingStrategies.All.Should().HaveCount(5);
+        StakingStrategies.All.Should().HaveCount(6);
+    }
+
+    // --- EV gate (HasPositiveEdge) ----------------------------------------------------------------
+
+    [Theory]
+    [InlineData(0.60, 0.55, 0.00, true)]   // winProb above price ⇒ +EV
+    [InlineData(0.55, 0.55, 0.00, false)]  // break-even is NOT an edge (strict >)
+    [InlineData(0.52, 0.55, 0.00, false)]  // below price ⇒ −EV
+    [InlineData(0.60, 0.55, 0.05, false)]  // margin pushes the bar to 0.60; strict > fails
+    [InlineData(0.61, 0.55, 0.05, true)]   // clears price + margin
+    public void HasPositiveEdge_requires_winProb_strictly_above_price_plus_margin(
+        decimal winProb, decimal price, decimal margin, bool expected)
+    {
+        StakingEngine.HasPositiveEdge(winProb, price, margin).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(1.0)]
+    [InlineData(-0.1)]
+    [InlineData(1.5)]
+    public void HasPositiveEdge_is_false_at_degenerate_prices(decimal price)
+    {
+        StakingEngine.HasPositiveEdge(0.99m, price).Should().BeFalse();
+    }
+
+    [Fact]
+    public void DefaultMinEdge_is_break_even()
+    {
+        StakingEngine.DefaultMinEdge.Should().Be(0m);
+        // With the default margin, any strictly positive edge qualifies.
+        StakingEngine.HasPositiveEdge(0.550001m, 0.55m, StakingEngine.DefaultMinEdge).Should().BeTrue();
+    }
+
+    // --- Whole-dollar quantization ----------------------------------------------------------------
+
+    [Theory]
+    [InlineData(27.78, 27)]   // floors, never rounds up
+    [InlineData(5.00, 5)]
+    [InlineData(1.00, 1)]
+    [InlineData(0.99, 0)]     // sub-$1 ⇒ abstain
+    [InlineData(0.00, 0)]
+    [InlineData(-3.00, 0)]
+    public void QuantizeToWholeDollars_floors_and_skips_below_one(decimal stake, decimal expected)
+    {
+        StakingEngine.QuantizeToWholeDollars(stake).Should().Be(expected);
+    }
+
+    // --- Quarter-Kelly 2% capped (kelly-q2, campaign 2026-06) -------------------------------------
+
+    [Fact]
+    public void KellyQ2_sizes_quarter_kelly_when_under_the_cap()
+    {
+        var k = new QuarterKellyTwoPercentCappedStakingStrategy();
+        // pUp 0.57, YES 0.55 ⇒ f* = 0.02/0.45 ≈ 0.04444; quarter ≈ 0.011111 × 1000 ≈ 11.11 < cap 20 ⇒ floor 11.
+        k.NextBetSize(new StrategyStep(0m, true, 2m, 1000m, new StakingInputs(0.57m, 0.55m, 0.45m)))
+            .Should().Be(11m);
+    }
+
+    [Fact]
+    public void KellyQ2_caps_at_two_percent_of_bankroll()
+    {
+        var k = new QuarterKellyTwoPercentCappedStakingStrategy();
+        // pUp 0.60, YES 0.55 ⇒ quarter-Kelly ≈ 27.78 on 1000 — capped at 2% = 20.
+        k.NextBetSize(new StrategyStep(0m, true, 2m, 1000m, new StakingInputs(0.60m, 0.55m, 0.45m)))
+            .Should().Be(20m);
+    }
+
+    [Fact]
+    public void KellyQ2_abstains_on_no_edge_and_sub_dollar_sizes()
+    {
+        var k = new QuarterKellyTwoPercentCappedStakingStrategy();
+        // No edge (pUp 0.52 vs YES 0.55) ⇒ 0.
+        k.NextBetSize(new StrategyStep(0m, true, 2m, 1000m, new StakingInputs(0.52m, 0.55m, 0.45m)))
+            .Should().Be(0m);
+        // Edge present but 2% of a $40 bankroll = $0.80 < $1 ⇒ abstain, not a cent-stake.
+        k.NextBetSize(new StrategyStep(0m, true, 2m, 40m, new StakingInputs(0.60m, 0.55m, 0.45m)))
+            .Should().Be(0m);
+        // Degenerate bankroll.
+        k.NextBetSize(new StrategyStep(0m, true, 2m, 0m, new StakingInputs(0.60m, 0.55m, 0.45m)))
+            .Should().Be(0m);
+        k.RequiresEdgeInputs.Should().BeTrue();
+    }
+
+    [Fact]
+    public void KellyQ2_down_side_uses_no_price()
+    {
+        var k = new QuarterKellyTwoPercentCappedStakingStrategy();
+        // pUp 0.43 ⇒ DOWN; winProb 0.57 at NO 0.55 — same sizing as the mirrored up case.
+        k.NextBetSize(new StrategyStep(0m, true, 2m, 1000m, new StakingInputs(0.43m, 0.45m, 0.55m)))
+            .Should().Be(11m);
     }
 
     // --- Step composition ------------------------------------------------------------------------

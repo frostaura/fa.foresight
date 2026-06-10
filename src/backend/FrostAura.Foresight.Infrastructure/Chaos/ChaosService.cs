@@ -112,6 +112,7 @@ public sealed class ChaosService : IChaosService
                         WindowLength = windowLen,
                         SampleCount = req.SampleCount,
                         AllowBorrow = req.AllowBorrow,
+                        InitialBalance = req.InitialBalance,
                         Seed = seed,
                         Status = "running",
                         StartedAt = now,
@@ -219,38 +220,57 @@ public sealed class ChaosService : IChaosService
                     strategy = null!; // will be overridden per-window using precomputedStakes
                 }
 
-                // ── 3. Generate deterministic start offsets ────────────────────────────────────
-                var offsets = ChaosRunner.GenerateStartOffsets(
-                    row.SampleCount, row.WindowLength, candidates.Length, seed);
+                // ── 3. Generate deterministic time-based windows ──────────────────────────────
+                // Windows are sampled on the time axis, not the candidate index: gating models
+                // (confidence gate / OOD guard) abstain on most candles, so the candidate array is
+                // sparse and an index-based window of N candles would demand N candidates — which
+                // a selective model can never supply (the v3-bag failure mode).
+                var windowIntervalMs = BacktestRunner.PublicIntervalMs(row.Interval);
+                var windows = ChaosRunner.GenerateTimeWindows(
+                    row.SampleCount, row.WindowLength, windowIntervalMs, candidates, seed);
 
-                if (offsets.Count == 0)
+                if (windows.Count == 0)
                 {
                     row.Status = "failed";
                     row.CompletedAt = DateTimeOffset.UtcNow;
-                    row.Error = $"Not enough candidates ({candidates.Length}) for window length {row.WindowLength}. Widen the candle range or reduce the window size.";
+                    row.Error = $"Candidate time range too short for a {row.WindowLength}-candle window " +
+                                $"({candidates.Length} candidates). Widen the candle range or reduce the window size.";
                     await db.SaveChangesAsync(ct);
                     hub.Publish(new ChaosEvent(batchId, ChaosEventKind.Progress, comboIdx + 1, totalCombos, 0, 0, row.Error));
                     continue;
                 }
 
-                // ── 4. Replay windows + collect sample results ────────────────────────────────
-                var sampleResults = new ChaosSampleResult[offsets.Count];
-                for (var si = 0; si < offsets.Count; si++)
+                // ── 4. Replay windows in PARALLEL + collect sample results ─────────────────────
+                // Each window replay is a pure function of (candidates, offset, strategy) and writes
+                // its result to a distinct array slot, so fanning the N samples across all cores is
+                // fully deterministic: aggregation reads the complete array only after every window
+                // finishes, independent of completion order. Built-in strategies are stateless pure
+                // singletons (safe to share across threads); DAG strategies already get a fresh
+                // per-window instance. Progress is reported via an interlocked counter.
+                var sampleResults = new ChaosSampleResult[windows.Count];
+                var windowsDone = 0;
+                var parallelOptions = new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = Environment.ProcessorCount,
+                    CancellationToken = ct,
+                };
+                Parallel.For(0, windows.Count, parallelOptions, si =>
                 {
                     // For DAG strategies: create a fresh PrecomputedStakesStrategy per window
                     // so the internal sequential call index aligns with the window's candidates.
                     // For built-in strategies: reuse the same instance (stateless pure function).
                     IStakingStrategy windowStrategy = precomputedStakes is not null
-                        ? new PrecomputedStakesStrategy(row.StrategyId, precomputedStakes, offsets[si])
+                        ? new PrecomputedStakesStrategy(row.StrategyId, precomputedStakes, windows[si].Start)
                         : strategy;
 
                     sampleResults[si] = ChaosRunner.ReplayWindow(
-                        candidates, offsets[si], row.WindowLength,
+                        candidates, windows[si].Start, windows[si].Count,
                         windowStrategy, req.InitialBalance, req.InitialBetSize, row.AllowBorrow);
 
-                    if (si % 50 == 0)
-                        hub.Publish(new ChaosEvent(batchId, ChaosEventKind.Progress, comboIdx + 1, totalCombos, si, offsets.Count, null));
-                }
+                    var done = Interlocked.Increment(ref windowsDone);
+                    if (done % 50 == 0)
+                        hub.Publish(new ChaosEvent(batchId, ChaosEventKind.Progress, comboIdx + 1, totalCombos, done, windows.Count, null));
+                });
 
                 // ── 5. Aggregate ──────────────────────────────────────────────────────────────
                 var agg = ChaosRunner.Aggregate(
@@ -262,6 +282,7 @@ public sealed class ChaosService : IChaosService
                 row.ProfitP5 = agg.ProfitP5;
                 row.ProfitP50 = agg.ProfitP50;
                 row.ProfitP95 = agg.ProfitP95;
+                row.ProfitMean = agg.ProfitMean;
                 row.WorstDrawdown = agg.WorstDrawdown;
                 row.MeanZeroCrossings = agg.MeanZeroCrossings;
                 row.SyntheticBetFraction = agg.SyntheticBetFraction;
@@ -292,7 +313,7 @@ public sealed class ChaosService : IChaosService
                 await db.SaveChangesAsync(ct);
 
                 hub.Publish(new ChaosEvent(batchId, ChaosEventKind.Progress,
-                    comboIdx + 1, totalCombos, offsets.Count, offsets.Count, null));
+                    comboIdx + 1, totalCombos, windows.Count, windows.Count, null));
 
                 _logger.LogInformation(
                     "Chaos {Id}: {Strategy}/{Window} — BustRate {Bust:P2}, P50 profit {P50:+0.##;-0.##}, Pass={Pass}",
@@ -537,6 +558,17 @@ public sealed class ChaosService : IChaosService
             .OrderBy(s => s.StartMs)
             .Take(take)
             .ToListAsync(ct);
+    }
+
+    public async Task<int> ClearAsync(Guid? modelId, CancellationToken ct)
+    {
+        if (!_tenant.IsResolved) throw new InvalidOperationException("Tenant context not resolved.");
+        var tenantId = _tenant.TenantId!.Value;
+        // ExecuteDeleteAsync emits a single DELETE; the ChaosSample → ChaosRun FK cascade
+        // (DeleteBehavior.Cascade) removes the per-window samples in the same statement.
+        var query = _db.ChaosRuns.Where(r => r.TenantId == tenantId);
+        if (modelId is { } mid) query = query.Where(r => r.ModelId == mid);
+        return await query.ExecuteDeleteAsync(ct);
     }
 }
 

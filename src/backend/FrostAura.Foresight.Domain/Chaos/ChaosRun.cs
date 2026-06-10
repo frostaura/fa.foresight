@@ -21,6 +21,8 @@ public sealed class ChaosRun : ITenantScoped
     public int WindowLength { get; init; }
     public int SampleCount { get; init; }
     public bool AllowBorrow { get; init; }
+    /// <summary>Starting bankroll each window replayed from — persisted so the UI can show mean final balance and Δ%.</summary>
+    public decimal InitialBalance { get; init; }
     /// <summary>PRNG seed used for this batch — persisted so the run is exactly reproducible.</summary>
     public long Seed { get; init; }
     public required string Status { get; set; }  // "running" | "complete" | "failed"
@@ -35,6 +37,8 @@ public sealed class ChaosRun : ITenantScoped
     public decimal? ProfitP50 { get; set; }
     /// <summary>95th-percentile profit.</summary>
     public decimal? ProfitP95 { get; set; }
+    /// <summary>Mean (average) profit across all windows — the basis for the UI's total-profit / Δ% / final-balance columns.</summary>
+    public decimal? ProfitMean { get; set; }
     /// <summary>Maximum drawdown across all windows.</summary>
     public decimal? WorstDrawdown { get; set; }
     /// <summary>Mean zero-crossings across all windows.</summary>

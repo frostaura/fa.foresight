@@ -194,7 +194,7 @@ public sealed class GradientBoostedTreesNode : IFlowNode
 
     // Parsing a 150-tree ensemble per candle would dominate a backtest; cache by the trained-state's
     // raw JSON (identical across every call of a single run). Bounded so it can't grow unboundedly.
-    private static readonly ConcurrentDictionary<string, GbtModel> _cache = new();
+    private static readonly ConcurrentDictionary<string, GbtServingState?> _cache = new();
 
     public NodePortSpec Spec { get; } = new(
         Category: "model",
@@ -219,6 +219,11 @@ public sealed class GradientBoostedTreesNode : IFlowNode
             ["l2"] = new("decimal", false, 1.0m, "L2 leaf-weight penalty (lambda)."),
             ["min_confidence"] = new("decimal", false, 0m,
                 "Confidence threshold for the high-conviction REPORTING subset (confidence = |pUp - 0.5| * 2). The node never abstains on it (always emits pUp, so live == backtest); BacktestRunner reads it to compute a secondary gated hit-rate alongside the headline ungated one."),
+            ["bags"] = new("int", false, 1,
+                "Seed-bag ensemble size B. Training fits B GBTs (seeds seed..seed+B-1); serving predicts the bag-mean probability. 1 = legacy single fit."),
+            ["seed"] = new("int", false, 1, "RNG seed of the first bag member."),
+            ["coverage"] = new("decimal", false, 0m,
+                "Confidence-gate keep fraction. >0 trains a threshold on the (1-coverage) quantile of |pCal - 0.5| over embargoed OOF predictions; below-threshold predictions ABSTAIN by emitting pUp = 0.5 (the canonical no-bet signal in backtest, chaos, and live). 0 = gate disabled."),
         });
 
     public Task<IReadOnlyDictionary<string, object?>> ExecuteAsync(
@@ -229,14 +234,31 @@ public sealed class GradientBoostedTreesNode : IFlowNode
         if (!ready || matrix is null || matrix.RowCount == 0)
             return Task.FromResult<IReadOnlyDictionary<string, object?>>(NullOutputs());
 
-        var model = ResolveModel(ctx);
-        if (model is null || model.Trees.Count == 0)
+        var serving = ResolveServingState(ctx);
+        if (serving is null || serving.Bag.Length == 0 || serving.Bag.All(m => m.Trees.Count == 0))
             return Task.FromResult<IReadOnlyDictionary<string, object?>>(NullOutputs());
 
         var row = new double[matrix.ColumnCount];
         for (var c = 0; c < matrix.ColumnCount; c++) row[c] = matrix.Rows[0, c];
 
-        var p = GradientBoostedTrees.PredictProba(model, row);
+        // Bag-mean raw probability (single-element bag for legacy modelGbt-only state).
+        var p = 0.0;
+        foreach (var m in serving.Bag) p += GradientBoostedTrees.PredictProba(m, row);
+        p /= serving.Bag.Length;
+
+        // Isotonic calibration (optional) — must run BEFORE the gate so the threshold (trained on
+        // calibrated OOF predictions) compares like with like.
+        if (serving.CalibrationX is not null)
+            p = IsotonicCalibration.Apply(serving.CalibrationX, serving.CalibrationY!, p);
+
+        // ABSTENTION CANON: pUp = 0.5 is the single no-bet signal that engines, chaos, and
+        // backtests all honor. Both the OOD veto and the confidence gate abstain through it,
+        // which is what keeps backtest == chaos == live.
+        if (serving.OodMeans is not null && IsOutOfDistribution(serving, row))
+            p = 0.5;
+        if (serving.GateThreshold is double threshold && Math.Abs(p - 0.5) < threshold)
+            p = 0.5;
+
         var pUp = (decimal)p;
         var confidence = Math.Abs(pUp - 0.5m) * 2m;
         return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>
@@ -252,17 +274,104 @@ public sealed class GradientBoostedTreesNode : IFlowNode
         ["confidence"] = 0.5m,
     };
 
-    private static GbtModel? ResolveModel(FlowContext ctx)
+    private static bool IsOutOfDistribution(GbtServingState serving, double[] row)
+    {
+        var hits = 0;
+        var n = Math.Min(row.Length, serving.OodMeans!.Length);
+        for (var i = 0; i < n; i++)
+        {
+            // A near-zero training std means the feature was constant — any real deviation from
+            // its mean is then maximally out-of-distribution, which the epsilon floor preserves.
+            var std = Math.Max(serving.OodStds![i], 1e-12);
+            if (Math.Abs((row[i] - serving.OodMeans[i]) / std) > serving.OodZMax) hits++;
+        }
+        return hits >= serving.OodMinHits;
+    }
+
+    private static GbtServingState? ResolveServingState(FlowContext ctx)
     {
         if (ctx.TrainedState is not JsonElement state || state.ValueKind != JsonValueKind.Object) return null;
-        if (!state.TryGetProperty("model.gbt", out var blob) || blob.ValueKind != JsonValueKind.Object) return null;
-        var raw = blob.GetRawText();
-        return _cache.GetOrAdd(raw, r =>
+        // Key by the whole remapped trained-state blob: identical across every candle of a run, and
+        // it covers the optional bag/calibration/gate/guard fields alongside the legacy model.
+        var raw = state.GetRawText();
+        return _cache.GetOrAdd(raw, _ =>
         {
             if (_cache.Count > 32) _cache.Clear(); // crude bound; models are few
-            return JsonSerializer.Deserialize<GbtModel>(r) ?? new GbtModel();
+            return ParseServingState(state);
         });
     }
+
+    private static GbtServingState? ParseServingState(JsonElement state)
+    {
+        // Bag (optional, contract field "modelGbtBag": { seeds, models }) takes precedence; the
+        // legacy single "model.gbt" blob serves as a one-element bag when absent.
+        var bag = new List<GbtModel>();
+        if (state.TryGetProperty("modelGbtBag", out var bagEl) && bagEl.ValueKind == JsonValueKind.Object
+            && bagEl.TryGetProperty("models", out var modelsEl) && modelsEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var m in modelsEl.EnumerateArray())
+            {
+                if (m.ValueKind != JsonValueKind.Object) continue;
+                var parsed = JsonSerializer.Deserialize<GbtModel>(m.GetRawText());
+                if (parsed is not null) bag.Add(parsed);
+            }
+        }
+        if (bag.Count == 0)
+        {
+            if (!state.TryGetProperty("model.gbt", out var blob) || blob.ValueKind != JsonValueKind.Object) return null;
+            bag.Add(JsonSerializer.Deserialize<GbtModel>(blob.GetRawText()) ?? new GbtModel());
+        }
+
+        double[]? calX = null, calY = null;
+        if (state.TryGetProperty("calibration", out var calEl) && calEl.ValueKind == JsonValueKind.Object
+            && calEl.TryGetProperty("x", out var xEl) && xEl.ValueKind == JsonValueKind.Array
+            && calEl.TryGetProperty("y", out var yEl) && yEl.ValueKind == JsonValueKind.Array)
+        {
+            var xs = xEl.EnumerateArray().Select(v => v.GetDouble()).ToArray();
+            var ys = yEl.EnumerateArray().Select(v => v.GetDouble()).ToArray();
+            if (xs.Length > 0 && xs.Length == ys.Length) { calX = xs; calY = ys; }
+        }
+
+        double? gateThreshold = null;
+        if (state.TryGetProperty("confidenceGate", out var gateEl) && gateEl.ValueKind == JsonValueKind.Object
+            && gateEl.TryGetProperty("threshold", out var thEl) && thEl.ValueKind == JsonValueKind.Number)
+            gateThreshold = thEl.GetDouble();
+
+        double[]? oodMeans = null, oodStds = null;
+        var zMax = 8.0;
+        var minHits = 3;
+        if (state.TryGetProperty("oodGuard", out var oodEl) && oodEl.ValueKind == JsonValueKind.Object
+            && oodEl.TryGetProperty("means", out var meansEl) && meansEl.ValueKind == JsonValueKind.Array
+            && oodEl.TryGetProperty("stds", out var stdsEl) && stdsEl.ValueKind == JsonValueKind.Array)
+        {
+            var means = meansEl.EnumerateArray().Select(v => v.GetDouble()).ToArray();
+            var stds = stdsEl.EnumerateArray().Select(v => v.GetDouble()).ToArray();
+            if (means.Length > 0 && means.Length == stds.Length)
+            {
+                oodMeans = means;
+                oodStds = stds;
+                if (oodEl.TryGetProperty("zMax", out var zEl) && zEl.ValueKind == JsonValueKind.Number) zMax = zEl.GetDouble();
+                if (oodEl.TryGetProperty("minHits", out var hEl) && hEl.ValueKind == JsonValueKind.Number && hEl.TryGetInt32(out var h)) minHits = h;
+            }
+        }
+
+        return new GbtServingState(bag.ToArray(), calX, calY, gateThreshold, oodMeans, oodStds, zMax, minHits);
+    }
+
+    /// <summary>
+    /// Parsed, cacheable serving-time state for one trained-state blob: the seed bag (one element
+    /// when only the legacy modelGbt is present) plus the optional calibration breakpoints,
+    /// confidence-gate threshold, and OOD guard statistics. All optional fields null = legacy path.
+    /// </summary>
+    private sealed record GbtServingState(
+        GbtModel[] Bag,
+        double[]? CalibrationX,
+        double[]? CalibrationY,
+        double? GateThreshold,
+        double[]? OodMeans,
+        double[]? OodStds,
+        double OodZMax,
+        int OodMinHits);
 }
 
 /// <summary>
