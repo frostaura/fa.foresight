@@ -701,13 +701,22 @@ export default function LiveBitcoinChart({
   }, [balanceSeries]);
 
   // Merge balance points into the chart row data so recharts can render them on the same x-axis.
-  // Each row gets a `balance` field if a ledger point exists for that candle, otherwise undefined
-  // (recharts treats undefined as a gap — that's fine, the line only draws where bets resolved).
+  // Candles WITHOUT a resolved bet carry the last known balance forward, so abstained candles draw
+  // a flat horizontal segment (visibly "no bet taken, balance unchanged") instead of a gap that
+  // freezes the line until the next bet. Candles before the first known balance stay undefined.
   const rowsWithBalance = useMemo<(Row & { balance?: number })[]>(() => {
     if (balanceSeries.length === 0) return rows;
     const byTime = new Map(balanceSeries.map((p) => [p.openTime, p.balance]));
     return rows.map((r) => {
-      const bal = byTime.get(r.openTime);
+      // Last ledger point at or before this candle — also seeds the carry when the
+      // most recent bet scrolled out of the visible window.
+      let bal = byTime.get(r.openTime);
+      if (bal == null) {
+        for (const p of balanceSeries) {
+          if (p.openTime > r.openTime) break;
+          bal = p.balance;
+        }
+      }
       return bal != null ? { ...r, balance: bal } : r;
     });
   }, [rows, balanceSeries]);
@@ -874,8 +883,8 @@ export default function LiveBitcoinChart({
               <Area yAxisId="price" type="monotone" dataKey="close" stroke={trendColor} strokeWidth={2}
                 fill={trendColor} fillOpacity={0.12} isAnimationActive={false} />
               {/* Bank-balance overlay — glowing FrostAura blue line. Rendered after the area fill
-                  so it composites on top of the price series. connectNulls=false lets the line draw
-                  only between resolved-bet candles (gaps for candles with no bet outcome). */}
+                  so it composites on top of the price series. Abstained candles carry the balance
+                  forward (flat segment = no bet taken); only pre-session candles have no value. */}
               {balanceSeries.length > 0 && (
                 <Area yAxisId="balance" type="linear" dataKey="balance"
                   stroke="#A4D4F4" strokeWidth={2} strokeOpacity={0.9} dot={false}
